@@ -67,16 +67,28 @@ class _FcmDebugDialogState extends State<FcmDebugDialog> {
         return;
       }
 
-      // Check APNs token on iOS
+      // Check APNs token on iOS — retry up to 5 times with 2s delays
+      // because iOS APNs registration is async and may not be ready immediately
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
-        _log('Checking APNs token (iOS)...');
-        final apnsToken = await messaging.getAPNSToken();
-        if (apnsToken != null) {
-          _log('✅ APNs token: ${apnsToken.substring(0, 20)}...');
-        } else {
-          _log('❌ APNs token is NULL');
-          _log('   → Upload APNs Auth Key in Firebase Console');
-          _log('   → Firebase Console → Project → Cloud Messaging → Apple app');
+        _log('Checking APNs token (iOS) — may retry up to 5x...');
+        String? apnsToken;
+        for (int attempt = 1; attempt <= 5; attempt++) {
+          apnsToken = await messaging.getAPNSToken();
+          if (apnsToken != null) {
+            _log('✅ APNs token (attempt $attempt): ${apnsToken.substring(0, 20)}...');
+            break;
+          }
+          _log('⚠️ Attempt $attempt: APNs token null — waiting 2s...');
+          await Future.delayed(const Duration(seconds: 2));
+        }
+        if (apnsToken == null) {
+          _log('❌ APNs token still NULL after 5 attempts');
+          _log('   Possible causes:');
+          _log('   1. Running on Simulator (APNs never works on simulator)');
+          _log('   2. App signed with dev cert but entitlement=production');
+          _log('   3. APNs Auth Key missing in Firebase Console');
+          _log('   4. Push Notifications not enabled in Apple Dev Portal');
+          return;
         }
       }
 
