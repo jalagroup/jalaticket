@@ -33,22 +33,11 @@ class FCMService {
 
   // Setup FCM after login with user context
   static Future<void> setupForUser(UserModel user) async {
-
-    if (_isSetup) {
-      if (kDebugMode) {
-        print('FCM already setup for current session');
-      }
-      return;
-    }
-
     try {
-      if (kDebugMode) {
-        print('Setting up FCM for user: ${user.email}');
-      }
+      if (kDebugMode) print('Setting up FCM for user: ${user.email}');
 
       final messaging = FirebaseMessaging.instance;
 
-      // Request permissions
       final settings = await messaging.requestPermission(
         alert: true,
         badge: true,
@@ -59,54 +48,50 @@ class FCMService {
         criticalAlert: false,
       );
 
-      if (kDebugMode) {
-        print('Permission status: ${settings.authorizationStatus}');
+      if (kDebugMode) print('Permission status: ${settings.authorizationStatus}');
+
+      final isAllowed = settings.authorizationStatus == AuthorizationStatus.authorized ||
+          settings.authorizationStatus == AuthorizationStatus.provisional;
+
+      if (!isAllowed) {
+        if (kDebugMode) print('Notification permission denied');
+        return;
       }
 
-      if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-        if (kDebugMode) {
-          print('Notification permission granted');
-        }
-
-        // Get token (web requires VAPID key)
-        _currentToken = kIsWeb
+      // Get token — retry up to 3 times on iOS since APNs registration can be delayed
+      String? token;
+      for (int i = 0; i < 3; i++) {
+        token = kIsWeb
             ? await messaging.getToken(vapidKey: _webVapidKey)
             : await messaging.getToken();
-        if (kDebugMode && _currentToken != null) {
-          print('Got FCM token: ${_currentToken!.substring(0, 20)}...');
-        }
-
-        if (_currentToken != null) {
-          // Save to database
-          await _saveTokenForUser(user.id, _currentToken!);
-
-          // Subscribe to user-specific topics
-          await _subscribeToUserTopics(user);
-
-          // Setup listeners
-          _setupTokenRefreshListener(user.id);
-          _setupMessageHandlers();
-
-          _isSetup = true;
-          if (kDebugMode) {
-            print('FCM setup completed for user: ${user.email}');
-          }
-        } else {
-          if (kDebugMode) {
-            print('Failed to get FCM token');
-          }
-        }
-      } else {
-        if (kDebugMode) {
-          print(
-              'Notification permission denied: ${settings.authorizationStatus}');
-        }
+        if (token != null) break;
+        if (kDebugMode) print('FCM token attempt ${i + 1} returned null, retrying...');
+        await Future.delayed(const Duration(seconds: 2));
       }
+
+      if (kDebugMode) print('Got FCM token: ${token != null ? "${token.substring(0, 20)}..." : "null"}');
+
+      if (token == null) {
+        if (kDebugMode) print('Failed to get FCM token after retries');
+        return;
+      }
+
+      _currentToken = token;
+
+      // Always save the token — even if already set up (user may have logged in again)
+      await _saveTokenForUser(user.id, token);
+
+      // Only set up listeners once per app session
+      if (!_isSetup) {
+        await _subscribeToUserTopics(user);
+        _setupTokenRefreshListener(user.id);
+        _setupMessageHandlers();
+        _isSetup = true;
+      }
+
+      if (kDebugMode) print('FCM setup completed for user: ${user.email}');
     } catch (e) {
-      if (kDebugMode) {
-        print('Error setting up FCM for user: $e');
-      }
-      // Don't throw error - FCM failure shouldn't block app
+      if (kDebugMode) print('Error setting up FCM for user: $e');
     }
   }
 
