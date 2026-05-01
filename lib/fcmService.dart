@@ -1,4 +1,5 @@
 // Enhanced FCMService.dart with navigation handling
+import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -15,6 +16,7 @@ class FCMService {
   static bool _isSetup = false;
   static Function(RemoteMessage)? _onForegroundMessage;
   static Function(RemoteMessage)? _onMessageTap;
+  static StreamSubscription<String>? _tokenRefreshSub;
 
   // Navigation callback for handling message tap navigation
   static Function(String?, String?)? _onNavigateToChat;
@@ -34,7 +36,7 @@ class FCMService {
   // Setup FCM after login with user context
   static Future<void> setupForUser(UserModel user) async {
     try {
-      if (kDebugMode) print('Setting up FCM for user: ${user.email}');
+      if (kDebugMode) print('🔔 FCM: Setting up for user: ${user.email}');
 
       final messaging = FirebaseMessaging.instance;
 
@@ -48,50 +50,55 @@ class FCMService {
         criticalAlert: false,
       );
 
-      if (kDebugMode) print('Permission status: ${settings.authorizationStatus}');
+      if (kDebugMode) print('🔔 FCM: Permission = ${settings.authorizationStatus}');
 
-      final isAllowed = settings.authorizationStatus == AuthorizationStatus.authorized ||
+      final isAllowed =
+          settings.authorizationStatus == AuthorizationStatus.authorized ||
           settings.authorizationStatus == AuthorizationStatus.provisional;
 
       if (!isAllowed) {
-        if (kDebugMode) print('Notification permission denied');
+        if (kDebugMode) print('🔔 FCM: Permission denied — cannot get token');
         return;
       }
 
-      // Get token — retry up to 3 times on iOS since APNs registration can be delayed
-      String? token;
-      for (int i = 0; i < 3; i++) {
-        token = kIsWeb
-            ? await messaging.getToken(vapidKey: _webVapidKey)
-            : await messaging.getToken();
-        if (token != null) break;
-        if (kDebugMode) print('FCM token attempt ${i + 1} returned null, retrying...');
-        await Future.delayed(const Duration(seconds: 2));
+      // Cancel any previous refresh listener (e.g. from a previous login)
+      await _tokenRefreshSub?.cancel();
+
+      // Register onTokenRefresh BEFORE calling getToken().
+      // On iOS, APNs registration can complete seconds after getToken() returns null.
+      // This stream fires the moment a token becomes available or rotates.
+      _tokenRefreshSub = messaging.onTokenRefresh.listen((newToken) async {
+        if (kDebugMode) print('🔔 FCM: onTokenRefresh fired → saving token');
+        _currentToken = newToken;
+        await _saveTokenForUser(user.id, newToken);
+      });
+
+      // Try to get the token immediately
+      final token = kIsWeb
+          ? await messaging.getToken(vapidKey: _webVapidKey)
+          : await messaging.getToken();
+
+      if (kDebugMode) {
+        print('🔔 FCM: getToken() = ${token != null ? "${token.substring(0, 20)}..." : "null"}');
       }
 
-      if (kDebugMode) print('Got FCM token: ${token != null ? "${token.substring(0, 20)}..." : "null"}');
-
-      if (token == null) {
-        if (kDebugMode) print('Failed to get FCM token after retries');
-        return;
+      if (token != null) {
+        _currentToken = token;
+        await _saveTokenForUser(user.id, token);
+      } else {
+        if (kDebugMode) print('🔔 FCM: token null now — onTokenRefresh will save it when APNs is ready');
       }
 
-      _currentToken = token;
-
-      // Always save the token — even if already set up (user may have logged in again)
-      await _saveTokenForUser(user.id, token);
-
-      // Only set up listeners once per app session
+      // Set up message handlers and topics only once per session
       if (!_isSetup) {
         await _subscribeToUserTopics(user);
-        _setupTokenRefreshListener(user.id);
         _setupMessageHandlers();
         _isSetup = true;
       }
 
-      if (kDebugMode) print('FCM setup completed for user: ${user.email}');
+      if (kDebugMode) print('🔔 FCM: Setup complete for ${user.email}');
     } catch (e) {
-      if (kDebugMode) print('Error setting up FCM for user: $e');
+      if (kDebugMode) print('🔔 FCM: Error in setupForUser: $e');
     }
   }
 
@@ -168,34 +175,6 @@ class FCMService {
     } catch (e) {
       if (kDebugMode) {
         print('Error subscribing to topics: $e');
-      }
-    }
-  }
-
-  static void _setupTokenRefreshListener(String userId) {
-    // Skip on unsupported platforms
-    if (!isSupported) return;
-
-    try {
-      FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
-        if (kDebugMode) {
-          print('FCM token refreshed');
-        }
-        _currentToken = newToken;
-        try {
-          await _saveTokenForUser(userId, newToken);
-          if (kDebugMode) {
-            print('Refreshed FCM token saved');
-          }
-        } catch (e) {
-          if (kDebugMode) {
-            print('Error saving refreshed token: $e');
-          }
-        }
-      });
-    } catch (e) {
-      if (kDebugMode) {
-        print('Error setting up token refresh listener: $e');
       }
     }
   }
@@ -434,6 +413,8 @@ class FCMService {
       _isSetup = false;
       _onForegroundMessage = null;
       _onMessageTap = null;
+      await _tokenRefreshSub?.cancel();
+      _tokenRefreshSub = null;
       _onNavigateToChat = null;
       _onNavigateToTicket = null;
 
