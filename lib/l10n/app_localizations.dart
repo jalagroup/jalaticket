@@ -843,6 +843,8 @@ class AppLocalizations {
   String get oF => translate('of');
   String get noUsersYet => translate('no_users_yet');
   String get createYourFirstUser => translate('create_your_first_user');
+  String get activate => translate('activate');
+  String get deactivate => translate('deactivate');
   String get userActivated => translate('user_activated');
   String get userDeactivated => translate('user_deactivated');
   String get removeUser => translate('remove_user');
@@ -1901,6 +1903,8 @@ const Map<String, String> _enValues = {
   'of': 'of',
   'no_users_yet': 'No users yet',
   'create_your_first_user': 'Create your first user',
+  'activate': 'Activate',
+  'deactivate': 'Deactivate',
   'user_activated': 'User activated',
   'user_deactivated': 'User deactivated',
   'remove_user': 'Remove User',
@@ -2930,6 +2934,8 @@ const Map<String, String> _arValues = {
   'of': 'من',
   'no_users_yet': 'لا يوجد مستخدمون بعد',
   'create_your_first_user': 'أنشئ مستخدمك الأول',
+  'activate': 'تفعيل',
+  'deactivate': 'إلغاء التفعيل',
   'user_activated': 'تم تفعيل المستخدم',
   'user_deactivated': 'تم إلغاء تفعيل المستخدم',
   'remove_user': 'إزالة المستخدم',

@@ -3003,6 +3003,21 @@ class _UsersManagementState extends State<UsersManagement>
                                         tooltip: l10n.edit,
                                         onTap: () => _showEditUserDialog(user),
                                       ),
+                                    if (_canEditUser(user) && !user.isDeleted) ...[
+                                      const SizedBox(width: 4),
+                                      _ActionIconButton(
+                                        icon: user.isActive
+                                            ? Icons.block_outlined
+                                            : Icons.check_circle_outline,
+                                        color: user.isActive
+                                            ? Colors.orange
+                                            : Colors.green,
+                                        tooltip: user.isActive
+                                            ? l10n.deactivate
+                                            : l10n.activate,
+                                        onTap: () => _toggleUserStatus(user),
+                                      ),
+                                    ],
                                     const SizedBox(width: 4),
                                     if (user.isDeleted)
                                       _ActionIconButton(
