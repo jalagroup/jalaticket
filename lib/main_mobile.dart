@@ -178,12 +178,9 @@ class _MyAppMobileState extends State<MyAppMobile> {
 
   Future<void> _initializeFirebaseInBackground() async {
     try {
-      print('🚀 Initializing Firebase...');
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
-      print('✅ Firebase initialized');
+      print('🚀 Setting up FCM handlers...');
       _setupFCMHandlers();
+      print('✅ FCM ready');
     } catch (e) {
       print('❌ Error initializing Firebase: $e');
     }
