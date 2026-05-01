@@ -18,6 +18,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:uuid/uuid.dart';
 import 'package:jalasupport/main.dart' show myAppKey;
 import 'package:jalasupport/main_mobile.dart' show myAppMobileKey;
+import 'package:jalasupport/fcm_debug_dialog.dart';
 
 // UI Components
 class AuthWrapper extends StatelessWidget {
@@ -1993,6 +1994,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         automaticallyImplyLeading: !isWeb,
         actions: [
+          if (!kIsWeb)
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.bug_report, color: Colors.orange),
+                onPressed: () => showFcmDebugDialog(context),
+                tooltip: 'FCM Debug',
+              ),
+            ),
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 4),
             decoration: BoxDecoration(
