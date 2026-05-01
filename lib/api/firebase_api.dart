@@ -1,57 +1,64 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class FirebaseApi {
   final _firebaseMessaging = FirebaseMessaging.instance;
-
-  // Local notifications plugin (for showing notifications when app is in foreground)
   final _localNotifications = FlutterLocalNotificationsPlugin();
 
-  /// Initialize FCM + Local Notifications
   Future<void> initNotifications() async {
-    // Request permissions (iOS only really needs this)
-    await _firebaseMessaging.requestPermission();
+    await _firebaseMessaging.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
 
-    // Get FCM token
+    // Show notifications while app is in foreground on iOS
+    await _firebaseMessaging.setForegroundNotificationPresentationOptions(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+
     final fCMToken = await _firebaseMessaging.getToken();
-    print('📲 FCM Token: $fCMToken');
+    if (kDebugMode) print('📲 FCM Token: $fCMToken');
 
-    // Initialize foreground notification handling
     await initLocalNotifications();
 
-    // Handle messages while the app is in foreground
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      print('🔔 Foreground message: ${message.notification?.title}');
+      if (kDebugMode) print('🔔 Foreground message: ${message.notification?.title}');
       final notification = message.notification;
-      if (notification != null) {
-        _localNotifications.show(
-          notification.hashCode,
-          notification.title,
-          notification.body,
-          const NotificationDetails(
-            android: AndroidNotificationDetails(
-              'high_importance_channel',
-              'High Importance Notifications',
-              importance: Importance.max,
-              priority: Priority.high,
-              playSound: true,
+      if (notification != null && !kIsWeb) {
+        // On iOS, setForegroundNotificationPresentationOptions handles display.
+        // Local notifications are used as a fallback for custom UI.
+        if (defaultTargetPlatform == TargetPlatform.android) {
+          _localNotifications.show(
+            notification.hashCode,
+            notification.title,
+            notification.body,
+            const NotificationDetails(
+              android: AndroidNotificationDetails(
+                'high_importance_channel',
+                'High Importance Notifications',
+                importance: Importance.max,
+                priority: Priority.high,
+                playSound: true,
+              ),
             ),
-          ),
-        );
+          );
+        }
       }
-    });
-
-    // Handle messages when user taps notification (background / terminated)
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      print('📩 Notification clicked: ${message.data}');
-      // TODO: Navigate user to specific screen
     });
   }
 
-  /// Setup local notifications for foreground
   Future<void> initLocalNotifications() async {
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const settings = InitializationSettings(android: android);
+    const ios = DarwinInitializationSettings(
+      requestAlertPermission: false,
+      requestBadgePermission: false,
+      requestSoundPermission: false,
+    );
+    const settings = InitializationSettings(android: android, iOS: ios);
     await _localNotifications.initialize(settings);
   }
 }
