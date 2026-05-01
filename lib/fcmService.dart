@@ -36,39 +36,41 @@ class FCMService {
   // Setup FCM after login with user context
   static Future<void> setupForUser(UserModel user) async {
     try {
-      if (kDebugMode) print('🔔 FCM: Setting up for user: ${user.email}');
+      print('🔔 FCM: Starting setup for user: ${user.email} (id=${user.id})');
 
       final messaging = FirebaseMessaging.instance;
 
       final settings = await messaging.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-        provisional: false,
-        announcement: false,
-        carPlay: false,
-        criticalAlert: false,
+        alert: true, badge: true, sound: true,
+        provisional: false, announcement: false,
+        carPlay: false, criticalAlert: false,
       );
 
-      if (kDebugMode) print('🔔 FCM: Permission = ${settings.authorizationStatus}');
+      print('🔔 FCM: Permission status = ${settings.authorizationStatus}');
 
       final isAllowed =
           settings.authorizationStatus == AuthorizationStatus.authorized ||
           settings.authorizationStatus == AuthorizationStatus.provisional;
 
       if (!isAllowed) {
-        if (kDebugMode) print('🔔 FCM: Permission denied — cannot get token');
+        print('🔔 FCM: Permission DENIED — user must allow notifications in Settings');
         return;
       }
 
-      // Cancel any previous refresh listener (e.g. from a previous login)
+      // On iOS: check APNs token availability first — if null, Firebase cannot get FCM token
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+        final apnsToken = await messaging.getAPNSToken();
+        print('🔔 FCM: APNs token = ${apnsToken != null ? "✅ available" : "❌ NULL — upload APNs key in Firebase Console"}');
+      }
+
+      // Cancel previous refresh listener so we always point to the current user
       await _tokenRefreshSub?.cancel();
 
-      // Register onTokenRefresh BEFORE calling getToken().
-      // On iOS, APNs registration can complete seconds after getToken() returns null.
-      // This stream fires the moment a token becomes available or rotates.
+      // Register onTokenRefresh BEFORE getToken() — on iOS, APNs registration
+      // can complete seconds after getToken() returns null. This stream fires
+      // the moment a token becomes available or rotates.
       _tokenRefreshSub = messaging.onTokenRefresh.listen((newToken) async {
-        if (kDebugMode) print('🔔 FCM: onTokenRefresh fired → saving token');
+        print('🔔 FCM: onTokenRefresh fired → saving token for ${user.email}');
         _currentToken = newToken;
         await _saveTokenForUser(user.id, newToken);
       });
@@ -78,27 +80,23 @@ class FCMService {
           ? await messaging.getToken(vapidKey: _webVapidKey)
           : await messaging.getToken();
 
-      if (kDebugMode) {
-        print('🔔 FCM: getToken() = ${token != null ? "${token.substring(0, 20)}..." : "null"}');
-      }
+      print('🔔 FCM: getToken() = ${token != null ? "✅ ${token.substring(0, 20)}..." : "❌ null (onTokenRefresh will handle it)"}');
 
       if (token != null) {
         _currentToken = token;
         await _saveTokenForUser(user.id, token);
-      } else {
-        if (kDebugMode) print('🔔 FCM: token null now — onTokenRefresh will save it when APNs is ready');
       }
 
-      // Set up message handlers and topics only once per session
+      // Set up message handlers and topic subscriptions only once per session
       if (!_isSetup) {
         await _subscribeToUserTopics(user);
         _setupMessageHandlers();
         _isSetup = true;
       }
 
-      if (kDebugMode) print('🔔 FCM: Setup complete for ${user.email}');
+      print('🔔 FCM: Setup complete for ${user.email}');
     } catch (e) {
-      if (kDebugMode) print('🔔 FCM: Error in setupForUser: $e');
+      print('🔔 FCM: Error in setupForUser: $e');
     }
   }
 
@@ -113,23 +111,25 @@ class FCMService {
 
   static Future<void> _saveTokenForUser(String userId, String token) async {
     try {
-      if (kDebugMode) {
-        print('Saving FCM token for user: $userId (web: $kIsWeb)');
+      // Use auth_id (= supabase.auth.currentUser.id) so the update matches
+      // the RLS policy (auth.uid() = auth_id). Using the table's 'id' column
+      // can silently update 0 rows when RLS is active.
+      final authId = supabase.auth.currentUser?.id;
+      if (authId == null) {
+        print('🔔 FCM: Cannot save token — no authenticated user');
+        return;
       }
 
-      // Each platform stores its token in its own column independently.
-      await supabase.from('users').update(
-        kIsWeb ? {'fcm_token_web': token} : {'fcm_token': token},
-      ).eq('id', userId);
+      final column = kIsWeb ? 'fcm_token_web' : 'fcm_token';
+      final updated = await supabase
+          .from('users')
+          .update({column: token})
+          .eq('auth_id', authId)
+          .select('id');
 
-      if (kDebugMode) {
-        print('FCM token saved successfully');
-      }
+      print('🔔 FCM: Token saved — updated ${updated.length} row(s) for auth_id=$authId');
     } catch (e) {
-      if (kDebugMode) {
-        print('Error saving FCM token: $e');
-      }
-      throw e;
+      print('🔔 FCM: Error saving token: $e');
     }
   }
 
