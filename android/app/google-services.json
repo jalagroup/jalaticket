@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "532032178313",
+    "project_id": "jalaticketing",
+    "storage_bucket": "jalaticketing.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:532032178313:android:78385a2ef71f3d9117de58",
+        "android_client_info": {
+          "package_name": "com.example.jalasupport"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "532032178313-15eubl1tpijmtgfbr4csoim2vh1ftpoq.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDAmxU1xpOSLDuUneUc3Lwy7_3lEJvZRnc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "532032178313-15eubl1tpijmtgfbr4csoim2vh1ftpoq.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
