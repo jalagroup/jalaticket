@@ -13,7 +13,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'dart:typed_data';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'fcm_auth_service.dart';
 
@@ -290,109 +289,9 @@ class AuthService {
   }
 
   static Future<void> _setupFCMAfterLogin(UserModel user) async {
-    // Skip FCM setup on web
-    if (kIsWeb) {
-      print('FCM not supported on web platform');
-      return;
-    }
-
-    try {
-      print('Setting up FCM for user: ${user.email}');
-
-      // Request notification permission
-      final messaging = FirebaseMessaging.instance;
-      final settings = await messaging.requestPermission(
-        alert: true,
-        announcement: false,
-        badge: true,
-        carPlay: false,
-        criticalAlert: false,
-        provisional: false,
-        sound: true,
-      );
-
-      if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-        print('Notification permission granted');
-
-        // Get FCM token
-        final fcmToken = await messaging.getToken();
-        if (fcmToken != null) {
-          print('FCM Token obtained: ${fcmToken.substring(0, 20)}...');
-
-          // Save token to database
-          await _saveFCMToken(user.id, fcmToken);
-
-          // Setup token refresh listener
-          messaging.onTokenRefresh.listen((newToken) async {
-            print('FCM Token refreshed');
-            await _saveFCMToken(user.id, newToken);
-          });
-
-          // Setup message handlers
-          _setupMessageHandlers();
-        } else {
-          print('Failed to get FCM token');
-        }
-      } else {
-        print(
-            'Notification permission denied: ${settings.authorizationStatus}');
-      }
-    } catch (e) {
-      print('Error setting up FCM: $e');
-    }
-  }
-
-  static Future<void> _saveFCMToken(String userId, String token) async {
-    try {
-      await supabase.from('users').update({
-        'fcm_token': token,
-      }).eq('id', userId);
-
-      print('FCM token saved to database successfully');
-    } catch (e) {
-      print('Error saving FCM token: $e');
-    }
-  }
-
-  static void _setupMessageHandlers() {
-    // Skip on web
     if (kIsWeb) return;
-
-    // Handle foreground messages
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      print('Received foreground message: ${message.notification?.title}');
-      // Handle the message - you can show in-app notification here
-    });
-
-    // Handle background message taps
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      print('Message opened app: ${message.notification?.title}');
-      // Handle navigation based on message data
-      _handleMessageTap(message);
-    });
-
-    // Handle terminated app message taps
-    FirebaseMessaging.instance
-        .getInitialMessage()
-        .then((RemoteMessage? message) {
-      if (message != null) {
-        print(
-            'App opened from terminated state by message: ${message.notification?.title}');
-        _handleMessageTap(message);
-      }
-    });
-  }
-
-  static void _handleMessageTap(RemoteMessage message) {
-    // Extract data from message
-    final ticketId = message.data['ticket_id'];
-    final type = message.data['type'];
-    final chatRoomId = message.data['chat_room_id'];
-
-    print('Handling message tap - Ticket: $ticketId, Type: $type');
-
-    // You can implement navigation logic here
-    // For example, navigate to specific ticket or chat screen
+    // Delegate entirely to FCMService which has retry logic and proper iOS handling
+    await FCMService.setupForUser(user);
   }
 
   static Future<void> signOut() async {
