@@ -417,8 +417,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 20),
 
-                    // Register Link
-                    _RegisterLink(onTap: _navigateToRegister),
+                    // Register link only on web — Apple 3.1.1 prohibits
+                    // in-app business registration on iOS/Android builds
+                    if (kIsWeb)
+                      _RegisterLink(onTap: _navigateToRegister),
                   ],
                 ),
               ),
