@@ -87,16 +87,14 @@ WHERE  EXISTS (
 );
 
 -- Schedule: every hour at minute 0
+-- No Authorization header needed because verify_jwt = false on the function
 SELECT cron.schedule(
   'auto-process-tickets',       -- job name
   '0 * * * *',                  -- cron expression: every hour
   $$
     SELECT net.http_post(
       url     := 'https://wxibjgzemtfzkattbpue.supabase.co/functions/v1/auto-process-tickets',
-      headers := jsonb_build_object(
-        'Content-Type',  'application/json',
-        'Authorization', 'Bearer ' || current_setting('app.anon_key', true)
-      ),
+      headers := '{"Content-Type": "application/json"}'::jsonb,
       body    := '{}'::jsonb
     );
   $$
