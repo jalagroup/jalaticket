@@ -464,20 +464,12 @@ class _ChatWidgetState extends State<ChatWidget>
         .substring(0, 1)
         .toUpperCase();
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F3F5),
+      // Orange header bleeds behind the status bar
+      backgroundColor: AppColors.primary,
       appBar: PreferredSize(
         preferredSize: const Size.fromHeight(64),
         child: Container(
-          decoration: BoxDecoration(
-            color: AppColors.secondary,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.18),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
+          color: AppColors.primary,
           child: SafeArea(
             bottom: false,
             child: SizedBox(
@@ -489,13 +481,13 @@ class _ChatWidgetState extends State<ChatWidget>
                         color: Colors.white, size: 20),
                     onPressed: () => Navigator.of(context).pop(),
                   ),
-                  // Avatar circle
+                  // White avatar circle
                   Container(
                     width: 40,
                     height: 40,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: AppColors.primary,
+                      color: Colors.white.withOpacity(0.25),
                     ),
                     child: Center(
                       child: Text(
@@ -554,7 +546,14 @@ class _ChatWidgetState extends State<ChatWidget>
           ),
         ),
       ),
-      body: _buildChatContent(l10n),
+      // Body: white card with rounded top corners, sits on top of orange BG
+      body: ClipRRect(
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(28),
+          topRight: Radius.circular(28),
+        ),
+        child: _buildChatContent(l10n),
+      ),
       resizeToAvoidBottomInset: true,
     );
   }
@@ -603,7 +602,7 @@ class _ChatWidgetState extends State<ChatWidget>
         // Messages list
         Expanded(
           child: Container(
-            color: const Color(0xFFF2F3F5),
+            color: Colors.white,
             child: _isLoading
                 ? Center(
                     child: CircularProgressIndicator(
@@ -858,7 +857,7 @@ class _ChatWidgetState extends State<ChatWidget>
                   padding: const EdgeInsets.symmetric(
                       horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
-                    color: isMe ? AppColors.primary : Colors.white,
+                    color: isMe ? AppColors.primary : const Color(0xFFEEEEEE),
                     borderRadius: BorderRadius.only(
                       topLeft: const Radius.circular(20),
                       topRight: const Radius.circular(20),
