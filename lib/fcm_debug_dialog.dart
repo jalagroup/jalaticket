@@ -67,62 +67,97 @@ class _FcmDebugDialogState extends State<FcmDebugDialog> {
         return;
       }
 
-      // Check APNs token on iOS — retry up to 5 times with 2s delays
-      // because iOS APNs registration is async and may not be ready immediately
+      // ── iOS: APNs token check (extended retry, non-blocking) ──────────────
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
-        _log('Checking APNs token (iOS) — may retry up to 5x...');
+        _log('Checking APNs token — retrying up to 15x (30s)...');
         String? apnsToken;
-        for (int attempt = 1; attempt <= 5; attempt++) {
+        for (int attempt = 1; attempt <= 15; attempt++) {
           apnsToken = await messaging.getAPNSToken();
           if (apnsToken != null) {
             _log('✅ APNs token (attempt $attempt): ${apnsToken.substring(0, 20)}...');
             break;
           }
-          _log('⚠️ Attempt $attempt: APNs token null — waiting 2s...');
+          _log('⚠️ Attempt $attempt/15: APNs null — waiting 2s...');
           await Future.delayed(const Duration(seconds: 2));
         }
+
         if (apnsToken == null) {
-          _log('❌ APNs token still NULL after 5 attempts');
-          _log('   Possible causes:');
-          _log('   1. Running on Simulator (APNs never works on simulator)');
-          _log('   2. App signed with dev cert but entitlement=production');
-          _log('   3. APNs Auth Key missing in Firebase Console');
-          _log('   4. Push Notifications not enabled in Apple Dev Portal');
-          return;
+          // APNs still null — log diagnostic info but continue anyway.
+          // Firebase may still return a token internally on some devices.
+          _log('⚠️ APNs token still null after 30s — attempting getToken() anyway...');
+          _log('ℹ️ Device: ${defaultTargetPlatform.name}, Web: $kIsWeb');
+          _log('ℹ️ If getToken() also fails, check:');
+          _log('   • Firebase Console → APNs Auth Key Team ID matches yours');
+          _log('   • Try on a different iOS device');
+          _log('   • Force-close app, reopen, then retry');
         }
       }
 
-      // Get FCM token
-      _log('Calling getToken()...');
-      final token = kIsWeb
-          ? await messaging.getToken(
-              vapidKey:
-                  'BJKG1UZoHzn1p4mDzNBVDRG0TTNeMhWFtgDxFbXuUlys__657aG4GZykYU-Sr_OFwV1yeQ_sgSrp9Zs369jKRWQ',
-            )
-          : await messaging.getToken();
+      // ── Try getToken() — set up onTokenRefresh listener as fallback ───────
+      _log('Calling getToken() (60s timeout)...');
 
-      if (token == null) {
-        _log('❌ getToken() returned null');
-        _log('   → APNs key likely missing in Firebase Console');
+      // Listen for async token in case iOS delivers it after getToken() returns
+      String? refreshedToken;
+      final refreshSub = messaging.onTokenRefresh.listen((t) {
+        refreshedToken = t;
+        _log('🔄 onTokenRefresh fired: ${t.substring(0, 30)}...');
+      });
+
+      String? token;
+      try {
+        final tokenFuture = kIsWeb
+            ? messaging.getToken(
+                vapidKey:
+                    'BJKG1UZoHzn1p4mDzNBVDRG0TTNeMhWFtgDxFbXuUlys__657aG4GZykYU-Sr_OFwV1yeQ_sgSrp9Zs369jKRWQ',
+              )
+            : messaging.getToken();
+        token = await tokenFuture.timeout(
+          const Duration(seconds: 60),
+          onTimeout: () {
+            _log('⏱ getToken() timed out after 60s');
+            return null;
+          },
+        );
+      } catch (e) {
+        _log('❌ getToken() threw: $e');
+      }
+
+      // If getToken() returned null, wait a bit longer for onTokenRefresh
+      if (token == null && refreshedToken == null) {
+        _log('⏳ Waiting 10s for onTokenRefresh fallback...');
+        await Future.delayed(const Duration(seconds: 10));
+      }
+      await refreshSub.cancel();
+
+      final finalToken = token ?? refreshedToken;
+
+      if (finalToken == null) {
+        _log('❌ No FCM token received from any method');
+        _log('ℹ️ Check: Firebase Console → Cloud Messaging → Apple app');
+        _log('ℹ️ Verify APNs Auth Key Team ID = your Apple Team ID');
+        _log('ℹ️ Verify APNs Key ID matches your .p8 key file');
         return;
       }
 
-      _log('✅ FCM token: ${token.substring(0, 30)}...');
-      setState(() => _currentToken = token);
+      if (refreshedToken != null && token == null) {
+        _log('✅ FCM token via onTokenRefresh: ${finalToken.substring(0, 30)}...');
+      } else {
+        _log('✅ FCM token via getToken(): ${finalToken.substring(0, 30)}...');
+      }
+      setState(() => _currentToken = finalToken);
 
       // Save to Supabase
       _log('Saving token to Supabase...');
       const column = kIsWeb ? 'fcm_token_web' : 'fcm_token';
       final updated = await supabase
           .from('users')
-          .update({column: token})
+          .update({column: finalToken})
           .eq('auth_id', authUser.id)
           .select('id');
 
       if (updated.isEmpty) {
         _log('⚠️ Updated 0 rows — check if auth_id matches in users table');
         _log('   auth_id used: ${authUser.id}');
-        // Try fetching the user row for diagnosis
         final rows = await supabase
             .from('users')
             .select('id, auth_id, $column')
