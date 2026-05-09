@@ -82,14 +82,30 @@ class _FcmDebugDialogState extends State<FcmDebugDialog> {
         }
 
         if (apnsToken == null) {
-          // APNs still null — log diagnostic info but continue anyway.
-          // Firebase may still return a token internally on some devices.
           _log('⚠️ APNs token still null after 30s — attempting getToken() anyway...');
-          _log('ℹ️ Device: ${defaultTargetPlatform.name}, Web: $kIsWeb');
-          _log('ℹ️ If getToken() also fails, check:');
-          _log('   • Firebase Console → APNs Auth Key Team ID matches yours');
-          _log('   • Try on a different iOS device');
-          _log('   • Force-close app, reopen, then retry');
+
+          // Query native iOS layer for the exact APNs registration result
+          try {
+            const nativeChannel = MethodChannel('apns_debug');
+            final status = await nativeChannel.invokeMethod<String>('getStatus') ?? 'no response';
+            if (status.startsWith('registered:')) {
+              _log('ℹ️ Native layer: iOS DID register — token=${status.substring(11, 31)}...');
+              _log('   → Firebase plugin not forwarding it. Try re-installing the app.');
+            } else if (status.startsWith('failed:')) {
+              _log('❌ Native iOS error: ${status.substring(7)}');
+              _log('   → This is the exact reason APNs registration failed.');
+            } else if (status == 'pending') {
+              _log('❌ Native layer: iOS never called register/fail callbacks');
+              _log('   → registerForRemoteNotifications may be blocked on this device');
+              _log('   → Try: Settings → [your name] → Sign Out then Sign In');
+              _log('   → Try: different network (WiFi vs cellular)');
+              _log('   → Try: on a different iPhone');
+            } else {
+              _log('ℹ️ Native status: $status');
+            }
+          } catch (e) {
+            _log('ℹ️ Could not read native APNs status: $e');
+          }
         }
       }
 
