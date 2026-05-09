@@ -92,7 +92,7 @@ SELECT cron.schedule(
   '0 * * * *',                  -- cron expression: every hour
   $$
     SELECT net.http_post(
-      url     := 'https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/auto-process-tickets',
+      url     := 'https://wxibjgzemtfzkattbpue.supabase.co/functions/v1/auto-process-tickets',
       headers := jsonb_build_object(
         'Content-Type',  'application/json',
         'Authorization', 'Bearer ' || current_setting('app.anon_key', true)
