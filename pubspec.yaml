@@ -1,6 +1,6 @@
 name: jalasupport
 description: Jala Support Ticketing System
-version: 1.0.0+13
+version: 1.0.1+13
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
