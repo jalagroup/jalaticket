@@ -21,6 +21,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:uuid/uuid.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 // REPLACE the entire OptimizedDialog class
 
@@ -5999,8 +6000,9 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
             ),
           ],
 
-          // Tracking Points Section (Only for in-progress tickets)
-          if (widget.ticket.status == TicketStatus.inprogress) ...[
+          // Tracking Points Section (in-progress + closed tickets)
+          if (widget.ticket.status == TicketStatus.inprogress ||
+              widget.ticket.status == TicketStatus.closed) ...[
             const SizedBox(height: 16),
             _buildInfoSection(
               l10n.workTracking,
@@ -6125,7 +6127,13 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
     ];
   }
 
-// Update _buildDetailItem to handle phone numbers
+  Future<void> _launchPhone(String number) async {
+    final uri = Uri(scheme: 'tel', path: number);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    }
+  }
+
   Widget _buildDetailItem(String label, String value, {bool isPhone = false}) {
     return Container(
       constraints: const BoxConstraints(minWidth: 150),
@@ -6143,13 +6151,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
           const SizedBox(height: 2),
           isPhone
               ? InkWell(
-                  onTap: () {
-                    // You can add phone calling functionality here
-                    // For web, it won't work, but for mobile it will
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Phone: $value')),
-                    );
-                  },
+                  onTap: () => _launchPhone(value),
                   child: Row(
                     children: [
                       const Icon(Icons.phone, size: 14, color: Colors.blue),
@@ -6328,11 +6330,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
         ),
         const SizedBox(height: 4),
         InkWell(
-          onTap: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Phone: $phoneNumber')),
-            );
-          },
+          onTap: () => _launchPhone(phoneNumber),
           child: Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
@@ -7274,6 +7272,17 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
       });
     }
 
+    // Reassign in-progress tickets
+    if (widget.ticket.status == TicketStatus.inprogress &&
+        widget.ticket.assignedTo != null) {
+      actions.add({
+        'label': l10n.assign,
+        'icon': Icons.assignment_ind,
+        'color': Colors.blue,
+        'onPressed': () => _showAssignDialog()
+      });
+    }
+
     return actions;
   }
 
@@ -7312,6 +7321,27 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
         });
       }
 
+      // Review & Approve prefinished tickets in their department
+      if (widget.ticket.status == TicketStatus.prefinished) {
+        actions.add({
+          'label': l10n.reviewAndApprove,
+          'icon': Icons.verified,
+          'color': Colors.green,
+          'onPressed': () => _showApprovalDialog()
+        });
+      }
+
+      // Reassign in-progress tickets in their department
+      if (widget.ticket.status == TicketStatus.inprogress &&
+          widget.ticket.assignedTo != null) {
+        actions.add({
+          'label': l10n.assign,
+          'icon': Icons.assignment_ind,
+          'color': Colors.blue,
+          'onPressed': () => _showAssignDialog()
+        });
+      }
+
       if (widget.ticket.status == TicketStatus.inprogress &&
           widget.ticket.assignedTo == widget.currentUser.id) {
         actions.add({
@@ -7343,7 +7373,8 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
 
     if ([TicketStatus.pending, TicketStatus.inprogress]
             .contains(widget.ticket.status) &&
-        widget.ticket.createdBy != widget.currentUser.id) {
+        widget.ticket.createdBy != widget.currentUser.id &&
+        widget.currentUser.departmentId == widget.ticket.targetDepartmentId) {
       actions.add({
         'label': l10n.wrongInfo,
         'icon': Icons.error_outline,
