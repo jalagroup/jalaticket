@@ -5443,7 +5443,8 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
               ],
             ),
           ),
-        if (_canCreatorApprove())
+        // On mobile, approve/reject go into the ••• menu to avoid overflow
+        if (!isMobile && _canCreatorApprove())
           Padding(
             padding: EdgeInsets.symmetric(horizontal: buttonPadding),
             child: Tooltip(
@@ -5463,7 +5464,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
               ),
             ),
           ),
-        if (_canCreatorApprove())
+        if (!isMobile && _canCreatorApprove())
           Padding(
             padding: EdgeInsets.symmetric(horizontal: buttonPadding),
             child: Tooltip(
@@ -5483,7 +5484,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
               ),
             ),
           ),
-        if (_getOtherActions().isNotEmpty)
+        if (_getOtherActions(mobileIncludeApproval: isMobile && _canCreatorApprove()).isNotEmpty)
           Padding(
             padding: EdgeInsets.symmetric(horizontal: buttonPadding),
             child: PopupMenuButton<VoidCallback>(
@@ -5502,7 +5503,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
                 ),
               ),
               onSelected: (callback) => callback(),
-              itemBuilder: (context) => _getOtherActions()
+              itemBuilder: (context) => _getOtherActions(mobileIncludeApproval: isMobile && _canCreatorApprove())
                   .map((action) => PopupMenuItem<VoidCallback>(
                         value: action['onPressed'],
                         child: Row(
@@ -5534,10 +5535,15 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
   }
 
 // 2. NEW METHOD: Get other actions (excluding approval actions)
-  List<Map<String, dynamic>> _getOtherActions() {
+  List<Map<String, dynamic>> _getOtherActions({bool mobileIncludeApproval = false}) {
     final allActions = _getAvailableActions();
 
-    // Remove approval-related actions since they're now buttons
+    if (mobileIncludeApproval) {
+      // On mobile the approve/reject are in the menu — include everything
+      return allActions;
+    }
+
+    // Desktop: remove approval actions since they have dedicated buttons
     return allActions.where((action) {
       final label = action['label'] as String;
       return !label.contains('Approve') &&
