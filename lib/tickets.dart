@@ -2621,10 +2621,12 @@ class _TicketsScreenState extends State<TicketsScreen>
             shouldCount = ticket.createdBy == widget.currentUser.id;
           }
         } else {
-          // Regular users: count all place tickets, or only own if toggle is on.
+          // Regular users: own tickets or same-place tickets (mirrors the list filter)
           shouldCount = _showMyTicketsOnly
               ? ticket.createdBy == widget.currentUser.id
-              : true;
+              : (widget.currentUser.placeId != null
+                  ? ticket.placeId == widget.currentUser.placeId
+                  : ticket.createdBy == widget.currentUser.id);
         }
 
         if (shouldCount) {
@@ -2700,6 +2702,7 @@ class _TicketsScreenState extends State<TicketsScreen>
       final chatRoomId = response['id'];
 
       if (MediaQuery.of(context).size.width < 768) {
+        activeChatRoomId = chatRoomId;
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -2717,9 +2720,11 @@ class _TicketsScreenState extends State<TicketsScreen>
             ),
           ),
         ).then((_) {
+          activeChatRoomId = null;
           _refreshUnreadCounts();
         });
       } else {
+        activeChatRoomId = chatRoomId;
         setState(() {
           _selectedChatRoomId = chatRoomId;
           _selectedTicketId = ticketId;
@@ -2748,6 +2753,7 @@ class _TicketsScreenState extends State<TicketsScreen>
   void _closeChat() async {
     if (!mounted || _isDisposed) return;
 
+    activeChatRoomId = null;
     setState(() {
       _selectedChatRoomId = null;
       _selectedTicketId = null;
@@ -5043,21 +5049,17 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
         const SizedBox(height: 10),
 
         // Row 3: Status and Priority badges + Supervision badge + Sub-tickets badge
-        Row(
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
           children: [
             _buildStatusBadge(),
-            const SizedBox(width: 6),
             _buildPriorityBadge(),
-            // NEW: Under Supervision Badge
             if (widget.ticket.underSupervision &&
-                widget.ticket.status == TicketStatus.prefinished) ...[
-              const SizedBox(width: 6),
+                widget.ticket.status == TicketStatus.prefinished)
               _buildSupervisionBadge(),
-            ],
-            if (_subtickets.isNotEmpty) ...[
-              const SizedBox(width: 6),
+            if (_subtickets.isNotEmpty)
               _buildSubticketsBadge(),
-            ],
           ],
         ),
 

@@ -54,6 +54,11 @@ class AppColors {
 // ✨ NEW: Global keys for accessing app state
 final GlobalKey<_MyAppState> myAppKey = GlobalKey<_MyAppState>();
 
+// Tracks which chat room the user is currently viewing.
+// Set by tickets.dart when a chat is opened/closed so foreground
+// notifications for that room are suppressed.
+String? activeChatRoomId;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -899,7 +904,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   void _handleForegroundMessage(message) {
     if (mounted) {
-      _showInAppNotification(message);
+      // Suppress notification if the user is already viewing that chat room
+      final msgChatRoomId = message.data['chat_room_id'];
+      final isInSameRoom = msgChatRoomId != null &&
+          msgChatRoomId == activeChatRoomId;
+      if (!isInSameRoom) {
+        _showInAppNotification(message);
+      }
       _loadNotifications();
     }
   }
@@ -1062,9 +1073,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         .eq('user_id', _currentUser!.id)
         .listen((data) {
           if (mounted) {
+            final sorted = List<Map<String, dynamic>>.from(data)
+              ..sort((a, b) =>
+                (b['created_at'] as String? ?? '')
+                    .compareTo(a['created_at'] as String? ?? ''));
             setState(() {
-              _notifications = data;
-              _unreadCount = data.where((n) => !n['is_read']).length;
+              _notifications = sorted;
+              _unreadCount = sorted.where((n) => !n['is_read']).length;
             });
           }
         });
