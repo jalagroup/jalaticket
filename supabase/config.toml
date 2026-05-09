@@ -416,3 +416,10 @@ enabled = true
 verify_jwt = true
 import_map = "./functions/send-push-notification/deno.json"
 entrypoint = "./functions/send-push-notification/index.ts"
+
+# Scheduled auto-process: runs without JWT (called by pg_cron via pg_net)
+[functions.auto-process-tickets]
+enabled = true
+verify_jwt = false
+import_map = "./functions/auto-process-tickets/deno.json"
+entrypoint = "./functions/auto-process-tickets/index.ts"

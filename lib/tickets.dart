@@ -1436,12 +1436,6 @@ class _TicketsScreenState extends State<TicketsScreen>
       curve: Curves.easeInOut,
     ));
 
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted && !_isDisposed) {
-        _checkAndAutoApproveExpiredTickets();
-      }
-    });
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _handlePendingNavigation();
     });
@@ -1745,38 +1739,6 @@ class _TicketsScreenState extends State<TicketsScreen>
       );
     } catch (e) {
       debugPrint('❌ Error setting up unread subscription: $e');
-    }
-  }
-
-  Future<void> _checkAndAutoApproveExpiredTickets() async {
-    if (!mounted || !_isVisible || _isDisposed) return;
-
-    try {
-      final result = await TicketService.checkAndAutoApproveExpiredTickets();
-
-      final approvedCount = result['count'] as int;
-      final ticketNumbers = result['ticket_numbers'] as List<String>;
-
-      if (approvedCount > 0 && mounted && !_isDisposed) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '$approvedCount ticket(s) automatically approved and closed: ${ticketNumbers.join(", ")}',
-            ),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 5),
-            action: SnackBarAction(
-              label: 'OK',
-              textColor: Colors.white,
-              onPressed: () {},
-            ),
-          ),
-        );
-
-        _refreshData();
-      }
-    } catch (e) {
-      debugPrint('❌ Error in auto-approval check: $e');
     }
   }
 
@@ -2096,58 +2058,35 @@ class _TicketsScreenState extends State<TicketsScreen>
   Future<List<TicketModel>> _filterAndParseTickets(
       List<Map<String, dynamic>> data) async {
     final tickets = <TicketModel>[];
-    final ticketsToAutoApprove = <TicketModel>[];
 
     try {
       if (widget.currentUser.userType == UserType.systemAdmin) {
         for (final ticketData in data) {
           try {
-            final ticket = TicketModel.fromJson(ticketData);
-            if (await _shouldAutoApproveTicket(ticket)) {
-              ticketsToAutoApprove.add(ticket);
-            } else {
-              tickets.add(ticket);
-            }
+            tickets.add(TicketModel.fromJson(ticketData));
           } catch (e) {
             debugPrint('❌ Error parsing ticket: $e');
-            continue;
           }
         }
       } else if (widget.currentUser.userType == UserType.branchAdmin) {
-        // NEW: Branch admin can see tickets from their assigned places
-        print('🔍 Loading tickets for branch admin: ${widget.currentUser.id}');
-
-        // Get branch admin's assigned places
         final assignedPlaces = await supabase
             .from('branch_admin_places')
             .select('place_id')
             .eq('admin_id', widget.currentUser.id);
-
         final placeIds =
             assignedPlaces.map((p) => p['place_id'] as String).toList();
-        print('📍 Branch admin assigned places: $placeIds');
 
         for (final ticketData in data) {
           try {
             final ticket = TicketModel.fromJson(ticketData);
-
-            // Branch admin can see tickets from their assigned places
             if (ticket.placeId != null && placeIds.contains(ticket.placeId)) {
-              if (await _shouldAutoApproveTicket(ticket)) {
-                ticketsToAutoApprove.add(ticket);
-              } else {
-                tickets.add(ticket);
-              }
+              tickets.add(ticket);
             }
           } catch (e) {
             debugPrint('❌ Error processing branch admin ticket: $e');
-            continue;
           }
         }
-
-        print('✅ Loaded ${tickets.length} tickets for branch admin');
       } else if (widget.currentUser.userType == UserType.superAdmin) {
-        // Rest of existing super admin logic...
         if (widget.currentUser.departmentId != null) {
           for (final ticketData in data) {
             try {
@@ -2157,38 +2096,26 @@ class _TicketsScreenState extends State<TicketsScreen>
                   ticket.createdBy == widget.currentUser.id ||
                   (ticket.parentTicketId != null &&
                       await _isSubticketAccessible(ticket))) {
-                if (await _shouldAutoApproveTicket(ticket)) {
-                  ticketsToAutoApprove.add(ticket);
-                } else {
-                  tickets.add(ticket);
-                }
+                tickets.add(ticket);
               }
             } catch (e) {
               debugPrint('❌ Error processing super admin ticket: $e');
-              continue;
             }
           }
         }
       } else if (widget.currentUser.userType == UserType.admin) {
-        // Existing admin logic...
         for (final ticketData in data) {
           try {
             final ticket = TicketModel.fromJson(ticketData);
             if (ticket.assignedTo == widget.currentUser.id ||
                 ticket.createdBy == widget.currentUser.id) {
-              if (await _shouldAutoApproveTicket(ticket)) {
-                ticketsToAutoApprove.add(ticket);
-              } else {
-                tickets.add(ticket);
-              }
+              tickets.add(ticket);
             }
           } catch (e) {
             debugPrint('❌ Error processing admin ticket: $e');
-            continue;
           }
         }
       } else if (widget.currentUser.userType == UserType.superUser) {
-        // Existing super user logic...
         if (widget.currentUser.placeId != null) {
           try {
             final usersInPlace = await supabase
@@ -2196,25 +2123,16 @@ class _TicketsScreenState extends State<TicketsScreen>
                 .select('id')
                 .eq('place_id', widget.currentUser.placeId!)
                 .eq('user_type', 'user');
-
             final userIds = [
               widget.currentUser.id,
               ...usersInPlace.map((u) => u['id']).cast<String>()
             ];
-
             for (final ticketData in data) {
               try {
                 final ticket = TicketModel.fromJson(ticketData);
-                if (userIds.contains(ticket.createdBy)) {
-                  if (await _shouldAutoApproveTicket(ticket)) {
-                    ticketsToAutoApprove.add(ticket);
-                  } else {
-                    tickets.add(ticket);
-                  }
-                }
+                if (userIds.contains(ticket.createdBy)) tickets.add(ticket);
               } catch (e) {
                 debugPrint('❌ Error processing super user ticket: $e');
-                continue;
               }
             }
           } catch (e) {
@@ -2222,148 +2140,22 @@ class _TicketsScreenState extends State<TicketsScreen>
           }
         }
       } else {
-        // Regular users: RLS already scopes data to their place.
-        // If _showMyTicketsOnly is on, keep only tickets they created.
         for (final ticketData in data) {
           try {
             final ticket = TicketModel.fromJson(ticketData);
             if (_showMyTicketsOnly &&
-                ticket.createdBy != widget.currentUser.id) {
-              continue;
-            }
-            if (ticket.createdBy == widget.currentUser.id &&
-                await _shouldAutoApproveTicket(ticket)) {
-              ticketsToAutoApprove.add(ticket);
-            } else {
-              tickets.add(ticket);
-            }
+                ticket.createdBy != widget.currentUser.id) continue;
+            tickets.add(ticket);
           } catch (e) {
             debugPrint('❌ Error parsing user ticket: $e');
-            continue;
           }
         }
-      }
-
-      if (ticketsToAutoApprove.isNotEmpty) {
-        _processAutoApprovals(ticketsToAutoApprove);
       }
     } catch (e) {
       debugPrint('❌ Error in _filterAndParseTickets: $e');
     }
 
     return tickets;
-  }
-
-  void _processAutoApprovals(List<TicketModel> tickets) {
-    Future.microtask(() async {
-      for (final ticket in tickets) {
-        try {
-          await _autoApproveSingleTicket(ticket);
-        } catch (e) {
-          debugPrint(
-              '❌ Error auto-approving ticket ${ticket.ticketNumber}: $e');
-        }
-      }
-
-      if (mounted && tickets.isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '${tickets.length} ticket(s) automatically approved',
-            ),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-        _refreshData();
-      }
-    });
-  }
-
-  Future<bool> _shouldAutoApproveTicket(TicketModel ticket) async {
-    if (ticket.status != TicketStatus.prefinished) {
-      return false;
-    }
-
-    try {
-      return await TicketService.isTicketEligibleForAutoApproval(ticket.id);
-    } catch (e) {
-      return false;
-    }
-  }
-
-  Future<void> _autoApproveSingleTicket(TicketModel ticket) async {
-    try {
-      final success = await TicketService.autoApproveSingleTicket(ticket.id);
-
-      if (success) {
-        // NEW: Send auto-approval notification with isAutoApproval flag
-        await NotificationService.notifyTicketApproved(
-          ticketId: ticket.id,
-          ticketCreatorId: ticket.createdBy,
-          approvedByUserId: ticket.createdBy, // System approval
-          ticketNumber: ticket.ticketNumber,
-          isApproved: true,
-          isAutoApproval: true, // ← NEW FLAG
-        );
-      }
-    } catch (e) {
-      debugPrint('❌ Error auto-approving ticket ${ticket.ticketNumber}: $e');
-    }
-  }
-
-// Add this method to _TicketsScreenState class
-  Future<void> _processBatchAutoApprovalsWithNotifications() async {
-    try {
-      final result = await TicketService.checkAndAutoApproveExpiredTickets();
-
-      final approvedCount = result['count'] as int;
-      final ticketNumbers = result['ticket_numbers'] as List<String>;
-
-      if (approvedCount > 0) {
-        print(
-            '✅ Processing notifications for $approvedCount auto-approved tickets');
-
-        // Get ticket details for notifications
-        final tickets = await supabase
-            .from('tickets')
-            .select('id, ticket_number, created_by, title')
-            .inFilter('ticket_number', ticketNumbers);
-
-        // Send notifications for each auto-approved ticket
-        for (final ticket in tickets) {
-          await NotificationService.notifyTicketApproved(
-            ticketId: ticket['id'],
-            ticketCreatorId: ticket['created_by'],
-            approvedByUserId: ticket['created_by'], // System approval
-            ticketNumber: ticket['ticket_number'],
-            isApproved: true,
-            isAutoApproval: true, // Indicate this is automatic
-          );
-        }
-
-        if (mounted && !_isDisposed) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                '$approvedCount ticket(s) automatically approved and closed: ${ticketNumbers.join(", ")}',
-              ),
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 5),
-              action: SnackBarAction(
-                label: 'OK',
-                textColor: Colors.white,
-                onPressed: () {},
-              ),
-            ),
-          );
-
-          _refreshData();
-        }
-      }
-    } catch (e) {
-      print('❌ Error processing auto-approvals with notifications: $e');
-    }
   }
 
   String? _getUserNameForStatus(String userId, TicketStatus status) {
@@ -2540,11 +2332,6 @@ class _TicketsScreenState extends State<TicketsScreen>
       }
     });
 
-    Future.delayed(const Duration(seconds: 1), () {
-      if (mounted && _isVisible && !_isDisposed) {
-        _checkAndAutoApproveExpiredTickets();
-      }
-    });
   }
 
   void _loadCurrentTabTickets() {
