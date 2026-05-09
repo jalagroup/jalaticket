@@ -457,17 +457,17 @@ class _ChatWidgetState extends State<ChatWidget>
 
   Widget _buildChatWidgetMobile(BuildContext context, AppLocalizations l10n) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: const Color(0xFFF0F4F7),
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               widget.ticketNumber ?? l10n.chat,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
-                color: AppColors.onBackground,
+                color: Colors.white,
               ),
             ),
             if (widget.ticketTitle != null)
@@ -475,31 +475,32 @@ class _ChatWidgetState extends State<ChatWidget>
                 widget.ticketTitle!,
                 style: TextStyle(
                   fontSize: 12,
-                  color: AppColors.onBackground.withOpacity(0.7),
+                  color: Colors.white.withOpacity(0.8),
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
           ],
         ),
-        backgroundColor: AppColors.background,
-        foregroundColor: AppColors.onBackground,
-        elevation: 0,
-        surfaceTintColor: AppColors.background,
+        backgroundColor: AppColors.secondary,
+        foregroundColor: Colors.white,
+        elevation: 2,
+        shadowColor: AppColors.secondary.withOpacity(0.4),
+        surfaceTintColor: AppColors.secondary,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: AppColors.onBackground),
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
           if (!_isAtBottom && _messages.isNotEmpty)
             Container(
-              margin: EdgeInsets.symmetric(horizontal: 4),
+              margin: const EdgeInsets.symmetric(horizontal: 4),
               decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.1),
+                color: Colors.white.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: IconButton(
-                icon: Icon(Icons.keyboard_arrow_down, color: AppColors.primary),
+                icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white),
                 onPressed: () {
                   _scrollController.animateTo(
                     0,
@@ -510,11 +511,10 @@ class _ChatWidgetState extends State<ChatWidget>
                 tooltip: l10n.scrollToLatest,
               ),
             ),
-          SizedBox(width: 8),
+          const SizedBox(width: 8),
         ],
       ),
       body: _buildChatContent(l10n),
-// IMPORTANT: Prevent keyboard from resizing the entire view
       resizeToAvoidBottomInset: true,
     );
   }
@@ -563,7 +563,7 @@ class _ChatWidgetState extends State<ChatWidget>
         // Messages list
         Expanded(
           child: Container(
-            color: AppColors.background,
+            color: const Color(0xFFF0F4F7),
             child: _isLoading
                 ? Center(
                     child: CircularProgressIndicator(
@@ -681,21 +681,41 @@ class _ChatWidgetState extends State<ChatWidget>
         Widget messageWidget = Column(
           children: [
             if (showTimestamp)
-              Container(
-                margin: const EdgeInsets.symmetric(vertical: 16),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppColors.secondary.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  DateFormat('MMM dd, yyyy - HH:mm').format(localTime),
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: AppColors.secondary,
-                    fontWeight: FontWeight.w600,
-                  ),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Divider(
+                        color: AppColors.secondary.withOpacity(0.15),
+                        thickness: 1,
+                        endIndent: 12,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: AppColors.secondary.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        DateFormat('MMM dd, yyyy · HH:mm').format(localTime),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppColors.secondary.withOpacity(0.8),
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Divider(
+                        color: AppColors.secondary.withOpacity(0.15),
+                        thickness: 1,
+                        indent: 12,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             _buildMessageBubble(message, isMe, localTime, l10n),
@@ -742,30 +762,37 @@ class _ChatWidgetState extends State<ChatWidget>
           Flexible(
             child: Container(
               constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.7,
+                maxWidth: MediaQuery.of(context).size.width * 0.72,
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: isMe ? AppColors.primary : Colors.grey[200],
+                color: isMe ? AppColors.primary : Colors.white,
                 borderRadius: BorderRadius.only(
                   topLeft: const Radius.circular(18),
                   topRight: const Radius.circular(18),
                   bottomLeft: Radius.circular(isMe ? 18 : 4),
                   bottomRight: Radius.circular(isMe ? 4 : 18),
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(isMe ? 0.12 : 0.07),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if (!isMe && message.senderName != null)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
+                      padding: const EdgeInsets.only(bottom: 5),
                       child: Text(
                         message.senderName!,
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
-                          color: Colors.grey[700],
+                          color: AppColors.secondary,
                         ),
                       ),
                     ),
@@ -773,9 +800,9 @@ class _ChatWidgetState extends State<ChatWidget>
                     message.message,
                     style: TextStyle(
                       fontSize: 15,
-                      color: isMe ? AppColors.onPrimary : Colors.black,
-                      height: 1.4,
-                      fontWeight: FontWeight.w500,
+                      color: isMe ? AppColors.onPrimary : const Color(0xFF1A1A2E),
+                      height: 1.45,
+                      fontWeight: FontWeight.w400,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -900,18 +927,18 @@ class _ChatWidgetState extends State<ChatWidget>
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.background,
+        color: Colors.white,
         border: Border(
           top: BorderSide(
-            color: AppColors.secondary.withOpacity(0.1),
+            color: AppColors.secondary.withOpacity(0.08),
             width: 1,
           ),
         ),
         boxShadow: [
           BoxShadow(
-            color: AppColors.secondary.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, -2),
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 10,
+            offset: const Offset(0, -3),
           ),
         ],
       ),
@@ -930,7 +957,7 @@ class _ChatWidgetState extends State<ChatWidget>
                   ),
                   color: _isSending
                       ? AppColors.primary.withOpacity(0.05)
-                      : AppColors.background,
+                      : const Color(0xFFF4F6F8),
                   boxShadow: [
                     BoxShadow(
                       color: AppColors.secondary.withOpacity(0.1),
@@ -947,20 +974,12 @@ class _ChatWidgetState extends State<ChatWidget>
                     hintStyle: TextStyle(
                       color: _isSending
                           ? AppColors.primary.withOpacity(0.6)
-                          : AppColors.onBackground.withOpacity(0.5),
-                      fontWeight: FontWeight.w500,
+                          : AppColors.onBackground.withOpacity(0.45),
+                      fontWeight: FontWeight.w400,
                     ),
                     border: InputBorder.none,
                     contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 14),
-                    prefixIcon: Container(
-                      margin: const EdgeInsets.only(left: 8, right: 4),
-                      child: Icon(
-                        Icons.chat_bubble_outline,
-                        color: AppColors.secondary.withOpacity(0.6),
-                        size: 20,
-                      ),
-                    ),
+                        horizontal: 18, vertical: 13),
                   ),
                   style: TextStyle(
                     color: AppColors.onBackground,

@@ -933,17 +933,19 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   void _navigateToChat(String? ticketId, String? chatRoomId) {
     if (ticketId == null) return;
-
     if (kIsWeb) {
       setState(() => _currentIndex = 1);
     } else {
       setState(() => _currentIndex = 2);
     }
+    // Highlight the associated ticket in the ticket list too.
+    TicketNavigationService.navigateTo(ticketId);
   }
 
   void _navigateToTicket(String? ticketId) {
     if (ticketId == null) return;
     setState(() => _currentIndex = 1);
+    TicketNavigationService.navigateTo(ticketId);
   }
 
   void _showInAppNotification(message) {

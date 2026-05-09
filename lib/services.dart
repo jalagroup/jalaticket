@@ -1484,6 +1484,29 @@ class TicketService {
   }
 }
 
+/// Allows any screen to request navigation to a specific ticket.
+/// The TicketsScreen registers a listener in initState and removes it in dispose.
+class TicketNavigationService {
+  static String? _pendingTicketId;
+  static VoidCallback? _listener;
+
+  /// Called by main.dart when a notification is tapped.
+  static void navigateTo(String ticketId) {
+    _pendingTicketId = ticketId;
+    _listener?.call();
+  }
+
+  /// Called by _TicketsScreenState to consume and act on the pending ID.
+  static String? consume() {
+    final id = _pendingTicketId;
+    _pendingTicketId = null;
+    return id;
+  }
+
+  static void setListener(VoidCallback cb) => _listener = cb;
+  static void removeListener() => _listener = null;
+}
+
 // Updated ChatService with professional unread count management
 // Replace your existing ChatService class in services.dart with this:
 

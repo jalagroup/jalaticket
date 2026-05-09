@@ -1445,6 +1445,35 @@ class _TicketsScreenState extends State<TicketsScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _handlePendingNavigation();
     });
+
+    // Register for in-app notification navigation.
+    TicketNavigationService.setListener(_onNavigationRequested);
+  }
+
+  void _onNavigationRequested() {
+    final ticketId = TicketNavigationService.consume();
+    if (ticketId == null || !mounted || _isDisposed) return;
+    // Brief delay so the tab switcher has time to become visible.
+    Future.delayed(const Duration(milliseconds: 350), () {
+      if (!mounted || _isDisposed) return;
+      _jumpToTicket(ticketId);
+    });
+  }
+
+  void _jumpToTicket(String ticketId) {
+    // Search every loaded tab for this ticket.
+    for (int i = 0; i < _statuses.length; i++) {
+      final tickets = _ticketsByStatus[_statuses[i]] ?? [];
+      if (tickets.any((t) => t.id == ticketId)) {
+        _tabController.animateTo(i);
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (mounted && !_isDisposed) _highlightTicket(ticketId);
+        });
+        return;
+      }
+    }
+    // Ticket not yet in any loaded list — just highlight without tab switch.
+    _highlightTicket(ticketId);
   }
 
   @override
@@ -1452,6 +1481,7 @@ class _TicketsScreenState extends State<TicketsScreen>
     debugPrint('🧹 Disposing TicketsScreen...');
     _isDisposed = true; // NEW: Mark as disposed
     _isVisible = false;
+    TicketNavigationService.removeListener();
 
     WidgetsBinding.instance.removeObserver(this);
     _highlightTimer?.cancel();
