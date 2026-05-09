@@ -47,3 +47,7 @@ app.*.map.json
 
 # Supabase local temp files
 supabase/.temp/
+
+# Firebase service account key (contains private key — never commit)
+assets/service_access.json
+.env.secret

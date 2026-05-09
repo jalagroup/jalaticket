@@ -1533,6 +1533,224 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 }
 
+void showTestPushDialog(BuildContext context) {
+  showDialog(
+    context: context,
+    builder: (context) => const _TestPushDialog(),
+  );
+}
+
+class _TestPushDialog extends StatefulWidget {
+  const _TestPushDialog();
+
+  @override
+  State<_TestPushDialog> createState() => _TestPushDialogState();
+}
+
+class _TestPushDialogState extends State<_TestPushDialog> {
+  final List<String> _logs = [];
+  bool _isLoading = false;
+  final _scrollController = ScrollController();
+
+  void _log(String msg) {
+    final ts = DateTime.now().toString().substring(11, 19);
+    setState(() => _logs.add('[$ts] $msg'));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  Future<void> _sendTestPush() async {
+    if (_isLoading) return;
+    setState(() {
+      _isLoading = true;
+      _logs.clear();
+    });
+    _log('--- Starting test push ---');
+
+    try {
+      final authUser = supabase.auth.currentUser;
+      if (authUser == null) {
+        _log('❌ Not authenticated');
+        return;
+      }
+      _log('✅ User: ${authUser.email}');
+
+      // Fetch user row
+      final rows = await supabase
+          .from('users')
+          .select('id, fcm_token, fcm_token_web')
+          .eq('auth_id', authUser.id)
+          .maybeSingle();
+
+      if (rows == null) {
+        _log('❌ No user row found in DB');
+        return;
+      }
+
+      final mobileToken = rows['fcm_token'] as String?;
+      final webToken = rows['fcm_token_web'] as String?;
+      final userId = rows['id'] as String;
+
+      _log('Mobile token: ${mobileToken != null ? "${mobileToken.substring(0, 20)}..." : "null"}');
+      _log('Web token: ${webToken != null ? "${webToken.substring(0, 20)}..." : "null"}');
+
+      // Insert an in-app notification (works on both mobile and web via realtime)
+      _log('Inserting in-app notification...');
+      await supabase.from('notifications').insert({
+        'user_id': userId,
+        'type': 'test',
+        'title': '🔔 Test Notification',
+        'message': 'This is a test notification sent from the profile screen.',
+        'is_read': false,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      _log('✅ In-app notification inserted — check the bell icon');
+
+      // Send FCM push via edge function (works on all platforms)
+      if (mobileToken != null && mobileToken.isNotEmpty) {
+        _log('Sending FCM push to mobile token via edge function...');
+        await NotificationService.sendTestPush(
+          token: mobileToken,
+          userId: userId,
+        );
+        _log('✅ FCM push sent — you should receive a system notification');
+      } else {
+        _log('⚠️ No mobile FCM token — FCM push skipped');
+        _log('   Open the app on a phone and tap "Get FCM Token" in FCM Debug first');
+      }
+
+      _log('--- Done ✅ ---');
+    } catch (e) {
+      _log('❌ Error: $e');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: double.infinity,
+        constraints: const BoxConstraints(maxWidth: 440, maxHeight: 480),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.notifications_active,
+                    color: Colors.deepPurple, size: 22),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Test Push Notification',
+                    style:
+                        TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 20),
+                  onPressed: () => Navigator.of(context).pop(),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Sends a real FCM push + in-app notification to yourself via Supabase Edge Function. Works on all platforms.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E1E),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: _logs.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'Tap "Send Test" to begin',
+                          style:
+                              TextStyle(color: Colors.grey, fontSize: 13),
+                        ),
+                      )
+                    : ListView.builder(
+                        controller: _scrollController,
+                        itemCount: _logs.length,
+                        itemBuilder: (context, i) {
+                          final line = _logs[i];
+                          Color color = Colors.grey.shade300;
+                          if (line.contains('✅')) color = Colors.greenAccent;
+                          if (line.contains('❌')) color = Colors.redAccent;
+                          if (line.contains('⚠️')) color = Colors.orange;
+                          if (line.contains('ℹ️')) {
+                            color = Colors.lightBlueAccent;
+                          }
+                          if (line.contains('---')) color = Colors.yellow;
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 1),
+                            child: Text(
+                              line,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: color,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              onPressed: _isLoading ? null : _sendTestPush,
+              icon: _isLoading
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.send, size: 18),
+              label: Text(
+                _isLoading ? 'Sending...' : 'Send Test',
+                style: const TextStyle(fontSize: 13),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.deepPurple,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class ProfileScreen extends StatefulWidget {
   final UserModel currentUser;
   final VoidCallback? onProfileImageUpdated; // ✨ Added callback
@@ -1996,6 +2214,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         automaticallyImplyLeading: !isWeb,
         actions: [
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 4),
+            decoration: BoxDecoration(
+              color: Colors.deepPurple.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: IconButton(
+              icon: const Icon(Icons.notifications_active,
+                  color: Colors.deepPurple),
+              onPressed: () => showTestPushDialog(context),
+              tooltip: 'Test Push Notification',
+            ),
+          ),
           if (!kIsWeb)
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 4),

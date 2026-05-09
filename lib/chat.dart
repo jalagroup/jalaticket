@@ -6,16 +6,10 @@ import 'package:jalasupport/l10n/app_localizations.dart';
 import 'package:jalasupport/main.dart';
 import 'package:jalasupport/models.dart';
 import 'package:jalasupport/services.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:jalasupport/sound_service.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
-import 'package:http/http.dart' as http;
-import 'package:image_picker/image_picker.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:uuid/uuid.dart';
 
 // Define app colors from main.dart
 class AppColors {
@@ -75,19 +69,19 @@ class _ChatWidgetState extends State<ChatWidget>
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
   List<ChatMessageModel> _messages = [];
+  // Optimistic messages shown instantly before server confirms them.
+  final List<ChatMessageModel> _pendingMessages = [];
   StreamSubscription? _messagesSubscription;
   bool _isLoading = false;
   bool _isSending = false;
+
+  List<ChatMessageModel> get _displayMessages =>
+      [..._messages, ..._pendingMessages];
   final FocusNode _focusNode = FocusNode();
-// Animation controllers - LAZY INITIALIZED
-  AnimationController? _sendAnimationController;
   AnimationController? _messageAddAnimationController;
-  Animation<double>? _sendScaleAnimation;
-  Animation<double>? _sendRotationAnimation;
   Animation<Offset>? _messageSlideAnimation;
   Animation<double>? _messageFadeAnimation;
   String? _lastAnimatedMessageId;
-  bool _isWaitingForMessage = false;
   Timer? _readMarkTimer;
   bool _isAtBottom = true;
   bool _hasUnreadMessages = false;
@@ -111,30 +105,8 @@ class _ChatWidgetState extends State<ChatWidget>
     });
   }
 
-// LAZY: Initialize animations only when needed
   void _ensureAnimationsInitialized() {
-    if (_sendAnimationController != null) return;
-    _sendAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 600),
-      vsync: this,
-    );
-
-    _sendScaleAnimation = Tween<double>(
-      begin: 1.0,
-      end: 0.8,
-    ).animate(CurvedAnimation(
-      parent: _sendAnimationController!,
-      curve: Curves.elasticOut,
-    ));
-
-    _sendRotationAnimation = Tween<double>(
-      begin: 0.0,
-      end: 2 * math.pi,
-    ).animate(CurvedAnimation(
-      parent: _sendAnimationController!,
-      curve: Curves.easeInOut,
-    ));
-
+    if (_messageAddAnimationController != null) return;
     _messageAddAnimationController = AnimationController(
       duration: const Duration(milliseconds: 700),
       vsync: this,
@@ -186,14 +158,12 @@ class _ChatWidgetState extends State<ChatWidget>
     _scrollController.dispose();
     _focusNode.dispose();
 
-// Only dispose if initialized
-    _sendAnimationController?.dispose();
     _messageAddAnimationController?.dispose();
 
     _lastAnimatedMessageId = null;
-    _isWaitingForMessage = false;
     _retryCount = 0;
     _sendQueue.clear();
+    _pendingMessages.clear();
 
     super.dispose();
   }
@@ -257,35 +227,30 @@ class _ChatWidgetState extends State<ChatWidget>
         print('📨 Received ${newMessages.length} messages from subscription');
 
         final oldCount = _messages.length;
-        final hasNewMessagesFromOthers = newMessages.any((msg) =>
-            msg.senderId != widget.currentUser.id &&
-            !_messages.any((existing) => existing.id == msg.id));
 
-        bool isOurNewMessage = false;
-        if (_isWaitingForMessage && newMessages.isNotEmpty) {
-          final latestMessage = newMessages.first;
-          if (latestMessage.senderId == widget.currentUser.id &&
-              !_messages.any((existing) => existing.id == latestMessage.id)) {
-            isOurNewMessage = true;
-            _lastAnimatedMessageId = latestMessage.id;
-            _isWaitingForMessage = false;
-          }
-        }
+        // Count newly confirmed messages sent by us that aren't already in
+        // _messages — each one "consumes" one pending optimistic bubble.
+        final confirmedOurMessages = newMessages.where((msg) =>
+            msg.senderId == widget.currentUser.id &&
+            !_messages.any((e) => e.id == msg.id)).length;
+
+        final hasNewFromOthers = newMessages.any((msg) =>
+            msg.senderId != widget.currentUser.id &&
+            !_messages.any((e) => e.id == msg.id));
 
         setState(() {
           _messages = newMessages;
-          _hasUnreadMessages = hasNewMessagesFromOthers ||
+          // Drop confirmed pending messages (oldest first).
+          for (var i = 0; i < confirmedOurMessages && _pendingMessages.isNotEmpty; i++) {
+            _pendingMessages.removeAt(0);
+          }
+          _hasUnreadMessages = hasNewFromOthers ||
               newMessages.any((m) => m.senderId != widget.currentUser.id);
         });
 
-        if (isOurNewMessage && _messageAddAnimationController != null) {
-          _messageAddAnimationController!.forward().then((_) {
-            Future.delayed(const Duration(milliseconds: 500), () {
-              if (mounted) {
-                _messageAddAnimationController!.reset();
-              }
-            });
-          });
+        // Play receive sound for messages from other users.
+        if (hasNewFromOthers) {
+          SoundService.playMessageReceived();
         }
 
         if (newMessages.length > oldCount) {
@@ -296,7 +261,6 @@ class _ChatWidgetState extends State<ChatWidget>
                 duration: const Duration(milliseconds: 300),
                 curve: Curves.easeOutCubic,
               );
-
               if (_isAtBottom) {
                 _markAsReadDelayed();
                 widget.onMessageSent?.call();
@@ -305,7 +269,7 @@ class _ChatWidgetState extends State<ChatWidget>
           });
         }
 
-        if (hasNewMessagesFromOthers && _isAtBottom) {
+        if (hasNewFromOthers && _isAtBottom) {
           _markAsReadDelayed();
           widget.onMessageSent?.call();
         }
@@ -353,27 +317,51 @@ class _ChatWidgetState extends State<ChatWidget>
     });
   }
 
-// OPTIMIZED: Queue-based message sending with keyboard persistence
   Future<void> _sendMessage() async {
     final messageText = _messageController.text.trim();
     if (messageText.isEmpty) return;
-// Add to queue and clear input immediately
-    _sendQueue.add(messageText);
+
     _messageController.clear();
-
-// Keep keyboard open on mobile
-    if (!mounted) return;
-
-// Initialize animations on first send
     _ensureAnimationsInitialized();
 
-// Start processing queue if not already processing
+    // 1. Play send sound immediately.
+    SoundService.playMessageSent();
+
+    // 2. Show optimistic bubble instantly.
+    _addOptimisticMessage(messageText);
+
+    // 3. Enqueue the actual network call.
+    _sendQueue.add(messageText);
     if (!_isProcessingQueue) {
       _processMessageQueue();
     }
   }
 
-// NEW: Process message queue for fast consecutive sends
+  void _addOptimisticMessage(String text) {
+    final pending = ChatMessageModel(
+      id: 'pending_${DateTime.now().millisecondsSinceEpoch}',
+      chatRoomId: widget.chatRoomId,
+      senderId: widget.currentUser.id,
+      message: text,
+      createdAt: DateTime.now(),
+      senderName: widget.currentUser.fullName,
+      senderProfileImage: widget.currentUser.profileImageUrl,
+      isPending: true,
+    );
+    setState(() => _pendingMessages.add(pending));
+
+    // Scroll to bottom to reveal the new bubble.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _scrollController.hasClients) {
+        _scrollController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
   Future<void> _processMessageQueue() async {
     if (_isProcessingQueue || _sendQueue.isEmpty) return;
     _isProcessingQueue = true;
@@ -381,61 +369,42 @@ class _ChatWidgetState extends State<ChatWidget>
     while (_sendQueue.isNotEmpty && mounted) {
       final messageText = _sendQueue.removeAt(0);
 
-      if (mounted) {
-        setState(() => _isSending = true);
-      }
-
-      // Animate send button
-      _sendAnimationController?.forward().then((_) {
-        _sendAnimationController?.reverse();
-      });
-
-      // Mark that we're waiting for this message
-      if (mounted) {
-        setState(() {
-          _isWaitingForMessage = true;
-        });
-      }
+      if (mounted) setState(() => _isSending = true);
 
       try {
         final success =
             await ChatService.sendMessage(widget.chatRoomId, messageText, null);
 
         if (success) {
-          print('✅ Message sent successfully');
-
+          // The realtime subscription will remove the pending bubble when the
+          // confirmed message arrives — nothing extra needed here.
           widget.onMessageSent?.call();
-
-          // Mark as read
           await ChatService.markChatAsRead(
               widget.chatRoomId, widget.currentUser.id);
         } else {
-          // Re-add to front of queue on failure
           if (mounted) {
-            _sendQueue.insert(0, messageText);
+            // Remove the optimistic bubble and restore text to input.
+            setState(() {
+              if (_pendingMessages.isNotEmpty) _pendingMessages.removeAt(0);
+            });
+            _messageController.text = messageText;
             final l10n = AppLocalizations.safeOf(context);
             _showErrorSnackBar('${l10n.error}: ${l10n.retry}');
-            setState(() {
-              _isWaitingForMessage = false;
-            });
           }
-          break; // Stop processing on failure
+          break;
         }
       } catch (e) {
         print('❌ Error sending message: $e');
         if (mounted) {
-          _sendQueue.insert(0, messageText);
+          setState(() {
+            if (_pendingMessages.isNotEmpty) _pendingMessages.removeAt(0);
+          });
+          _messageController.text = messageText;
           final l10n = AppLocalizations.safeOf(context);
           _showErrorSnackBar('${l10n.error}: $e');
-          setState(() {
-            _isWaitingForMessage = false;
-          });
         }
         break;
       }
-
-      // Small delay between sends
-      await Future.delayed(const Duration(milliseconds: 100));
     }
 
     if (mounted) {
@@ -443,8 +412,6 @@ class _ChatWidgetState extends State<ChatWidget>
         _isSending = false;
         _isProcessingQueue = false;
       });
-
-      // Keep focus on text field (keeps keyboard open on mobile)
       _focusNode.requestFocus();
     }
   }
@@ -688,23 +655,23 @@ class _ChatWidgetState extends State<ChatWidget>
 
 // OPTIMIZED: Use ListView.builder with itemExtent for better performance
   Widget _buildMessagesList(AppLocalizations l10n) {
+    final msgs = _displayMessages;
     return ListView.builder(
       controller: _scrollController,
       reverse: true,
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-      itemCount: _messages.length,
-// Performance optimization: estimated height
+      itemCount: msgs.length,
       cacheExtent: 1000,
       itemBuilder: (context, index) {
-        final reversedIndex = _messages.length - 1 - index;
-        final message = _messages[reversedIndex];
+        final reversedIndex = msgs.length - 1 - index;
+        final message = msgs[reversedIndex];
         final isMe = message.senderId == widget.currentUser.id;
         final localTime = message.createdAt.toLocal();
         bool showTimestamp = false;
         if (reversedIndex == 0) {
           showTimestamp = true;
         } else {
-          final previousMessage = _messages[reversedIndex - 1];
+          final previousMessage = msgs[reversedIndex - 1];
           final previousTime = previousMessage.createdAt.toLocal();
           final timeDifference =
               localTime.difference(previousTime).inMinutes.abs();
@@ -735,7 +702,6 @@ class _ChatWidgetState extends State<ChatWidget>
           ],
         );
 
-        // Only animate if animations are initialized
         if (index == 0 &&
             message.senderId == widget.currentUser.id &&
             message.id == _lastAnimatedMessageId &&
@@ -829,9 +795,12 @@ class _ChatWidgetState extends State<ChatWidget>
                       if (isMe) ...[
                         const SizedBox(width: 6),
                         Icon(
-                          Icons.done_all,
+                          message.isPending
+                              ? Icons.access_time_rounded
+                              : Icons.done_all,
                           size: 12,
-                          color: AppColors.onPrimary.withOpacity(0.8),
+                          color: AppColors.onPrimary.withOpacity(
+                              message.isPending ? 0.6 : 0.8),
                         ),
                       ],
                     ],
@@ -1017,21 +986,7 @@ class _ChatWidgetState extends State<ChatWidget>
             ),
             const SizedBox(width: 12),
 
-            // Animated send button - only animate if initialized
-            _sendAnimationController != null
-                ? AnimatedBuilder(
-                    animation: _sendAnimationController!,
-                    builder: (context, child) {
-                      return Transform.scale(
-                        scale: _sendScaleAnimation!.value,
-                        child: Transform.rotate(
-                          angle: _sendRotationAnimation!.value,
-                          child: _buildSendButton(l10n),
-                        ),
-                      );
-                    },
-                  )
-                : _buildSendButton(l10n),
+            _buildSendButton(l10n),
           ],
         ),
       ),

@@ -14,7 +14,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
-import 'fcm_auth_service.dart';
 
 // Add to services.dart
 
@@ -1628,33 +1627,42 @@ class ChatService {
       print('✅ Message sent successfully: ${response['id']}');
       _invalidateUnreadCache();
 
-      // Get ticket info for notifications
-      final chatRoom = await supabase
-          .from('chat_rooms')
-          .select('ticket_id, tickets(ticket_number)')
-          .eq('id', chatRoomId)
-          .single();
-
-      final ticketId = chatRoom['ticket_id'] as String?;
-      final ticketInfo = chatRoom['tickets'] as Map<String, dynamic>?;
-      final ticketNumber = ticketInfo?['ticket_number'] as String?;
-
-      // Use the enhanced notification method with preference checking
-      if (ticketId != null) {
-        await NotificationService.notifyChatMessage(
-          chatRoomId: chatRoomId,
-          senderId: user.id,
-          messageContent: message,
-          ticketId: ticketId,
-          ticketNumber: ticketNumber,
-        );
-      }
+      // Fire notifications in background — don't block the caller.
+      _sendMessageNotificationsAsync(chatRoomId, user.id, message);
 
       return true;
     } catch (e) {
       print('❌ Error sending message: $e');
       return false;
     }
+  }
+
+  // Runs notifications in background without blocking the send call.
+  static void _sendMessageNotificationsAsync(
+      String chatRoomId, String senderId, String message) {
+    (() async {
+      try {
+        final chatRoom = await supabase
+            .from('chat_rooms')
+            .select('ticket_id, tickets(ticket_number)')
+            .eq('id', chatRoomId)
+            .single();
+        final ticketId = chatRoom['ticket_id'] as String?;
+        final ticketInfo = chatRoom['tickets'] as Map<String, dynamic>?;
+        final ticketNumber = ticketInfo?['ticket_number'] as String?;
+        if (ticketId != null) {
+          await NotificationService.notifyChatMessage(
+            chatRoomId: chatRoomId,
+            senderId: senderId,
+            messageContent: message,
+            ticketId: ticketId,
+            ticketNumber: ticketNumber,
+          );
+        }
+      } catch (e) {
+        print('⚠️ Background notification error: $e');
+      }
+    })();
   }
 
   static Future<void> _sendChatNotifications(
@@ -1954,13 +1962,8 @@ class NotificationService {
 
   // Initialize the notification service
   static Future<void> initialize() async {
-    try {
-      await FCMAuthService.loadServiceAccount();
-      _setupEmailBatchProcessor();
-      print('✅ NotificationService initialized successfully');
-    } catch (e) {
-      print('❌ Error initializing NotificationService: $e');
-    }
+    _setupEmailBatchProcessor();
+    print('✅ NotificationService initialized');
   }
 
   /// Get auto-approval time setting in minutes (with enhanced debugging)
@@ -2355,9 +2358,10 @@ class NotificationService {
       print('✓ Email enabled: $emailEnabled');
 
       // Step 3: Build notification content
+      final isAr = userInfo.language == 'ar';
       final title = ticketNumber != null
-          ? 'New message in #$ticketNumber'
-          : 'New message from $senderName';
+          ? (isAr ? 'رسالة جديدة في #$ticketNumber' : 'New message in #$ticketNumber')
+          : (isAr ? 'رسالة جديدة من $senderName' : 'New message from $senderName');
 
       final truncatedMessage = messageContent.length > 100
           ? '${messageContent.substring(0, 100)}...'
@@ -2583,12 +2587,17 @@ class NotificationService {
           );
 
           // Send in-app and push notification
+          final ticketCreatedNotif = _getLocalizedTicketCreatedNotification(
+            ticketNumber: ticketNumber,
+            creatorName: creator.fullName,
+            ticketTitle: ticketTitle,
+            lang: adminInfo.language,
+          );
           notificationTasks.add(createAndSendNotification(
             userId: adminInfo.id,
             type: 'ticket_created',
-            title: '🎫 New Ticket Created',
-            message:
-                'New ticket #$ticketNumber created by ${creator.fullName}: $ticketTitle',
+            title: ticketCreatedNotif['title']!,
+            message: ticketCreatedNotif['message']!,
             ticketId: ticketId,
             additionalData: {
               'ticket_number': ticketNumber,
@@ -2809,12 +2818,17 @@ class NotificationService {
     required String ticketNumber,
     required String ticketTitle,
   }) async {
+    final notif = _getLocalizedTicketCreatedNotification(
+      ticketNumber: ticketNumber,
+      creatorName: creator.fullName,
+      ticketTitle: ticketTitle,
+      lang: adminInfo.language,
+    );
     await createAndSendNotification(
       userId: adminInfo.id,
       type: 'ticket_created',
-      title: '🎫 New Ticket Created',
-      message:
-          'New ticket #$ticketNumber created by ${creator.fullName}: $ticketTitle',
+      title: notif['title']!,
+      message: notif['message']!,
       ticketId: ticketId,
       additionalData: {
         'ticket_number': ticketNumber,
@@ -2882,12 +2896,19 @@ class NotificationService {
     final shortMessage =
         message.length > 100 ? '${message.substring(0, 100)}...' : message;
 
+    final chatNotif = _getLocalizedChatNotification(
+      senderName: sender.fullName,
+      ticketNumber: ticketNumber,
+      shortMessage: shortMessage,
+      lang: participant.language,
+    );
+
     // Skip database insert for chat messages
     await createAndSendNotification(
       userId: participant.id,
       type: 'new_message',
-      title: '💬 ${sender.fullName} - Ticket #$ticketNumber',
-      message: shortMessage,
+      title: chatNotif['title']!,
+      message: chatNotif['message']!,
       ticketId: ticketId,
       chatRoomId: chatRoomId,
       senderId: sender.id,
@@ -2947,12 +2968,16 @@ class NotificationService {
       final tasks = <Future>[];
 
       // Notify assigned admin with detailed ticket info
+      final assignedAdminNotif = _getLocalizedTicketAssignedToAdminNotification(
+        ticketNumber: ticketNumber,
+        assignerName: assigner.fullName,
+        lang: assignedUser.language,
+      );
       tasks.add(createAndSendNotification(
         userId: assignedToUserId,
         type: 'ticket_assigned',
-        title: '🎯 Ticket Assigned to You',
-        message:
-            'Ticket #$ticketNumber has been assigned to you by ${assigner.fullName}',
+        title: assignedAdminNotif['title']!,
+        message: assignedAdminNotif['message']!,
         ticketId: ticketId,
         additionalData: {
           'ticket_number': ticketNumber,
@@ -4121,12 +4146,18 @@ class NotificationService {
         return;
       }
 
+      final subticketNotif = _getLocalizedSubticketCreatedNotification(
+        subticketNumber: subticketNumber,
+        parentTicketNumber: parentTicketNumber,
+        creatorName: creator.fullName,
+        subticketTitle: subticketTitle,
+        lang: targetAdmin.language,
+      );
       await createAndSendNotification(
         userId: targetAdminId,
         type: 'subticket_created',
-        title: '📋 New Subticket Created',
-        message:
-            'Subticket #$subticketNumber created for parent ticket #$parentTicketNumber\n\nCreated by: ${creator.fullName}\nTitle: $subticketTitle',
+        title: subticketNotif['title']!,
+        message: subticketNotif['message']!,
         ticketId: subticketId,
         additionalData: {
           'subticket_number': subticketNumber,
@@ -4244,15 +4275,14 @@ class NotificationService {
     }
 
     try {
-      final success = await _sendDirectFCM(
+      final success = await _sendViaEdgeFunction(
         token: token,
         title: title,
         body: body,
         data: data,
       );
-
-      if (!success) {
-        print('🔄 Direct FCM failed, trying Cloud Function fallback...');
+      // Fall back to Firebase Cloud Function on mobile if edge function fails
+      if (!success && !kIsWeb) {
         await _sendViaCloudFunction(
           token: token,
           title: title,
@@ -4265,80 +4295,7 @@ class NotificationService {
     }
   }
 
-  // Enhanced direct FCM sending
-  static Future<bool> _sendDirectFCM({
-    required String token,
-    required String title,
-    required String body,
-    required Map<String, String> data,
-  }) async {
-    try {
-      final accessToken = await FCMAuthService.getAccessToken();
-      if (accessToken == null) {
-        return false;
-      }
-
-      final url =
-          'https://fcm.googleapis.com/v1/projects/jalaticketing/messages:send';
-
-      final requestBody = {
-        'message': {
-          'token': token,
-          'notification': {
-            'title': title,
-            'body': body,
-          },
-          'data': data,
-          'android': {
-            'priority': 'high',
-            'notification': {
-              'click_action': 'FLUTTER_NOTIFICATION_CLICK',
-              'sound': 'default',
-              'channel_id': 'high_importance_channel',
-            },
-          },
-          'apns': {
-            'headers': {
-              'apns-priority': '10',
-            },
-            'payload': {
-              'aps': {
-                'sound': 'default',
-                'badge': 1,
-                'alert': {
-                  'title': title,
-                  'body': body,
-                },
-              },
-            },
-          },
-        },
-      };
-
-      final response = await http.post(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $accessToken',
-        },
-        body: json.encode(requestBody),
-      );
-
-      if (response.statusCode == 200) {
-        print('✅ Direct FCM notification sent successfully');
-        return true;
-      } else {
-        print(
-            '❌ Direct FCM failed with status ${response.statusCode}: ${response.body}');
-        return false;
-      }
-    } catch (e) {
-      print('❌ Exception in _sendDirectFCM: $e');
-      return false;
-    }
-  }
-
-  // Enhanced cloud function fallback
+  // Legacy Firebase Cloud Function fallback (mobile only — has CORS on web)
   static Future<void> _sendViaCloudFunction({
     required String token,
     required String title,
@@ -4346,30 +4303,67 @@ class NotificationService {
     required Map<String, String> data,
   }) async {
     try {
-      final cloudFunctionUrl =
-          'https://us-central1-jalaticketing.cloudfunctions.net/sendNotificationHTTP';
-
-      final requestBody = {
-        'token': token,
-        'title': title,
-        'body': body,
-        'data': data,
-      };
-
       final response = await http.post(
-        Uri.parse(cloudFunctionUrl),
+        Uri.parse(
+            'https://us-central1-jalaticketing.cloudfunctions.net/sendNotificationHTTP'),
         headers: {'Content-Type': 'application/json'},
-        body: json.encode(requestBody),
+        body: json.encode({'token': token, 'title': title, 'body': body, 'data': data}),
       );
-
       if (response.statusCode == 200) {
-        print('✅ Cloud Function notification sent successfully');
+        print('✅ Push sent via Cloud Function fallback');
       } else {
-        print(
-            '❌ Cloud Function failed with status ${response.statusCode}: ${response.body}');
+        print('❌ Cloud Function fallback failed: ${response.statusCode}');
       }
     } catch (e) {
-      print('❌ Exception in _sendViaCloudFunction: $e');
+      print('❌ Cloud Function fallback error: $e');
+    }
+  }
+
+  static Future<void> sendTestPush({
+    required String token,
+    required String userId,
+  }) async {
+    await _sendViaEdgeFunction(
+      token: token,
+      title: '🔔 Test Notification',
+      body: 'This is a test notification sent from the profile screen.',
+      data: {
+        'type': 'test',
+        'user_id': userId,
+        'click_action': 'FLUTTER_NOTIFICATION_CLICK',
+      },
+    );
+  }
+
+  // Send FCM push via Supabase Edge Function (works on all platforms).
+  // JWT signing happens server-side in Deno — no pointycastle issues on web.
+  static Future<bool> _sendViaEdgeFunction({
+    required String token,
+    required String title,
+    required String body,
+    required Map<String, String> data,
+  }) async {
+    try {
+      final response = await supabase.functions.invoke(
+        'send-push-notification',
+        body: {
+          'token': token,
+          'title': title,
+          'body': body,
+          'data': data,
+        },
+      );
+
+      if (response.status == 200) {
+        print('✅ Push notification sent via edge function');
+        return true;
+      } else {
+        print('❌ Edge function returned ${response.status}: ${response.data}');
+        return false;
+      }
+    } catch (e) {
+      print('❌ Edge function error: $e');
+      return false;
     }
   }
 
@@ -4518,6 +4512,70 @@ class NotificationService {
             : 'Your ticket #$ticketNumber requires additional work, as reviewed by $approverName$reasonSuffix',
       };
     }
+  }
+
+  // Localized notification for new chat message
+  static Map<String, String> _getLocalizedChatNotification({
+    required String senderName,
+    required String ticketNumber,
+    required String shortMessage,
+    required String lang,
+  }) {
+    final isAr = lang == 'ar';
+    return {
+      'title': isAr
+          ? '💬 $senderName - تذكرة #$ticketNumber'
+          : '💬 $senderName - Ticket #$ticketNumber',
+      'message': shortMessage,
+    };
+  }
+
+  // Localized notification for new ticket created (admin/recipient perspective)
+  static Map<String, String> _getLocalizedTicketCreatedNotification({
+    required String ticketNumber,
+    required String creatorName,
+    required String ticketTitle,
+    required String lang,
+  }) {
+    final isAr = lang == 'ar';
+    return {
+      'title': isAr ? '🎫 تذكرة جديدة' : '🎫 New Ticket Created',
+      'message': isAr
+          ? 'تذكرة جديدة رقم #$ticketNumber أنشأها $creatorName: $ticketTitle'
+          : 'New ticket #$ticketNumber created by $creatorName: $ticketTitle',
+    };
+  }
+
+  // Localized notification for ticket assigned (assigned admin's perspective)
+  static Map<String, String> _getLocalizedTicketAssignedToAdminNotification({
+    required String ticketNumber,
+    required String assignerName,
+    required String lang,
+  }) {
+    final isAr = lang == 'ar';
+    return {
+      'title': isAr ? '🎯 تم تعيين تذكرة لك' : '🎯 Ticket Assigned to You',
+      'message': isAr
+          ? 'تم تعيين التذكرة رقم #$ticketNumber إليك بواسطة $assignerName'
+          : 'Ticket #$ticketNumber has been assigned to you by $assignerName',
+    };
+  }
+
+  // Localized notification for subticket created
+  static Map<String, String> _getLocalizedSubticketCreatedNotification({
+    required String subticketNumber,
+    required String parentTicketNumber,
+    required String creatorName,
+    required String subticketTitle,
+    required String lang,
+  }) {
+    final isAr = lang == 'ar';
+    return {
+      'title': isAr ? '📋 تذكرة فرعية جديدة' : '📋 New Subticket Created',
+      'message': isAr
+          ? 'تذكرة فرعية رقم #$subticketNumber أنشئت للتذكرة #$parentTicketNumber\n\nأنشأها: $creatorName\nالعنوان: $subticketTitle'
+          : 'Subticket #$subticketNumber created for parent ticket #$parentTicketNumber\n\nCreated by: $creatorName\nTitle: $subticketTitle',
+    };
   }
 
   // Utility methods (keeping existing interface)

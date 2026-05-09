@@ -599,7 +599,8 @@ class ChatMessageModel {
   final List<String>? mentionedUsers;
   final DateTime createdAt;
   final String? senderName;
-  final String? senderProfileImage; // Add this field
+  final String? senderProfileImage;
+  final bool isPending;
 
   ChatMessageModel({
     required this.id,
@@ -609,7 +610,8 @@ class ChatMessageModel {
     this.mentionedUsers,
     required this.createdAt,
     this.senderName,
-    this.senderProfileImage, // Add this parameter
+    this.senderProfileImage,
+    this.isPending = false,
   });
 
   factory ChatMessageModel.fromJson(Map<String, dynamic> json) {

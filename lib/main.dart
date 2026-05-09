@@ -31,6 +31,7 @@ import 'package:uuid/uuid.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:jalasupport/main_mobile.dart' show myAppMobileKey;
+import 'package:jalasupport/sound_service.dart';
 
 import 'dart:ui' as ui;
 
@@ -76,6 +77,9 @@ void main() async {
       logLevel: RealtimeLogLevel.info,
     ),
   );
+
+  // Pre-generate tones so first play is instant.
+  SoundService.init();
 
   // Platform-specific initialization
   if (kIsWeb) {
@@ -1077,9 +1081,14 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               ..sort((a, b) =>
                 (b['created_at'] as String? ?? '')
                     .compareTo(a['created_at'] as String? ?? ''));
+            final newUnread = sorted.where((n) => !n['is_read']).length;
+            // Play a gentle bell when a new unread notification arrives.
+            if (newUnread > _unreadCount) {
+              SoundService.playNotification();
+            }
             setState(() {
               _notifications = sorted;
-              _unreadCount = sorted.where((n) => !n['is_read']).length;
+              _unreadCount = newUnread;
             });
           }
         });
