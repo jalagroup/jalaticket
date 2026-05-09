@@ -629,23 +629,32 @@ class _ChatWidgetState extends State<ChatWidget>
                   curve: Curves.easeOut,
                 ),
                 child: Container(
-                  width: 40,
-                  height: 40,
+                  width: 44,
+                  height: 44,
                   decoration: BoxDecoration(
                     color: Colors.white,
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.15),
-                        blurRadius: 8,
+                        color: AppColors.primary.withOpacity(0.25),
+                        blurRadius: 10,
                         offset: const Offset(0, 3),
                       ),
                     ],
                   ),
-                  child: const Icon(
-                    Icons.keyboard_arrow_down_rounded,
-                    color: Color(0xFF1C1C1E),
-                    size: 22,
+                  child: Padding(
+                    padding: const EdgeInsets.all(3),
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        color: AppColors.primary,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        color: Colors.white,
+                        size: 22,
+                      ),
+                    ),
                   ),
                 ),
               ),
