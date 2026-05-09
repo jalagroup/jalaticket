@@ -599,67 +599,68 @@ class _ChatWidgetState extends State<ChatWidget>
               ],
             ),
           ),
-        // Messages list
+        // Messages list with floating scroll button overlaid
         Expanded(
-          child: Container(
-            color: Colors.white,
-            child: _isLoading
-                ? Center(
-                    child: CircularProgressIndicator(
-                      valueColor:
-                          AlwaysStoppedAnimation<Color>(AppColors.primary),
+          child: Stack(
+            children: [
+              Container(
+                color: Colors.white,
+                child: _isLoading
+                    ? Center(
+                        child: CircularProgressIndicator(
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(AppColors.primary),
+                        ),
+                      )
+                    : _messages.isEmpty
+                        ? _buildEmptyState(l10n)
+                        : _buildMessagesList(l10n),
+              ),
+              // Truly floating scroll-to-bottom button
+              if (!_isAtBottom && _messages.isNotEmpty)
+                Positioned(
+                  right: 14,
+                  bottom: 12,
+                  child: GestureDetector(
+                    onTap: () => _scrollController.animateTo(
+                      0,
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeOut,
                     ),
-                  )
-                : _messages.isEmpty
-                    ? _buildEmptyState(l10n)
-                    : _buildMessagesList(l10n),
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.primary.withOpacity(0.3),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(3),
+                        child: Container(
+                          decoration: const BoxDecoration(
+                            color: AppColors.primary,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.keyboard_arrow_down_rounded,
+                            color: Colors.white,
+                            size: 22,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
-
-        // Scroll to bottom button
-        if (!_isAtBottom && _messages.isNotEmpty)
-          Align(
-            alignment: Alignment.centerRight,
-            child: Padding(
-              padding: const EdgeInsets.only(right: 14, bottom: 6),
-              child: GestureDetector(
-                onTap: () => _scrollController.animateTo(
-                  0,
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeOut,
-                ),
-                child: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primary.withOpacity(0.25),
-                        blurRadius: 10,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(3),
-                    child: Container(
-                      decoration: const BoxDecoration(
-                        color: AppColors.primary,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.keyboard_arrow_down_rounded,
-                        color: Colors.white,
-                        size: 22,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
 
         // Message input
         _buildMessageInput(l10n),
