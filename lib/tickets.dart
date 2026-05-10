@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:jalasupport/FCMService.dart';
-import 'package:jalasupport/chat.dart';
+import 'package:jalasupport/chat.dart' hide AppColors;
 import 'package:jalasupport/create_complaint_dialog.dart';
 import 'package:jalasupport/l10n/app_localizations.dart';
 import 'package:jalasupport/tickets_modules/allDialogs.dart';
