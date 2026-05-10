@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:jalasupport/FCMService.dart';
-import 'package:jalasupport/chat.dart' hide AppColors;
+import 'package:jalasupport/chat.dart';
 import 'package:jalasupport/create_complaint_dialog.dart';
 import 'package:jalasupport/l10n/app_localizations.dart';
 import 'package:jalasupport/tickets_modules/allDialogs.dart';
@@ -8898,13 +8898,15 @@ class _CreatorApprovalDialogState extends State<CreatorApprovalDialog> {
     if (widget.fullScreen) {
       return Scaffold(
         appBar: AppBar(
-          title: Text(l10n.reviewCompletedWork),
+          title: Text(l10n.reviewCompletedWork,
+              style: const TextStyle(color: Colors.white)),
           leading: IconButton(
             icon: const Icon(Icons.close),
             onPressed: () => Navigator.pop(context),
           ),
           backgroundColor: AppColors.primary,
           foregroundColor: Colors.white,
+          iconTheme: const IconThemeData(color: Colors.white),
         ),
         body: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
