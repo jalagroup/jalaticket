@@ -1,16 +1,12 @@
 /**
  * auto-process-tickets — Supabase Edge Function
  *
- * Runs on a schedule (via pg_cron + pg_net) and handles two jobs:
- *   1. Auto-approve: closes prefinished tickets whose countdown has expired.
- *   2. Auto-approve supervised: closes prefinished+under_supervision tickets
- *      that have also exceeded their timeout (uses the same setting or a
- *      separate `auto_approval_minutes_supervised` key, falling back to the
- *      regular value).
+ * Scheduled via pg_cron every hour. Calls the existing
+ * auto_approve_expired_tickets() Postgres RPC which handles:
+ *   - Standard prefinished tickets (no creator action within timeout)
+ *   - Under-supervision prefinished tickets (same timeout, no action)
  *
- * After each batch it fires push notifications to ticket creators using FCM.
- *
- * Can also be called manually (POST with optional secret header for testing).
+ * After the batch it fires FCM push notifications to ticket creators.
  */
 
 import "@supabase/functions-js/edge-runtime.d.ts";
@@ -34,66 +30,63 @@ async function getFcmAccessToken(
     scopes: ["https://www.googleapis.com/auth/firebase.messaging"],
   });
   const client = await auth.getClient();
-  const tokenResponse = await client.getAccessToken();
-  if (!tokenResponse.token) throw new Error("Failed to obtain FCM access token");
-  return tokenResponse.token;
+  const token = await client.getAccessToken();
+  if (!token.token) throw new Error("Failed to obtain FCM access token");
+  return token.token;
 }
 
-async function sendPushNotification(
+async function sendPush(
   fcmToken: string,
   title: string,
   body: string,
   data: Record<string, string>,
-  credentials: Record<string, string>,
+  projectId: string,
   accessToken: string,
 ): Promise<void> {
-  const message = {
-    token: fcmToken,
-    notification: { title, body },
-    data,
-    android: {
-      priority: "high",
-      notification: {
-        sound: "default",
-        channel_id: "high_importance_channel",
-        click_action: "FLUTTER_NOTIFICATION_CLICK",
-      },
-    },
-    apns: {
-      headers: { "apns-priority": "10" },
-      payload: {
-        aps: {
-          alert: { title, body },
-          sound: "default",
-          badge: 1,
-          "content-available": 1,
-        },
-      },
-    },
-  };
-
   const res = await fetch(
-    `https://fcm.googleapis.com/v1/projects/${credentials.project_id}/messages:send`,
+    `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
     {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({
+        message: {
+          token: fcmToken,
+          notification: { title, body },
+          data,
+          android: {
+            priority: "high",
+            notification: {
+              sound: "default",
+              channel_id: "high_importance_channel",
+              click_action: "FLUTTER_NOTIFICATION_CLICK",
+            },
+          },
+          apns: {
+            headers: { "apns-priority": "10" },
+            payload: {
+              aps: {
+                alert: { title, body },
+                sound: "default",
+                badge: 1,
+                "content-available": 1,
+              },
+            },
+          },
+        },
+      }),
     },
   );
-
   if (!res.ok) {
-    const err = await res.text();
-    console.error(`FCM error (${res.status}) for token ${fcmToken}: ${err}`);
+    console.error(`FCM error (${res.status}):`, await res.text());
   }
 }
 
 // ─── main ───────────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
-  // Allow both GET (pg_net cron call) and POST (manual test)
   if (req.method !== "GET" && req.method !== "POST") {
     return json({ error: "Method not allowed" }, 405);
   }
@@ -109,112 +102,110 @@ Deno.serve(async (req) => {
       auth: { persistSession: false },
     });
 
-    // ── FCM setup ────────────────────────────────────────────────────────────
-    const serviceAccountJson = Deno.env.get("FCM_SERVICE_ACCOUNT");
-    let fcmCredentials: Record<string, string> | null = null;
-    let fcmAccessToken: string | null = null;
+    // ── 1. Run the existing batch auto-approval RPC ──────────────────────────
+    // This single RPC handles both regular prefinished and supervised tickets.
+    // It reads the timeout from system_settings.auto_approval_minutes.
+    console.log("▶ Calling auto_approve_expired_tickets …");
 
-    if (serviceAccountJson) {
-      try {
-        const parsed = JSON.parse(serviceAccountJson);
-        fcmCredentials =
-          typeof parsed === "string" ? JSON.parse(parsed) : parsed;
-        fcmAccessToken = await getFcmAccessToken(fcmCredentials!);
-      } catch (e) {
-        console.error("FCM credentials error — notifications will be skipped:", e);
-      }
-    }
-
-    // ── 1. Auto-approve standard prefinished tickets ─────────────────────────
-    console.log("▶ Running auto_approve_expired_tickets …");
-    const { data: batchResult, error: batchErr } = await supabase.rpc(
+    const { data: result, error: rpcErr } = await supabase.rpc(
       "auto_approve_expired_tickets",
     );
-    if (batchErr) {
-      console.error("auto_approve_expired_tickets error:", batchErr);
+
+    if (rpcErr) {
+      console.error("RPC error:", rpcErr);
+      return json({ error: rpcErr.message }, 500);
     }
 
-    const approvedCount: number = batchResult?.approved_count ?? 0;
-    const approvedTicketIds: string[] = batchResult?.ticket_ids ?? [];
-    const approvedTicketNumbers: string[] = batchResult?.ticket_numbers ?? [];
+    // RPC returns: { approved_count: number, ticket_numbers: string[] }
+    const approvedCount: number = result?.approved_count ?? 0;
+    // ticket_numbers may come back as a JSON array string or a real array
+    let ticketNumbers: string[] = [];
+    if (Array.isArray(result?.ticket_numbers)) {
+      ticketNumbers = result.ticket_numbers;
+    } else if (typeof result?.ticket_numbers === "string") {
+      try { ticketNumbers = JSON.parse(result.ticket_numbers); } catch (_) {}
+    }
 
-    console.log(`✅ Auto-approved ${approvedCount} ticket(s): ${approvedTicketNumbers.join(", ")}`);
+    console.log(`✅ Auto-approved ${approvedCount} ticket(s): ${ticketNumbers.join(", ")}`);
 
-    // ── 2. Auto-approve supervised prefinished tickets ───────────────────────
-    console.log("▶ Running auto_approve_supervised_tickets …");
-    const { data: supResult, error: supErr } = await supabase.rpc(
-      "auto_approve_supervised_tickets",
+    if (approvedCount === 0) {
+      return json({ success: true, approved_count: 0, ticket_numbers: [] });
+    }
+
+    // ── 2. Send push notifications to ticket creators ────────────────────────
+    const serviceAccountJson = Deno.env.get("FCM_SERVICE_ACCOUNT");
+    if (!serviceAccountJson) {
+      console.warn("FCM_SERVICE_ACCOUNT not set — skipping notifications");
+      return json({ success: true, approved_count: approvedCount, ticket_numbers: ticketNumbers });
+    }
+
+    let credentials: Record<string, string>;
+    try {
+      const parsed = JSON.parse(serviceAccountJson);
+      credentials = typeof parsed === "string" ? JSON.parse(parsed) : parsed;
+    } catch (e) {
+      console.error("Invalid FCM_SERVICE_ACCOUNT JSON:", e);
+      return json({ success: true, approved_count: approvedCount, ticket_numbers: ticketNumbers });
+    }
+
+    const accessToken = await getFcmAccessToken(credentials);
+
+    // Fetch ticket rows by ticket_number to get creator IDs
+    const { data: tickets, error: ticketErr } = await supabase
+      .from("tickets")
+      .select("id, ticket_number, created_by, under_supervision")
+      .in("ticket_number", ticketNumbers);
+
+    if (ticketErr || !tickets?.length) {
+      console.error("Error fetching tickets:", ticketErr);
+      return json({ success: true, approved_count: approvedCount, ticket_numbers: ticketNumbers });
+    }
+
+    // Fetch FCM tokens for all creators
+    const creatorIds = [...new Set(tickets.map((t: { created_by: string }) => t.created_by))];
+    const { data: users } = await supabase
+      .from("users")
+      .select("id, fcm_token, preferred_language")
+      .in("id", creatorIds);
+
+    const userMap = new Map(
+      (users ?? []).map((u: { id: string; fcm_token?: string; preferred_language?: string }) => [u.id, u]),
     );
-    if (supErr) {
-      // If the RPC doesn't exist yet, log and skip gracefully
-      console.warn("auto_approve_supervised_tickets not available:", supErr.message);
+
+    for (const ticket of tickets) {
+      const user = userMap.get(ticket.created_by) as
+        | { fcm_token?: string; preferred_language?: string }
+        | undefined;
+      if (!user?.fcm_token) continue;
+
+      const isAr = user.preferred_language === "ar";
+      const wasSupervised = ticket.under_supervision;
+
+      const title = isAr ? "تمت الموافقة التلقائية" : "Ticket Auto-Approved";
+      const body = isAr
+        ? `تمت الموافقة التلقائية على تذكرتك رقم ${ticket.ticket_number}${wasSupervised ? " (تحت الإشراف)" : ""}`
+        : `Ticket #${ticket.ticket_number} was automatically approved${wasSupervised ? " (under supervision)" : ""}`;
+
+      await sendPush(
+        user.fcm_token,
+        title,
+        body,
+        {
+          type: "ticket_auto_approved",
+          ticket_id: ticket.id,
+          ticket_number: String(ticket.ticket_number),
+          is_auto_approval: "true",
+          was_supervised: String(wasSupervised ?? false),
+        },
+        credentials.project_id,
+        accessToken,
+      );
     }
 
-    const supApprovedCount: number = supResult?.approved_count ?? 0;
-    const supApprovedTicketIds: string[] = supResult?.ticket_ids ?? [];
-    const supApprovedTicketNumbers: string[] = supResult?.ticket_numbers ?? [];
-
-    console.log(`✅ Auto-approved ${supApprovedCount} supervised ticket(s): ${supApprovedTicketNumbers.join(", ")}`);
-
-    // ── 3. Send push notifications for all auto-approved tickets ─────────────
-    const allApprovedIds = [...approvedTicketIds, ...supApprovedTicketIds];
-
-    if (allApprovedIds.length > 0 && fcmCredentials && fcmAccessToken) {
-      // Fetch creator FCM tokens for all approved tickets
-      const { data: ticketRows, error: fetchErr } = await supabase
-        .from("tickets")
-        .select("id, ticket_number, created_by")
-        .in("id", allApprovedIds);
-
-      if (fetchErr) {
-        console.error("Error fetching ticket rows:", fetchErr);
-      } else if (ticketRows) {
-        const creatorIds = [...new Set(ticketRows.map((t: { created_by: string }) => t.created_by))];
-
-        // Fetch FCM tokens for creators
-        const { data: users } = await supabase
-          .from("users")
-          .select("id, fcm_token, preferred_language")
-          .in("id", creatorIds);
-
-        const userMap = new Map(
-          (users ?? []).map((u: { id: string; fcm_token: string; preferred_language: string }) => [u.id, u]),
-        );
-
-        for (const ticket of ticketRows) {
-          const user = userMap.get(ticket.created_by) as { fcm_token?: string; preferred_language?: string } | undefined;
-          if (!user?.fcm_token) continue;
-
-          const isAr = user.preferred_language === "ar";
-          const title = isAr ? "تمت الموافقة التلقائية" : "Auto-Approved";
-          const body = isAr
-            ? `تمت الموافقة على تذكرتك رقم ${ticket.ticket_number} تلقائياً`
-            : `Ticket #${ticket.ticket_number} was automatically approved`;
-
-          await sendPushNotification(
-            user.fcm_token,
-            title,
-            body,
-            {
-              type: "ticket_auto_approved",
-              ticket_id: ticket.id,
-              ticket_number: String(ticket.ticket_number),
-              is_auto_approval: "true",
-            },
-            fcmCredentials,
-            fcmAccessToken,
-          );
-        }
-      }
-    }
-
-    const totalApproved = approvedCount + supApprovedCount;
     return json({
       success: true,
-      standard_approved: approvedCount,
-      supervised_approved: supApprovedCount,
-      total_approved: totalApproved,
-      ticket_numbers: [...approvedTicketNumbers, ...supApprovedTicketNumbers],
+      approved_count: approvedCount,
+      ticket_numbers: ticketNumbers,
     });
   } catch (e) {
     console.error("auto-process-tickets fatal error:", e);
