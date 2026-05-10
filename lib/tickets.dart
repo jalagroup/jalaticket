@@ -5264,41 +5264,48 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
         if (_canCreatorApprove())
           Padding(
             padding: EdgeInsets.symmetric(horizontal: buttonPadding),
-            child: Tooltip(
-              message: l10n.approveAndClose,
-              child: IconButton(
-                icon: Icon(Icons.check_circle, size: iconSize),
-                onPressed: () => _showCreatorApprovalDialog(true),
-                padding: EdgeInsets.all(buttonPadding),
-                constraints: BoxConstraints(
-                  minWidth: buttonSize,
-                  minHeight: buttonSize,
+            child: PopupMenuButton<String>(
+              padding: EdgeInsets.zero,
+              child: Container(
+                width: buttonSize,
+                height: buttonSize,
+                decoration: BoxDecoration(
+                  color: Colors.grey.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                style: IconButton.styleFrom(
-                  backgroundColor: Colors.green.withOpacity(0.1),
-                  foregroundColor: Colors.green,
-                ),
-              ),
-            ),
-          ),
-        if (_canCreatorApprove())
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: buttonPadding),
-            child: Tooltip(
-              message: l10n.requestChanges,
-              child: IconButton(
-                icon: Icon(Icons.edit, size: iconSize),
-                onPressed: () => _showCreatorApprovalDialog(false),
-                padding: EdgeInsets.all(buttonPadding),
-                constraints: BoxConstraints(
-                  minWidth: buttonSize,
-                  minHeight: buttonSize,
-                ),
-                style: IconButton.styleFrom(
-                  backgroundColor: Colors.orange.withOpacity(0.1),
-                  foregroundColor: Colors.orange,
+                child: Icon(
+                  Icons.more_vert,
+                  size: iconSize,
+                  color: Colors.grey[700],
                 ),
               ),
+              itemBuilder: (context) => [
+                PopupMenuItem<String>(
+                  value: 'approve',
+                  child: Row(
+                    children: [
+                      const Icon(Icons.check_circle,
+                          color: Colors.green, size: 20),
+                      const SizedBox(width: 10),
+                      Text(l10n.approveAndClose),
+                    ],
+                  ),
+                ),
+                PopupMenuItem<String>(
+                  value: 'reject',
+                  child: Row(
+                    children: [
+                      const Icon(Icons.edit,
+                          color: Colors.orange, size: 20),
+                      const SizedBox(width: 10),
+                      Text(l10n.requestChanges),
+                    ],
+                  ),
+                ),
+              ],
+              onSelected: (value) {
+                _showCreatorApprovalDialog(value == 'approve');
+              },
             ),
           ),
         if (_getOtherActions().isNotEmpty)
@@ -7862,15 +7869,32 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
 
   // NEW: Enhanced creator approval dialog with auto-close functionality
   void _showCreatorApprovalDialog(bool isApproval) {
-    showDialog(
-      context: context,
-      builder: (context) => CreatorApprovalDialog(
-        ticket: widget.ticket,
-        currentUser: widget.currentUser,
-        onApprovalSubmitted: widget.onRefresh,
-        initialApproval: isApproval,
-      ),
-    );
+    final isMobile = MediaQuery.of(context).size.width < 768;
+    if (isMobile) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (context) => CreatorApprovalDialog(
+            ticket: widget.ticket,
+            currentUser: widget.currentUser,
+            onApprovalSubmitted: widget.onRefresh,
+            initialApproval: isApproval,
+            fullScreen: true,
+          ),
+        ),
+      );
+    } else {
+      showDialog(
+        context: context,
+        builder: (context) => CreatorApprovalDialog(
+          ticket: widget.ticket,
+          currentUser: widget.currentUser,
+          onApprovalSubmitted: widget.onRefresh,
+          initialApproval: isApproval,
+        ),
+      );
+    }
   }
 
   void _showCreateCorrectedTicketDialog() {
@@ -8200,6 +8224,7 @@ class CreatorApprovalDialog extends StatefulWidget {
   final UserModel currentUser;
   final VoidCallback onApprovalSubmitted;
   final bool initialApproval;
+  final bool fullScreen;
 
   const CreatorApprovalDialog({
     super.key,
@@ -8207,6 +8232,7 @@ class CreatorApprovalDialog extends StatefulWidget {
     required this.currentUser,
     required this.onApprovalSubmitted,
     this.initialApproval = true,
+    this.fullScreen = false,
   });
 
   @override
@@ -8546,11 +8572,355 @@ class _CreatorApprovalDialogState extends State<CreatorApprovalDialog> {
     }
   }
 
+  Widget _buildContent(BuildContext context, AppLocalizations l10n, Color timerColor) {
+    final isMobile = MediaQuery.of(context).size.width < 768;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Ticket info
+        Text(
+          '${l10n.ticket}: ${widget.ticket.ticketNumber}',
+          style: TextStyle(
+            fontSize: isMobile ? 12 : 13,
+            color: Colors.grey[600],
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // Auto-close timer warning
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                timerColor.withOpacity(0.15),
+                timerColor.withOpacity(0.05),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: timerColor.withOpacity(0.4), width: 2),
+          ),
+          child: _isLoadingTime
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(8.0),
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          _remainingTime != null &&
+                                  _remainingTime! == Duration.zero
+                              ? Icons.warning
+                              : Icons.schedule,
+                          color: timerColor,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _remainingTime != null &&
+                                    _remainingTime! == Duration.zero
+                                ? l10n.timeExpired
+                                : l10n.autoApprovalCountdown,
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: timerColor,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l10n.timeRemaining,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[700],
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _formatRemainingTime(),
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: timerColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[100],
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.grey[300]!),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                l10n.totalTime,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.grey[700],
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                _formatTotalAutoApprovalTime(),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.grey[800],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_remainingTime != null &&
+                        _ticketFinishedAt != null) ...[
+                      const SizedBox(height: 10),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: _remainingTime! == Duration.zero
+                              ? 0.0
+                              : (_remainingTime!.inSeconds /
+                                      (_autoApprovalMinutes * 60))
+                                  .clamp(0.0, 1.0),
+                          backgroundColor: Colors.grey[300],
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(timerColor),
+                          minHeight: 8,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+        ),
+        const SizedBox(height: 12),
+
+        // Approval/Rejection Toggle
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.grey.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: Colors.grey.withOpacity(0.2)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${l10n.yourDecision}:',
+                style: const TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: RadioListTile<bool>(
+                      title: Text(l10n.approve,
+                          style: const TextStyle(fontSize: 13)),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      value: true,
+                      groupValue: _isApproved,
+                      onChanged: (value) =>
+                          setState(() => _isApproved = value!),
+                      activeColor: Colors.green,
+                    ),
+                  ),
+                  Expanded(
+                    child: RadioListTile<bool>(
+                      title: Text(l10n.requestChanges,
+                          style: const TextStyle(fontSize: 13)),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      value: false,
+                      groupValue: _isApproved,
+                      onChanged: (value) =>
+                          setState(() => _isApproved = value!),
+                      activeColor: Colors.orange,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // Input fields
+        if (_isApproved) ...[
+          Text(
+            '${l10n.approvalNotes}:',
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _notesController,
+            decoration: InputDecoration(
+              labelText: l10n.approvalNotesLabel,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              hintText: l10n.workMeetsExpectations,
+              contentPadding: const EdgeInsets.all(10),
+              isDense: true,
+            ),
+            maxLines: 4,
+          ),
+        ] else ...[
+          Text(
+            '${l10n.changesNeeded}:',
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _rejectionReasonController,
+            decoration: InputDecoration(
+              labelText: l10n.explainChanges,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              hintText: l10n.whatNeedsImprovement,
+              contentPadding: const EdgeInsets.all(10),
+              isDense: true,
+            ),
+            maxLines: 4,
+          ),
+        ],
+        const SizedBox(height: 12),
+
+        // Information box
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: _isApproved
+                ? Colors.green.withOpacity(0.1)
+                : Colors.orange.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: _isApproved
+                  ? Colors.green.withOpacity(0.3)
+                  : Colors.orange.withOpacity(0.3),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    _isApproved ? Icons.check_circle : Icons.edit,
+                    color:
+                        _isApproved ? Colors.green[700] : Colors.orange[700],
+                    size: 16,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _isApproved ? l10n.approval : l10n.requestChanges,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: _isApproved
+                          ? Colors.green[700]
+                          : Colors.orange[700],
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _isApproved
+                    ? '• ${l10n.ticketWillBeClosed}\n• ${l10n.noFurtherWork}'
+                    : '• ${l10n.returnsToInProgress}\n• ${l10n.adminSeesFeedback}',
+                style: const TextStyle(fontSize: 11),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _buildActions(BuildContext context, AppLocalizations l10n) {
+    return [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: Text(l10n.cancel),
+      ),
+      const SizedBox(width: 8),
+      ElevatedButton(
+        onPressed: _isLoading ? null : _submitApproval,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: _isApproved ? Colors.green : Colors.orange,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        ),
+        child: _isLoading
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 2,
+                ),
+              )
+            : Text(
+                _isApproved ? l10n.approve : l10n.requestChanges,
+                style: const TextStyle(fontSize: 13, color: Colors.white),
+              ),
+      ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.safeOf(context);
     final isMobile = MediaQuery.of(context).size.width < 768;
     final timerColor = _getTimerColor();
+
+    if (widget.fullScreen) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text(l10n.reviewCompletedWork),
+          leading: IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () => Navigator.pop(context),
+          ),
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+        ),
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: _buildContent(context, l10n, timerColor),
+        ),
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: _buildActions(context, l10n),
+            ),
+          ),
+        ),
+      );
+    }
 
     return OptimizedDialog(
       title: l10n.reviewCompletedWork,
@@ -8560,316 +8930,8 @@ class _CreatorApprovalDialogState extends State<CreatorApprovalDialog> {
           : MediaQuery.of(context).size.height * 0.7,
       contentPadding: const EdgeInsets.all(12),
       isScrollable: true,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Ticket info
-          Text(
-            '${l10n.ticket}: ${widget.ticket.ticketNumber}',
-            style: TextStyle(
-              fontSize: isMobile ? 12 : 13,
-              color: Colors.grey[600],
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          // Auto-close timer warning
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  timerColor.withOpacity(0.15),
-                  timerColor.withOpacity(0.05),
-                ],
-              ),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: timerColor.withOpacity(0.4), width: 2),
-            ),
-            child: _isLoadingTime
-                ? const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(8.0),
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            _remainingTime != null &&
-                                    _remainingTime! == Duration.zero
-                                ? Icons.warning
-                                : Icons.schedule,
-                            color: timerColor,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _remainingTime != null &&
-                                      _remainingTime! == Duration.zero
-                                  ? l10n.timeExpired
-                                  : l10n.autoApprovalCountdown,
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: timerColor,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                l10n.timeRemaining,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.grey[700],
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                _formatRemainingTime(),
-                                style: TextStyle(
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.bold,
-                                  color: timerColor,
-                                ),
-                              ),
-                            ],
-                          ),
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: Colors.grey[100],
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: Colors.grey[300]!),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Text(
-                                  l10n.totalTime,
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: Colors.grey[700],
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  _formatTotalAutoApprovalTime(),
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.grey[800],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (_remainingTime != null &&
-                          _ticketFinishedAt != null) ...[
-                        const SizedBox(height: 10),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(4),
-                          child: LinearProgressIndicator(
-                            value: _remainingTime! == Duration.zero
-                                ? 0.0
-                                : (_remainingTime!.inSeconds /
-                                        (_autoApprovalMinutes * 60))
-                                    .clamp(0.0, 1.0),
-                            backgroundColor: Colors.grey[300],
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(timerColor),
-                            minHeight: 8,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-          ),
-          const SizedBox(height: 12),
-
-          // Approval/Rejection Toggle
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: Colors.grey.withOpacity(0.05),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: Colors.grey.withOpacity(0.2)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${l10n.yourDecision}:',
-                  style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: RadioListTile<bool>(
-                        title: Text(l10n.approve,
-                            style: const TextStyle(fontSize: 13)),
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                        value: true,
-                        groupValue: _isApproved,
-                        onChanged: (value) =>
-                            setState(() => _isApproved = value!),
-                        activeColor: Colors.green,
-                      ),
-                    ),
-                    Expanded(
-                      child: RadioListTile<bool>(
-                        title: Text(l10n.requestChanges,
-                            style: const TextStyle(fontSize: 13)),
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                        value: false,
-                        groupValue: _isApproved,
-                        onChanged: (value) =>
-                            setState(() => _isApproved = value!),
-                        activeColor: Colors.orange,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          // Input fields
-          if (_isApproved) ...[
-            Text(
-              '${l10n.approvalNotes}:',
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _notesController,
-              decoration: InputDecoration(
-                labelText: l10n.approvalNotesLabel,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                hintText: l10n.workMeetsExpectations,
-                contentPadding: const EdgeInsets.all(10),
-                isDense: true,
-              ),
-              maxLines: 4,
-            ),
-          ] else ...[
-            Text(
-              '${l10n.changesNeeded}:',
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _rejectionReasonController,
-              decoration: InputDecoration(
-                labelText: l10n.explainChanges,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                hintText: l10n.whatNeedsImprovement,
-                contentPadding: const EdgeInsets.all(10),
-                isDense: true,
-              ),
-              maxLines: 4,
-            ),
-          ],
-          const SizedBox(height: 12),
-
-          // Information box
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: _isApproved
-                  ? Colors.green.withOpacity(0.1)
-                  : Colors.orange.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: _isApproved
-                    ? Colors.green.withOpacity(0.3)
-                    : Colors.orange.withOpacity(0.3),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      _isApproved ? Icons.check_circle : Icons.edit,
-                      color:
-                          _isApproved ? Colors.green[700] : Colors.orange[700],
-                      size: 16,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _isApproved ? l10n.approval : l10n.requestChanges,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: _isApproved
-                            ? Colors.green[700]
-                            : Colors.orange[700],
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  _isApproved
-                      ? '• ${l10n.ticketWillBeClosed}\n• ${l10n.noFurtherWork}'
-                      : '• ${l10n.returnsToInProgress}\n• ${l10n.adminSeesFeedback}',
-                  style: const TextStyle(fontSize: 11),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text(l10n.cancel),
-        ),
-        const SizedBox(width: 8),
-        ElevatedButton(
-          onPressed: _isLoading ? null : _submitApproval,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: _isApproved ? Colors.green : Colors.orange,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          ),
-          child: _isLoading
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    color: Colors.white,
-                    strokeWidth: 2,
-                  ),
-                )
-              : Text(
-                  _isApproved ? l10n.approve : l10n.requestChanges,
-                  style: const TextStyle(fontSize: 13, color: Colors.white),
-                ),
-        ),
-      ],
+      child: _buildContent(context, l10n, timerColor),
+      actions: _buildActions(context, l10n),
     );
   }
 }
