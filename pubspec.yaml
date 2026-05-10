@@ -67,8 +67,7 @@ flutter:
   assets:
     - assets/images/
     - assets/fonts/
-    - assets/service_access.json
-  
+
   fonts:
     - family: NotoSansArabic
       fonts:
