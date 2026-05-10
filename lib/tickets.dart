@@ -3702,8 +3702,8 @@ class _TicketsScreenState extends State<TicketsScreen>
             physics: const AlwaysScrollableScrollPhysics(),
             itemCount: tickets.length,
             padding: EdgeInsets.only(
-              left: isMobile || isTablet ? 16 : 24,
-              right: isMobile || isTablet ? 16 : 24,
+              left: isMobile || isTablet ? 8 : 12,
+              right: isMobile || isTablet ? 8 : 12,
               top: 8,
               bottom: bottomNavBarHeight + 8,
             ),
