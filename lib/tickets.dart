@@ -7168,10 +7168,13 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
 
       if (widget.ticket.status == TicketStatus.inprogress &&
           widget.ticket.assignedTo == widget.currentUser.id) {
+        final isCheckedIn = _checkInStatus != null;
         actions.add({
-          'label': l10n.markFinished,
-          'icon': Icons.check_circle,
-          'color': Colors.purple,
+          'label': isCheckedIn
+              ? '${l10n.markFinished} 🔒'
+              : l10n.markFinished,
+          'icon': isCheckedIn ? Icons.lock : Icons.check_circle,
+          'color': isCheckedIn ? Colors.grey : Colors.purple,
           'onPressed': () => _showFinishDialog()
         });
         actions.add({
@@ -7289,10 +7292,13 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
       }
 
       if (widget.ticket.status == TicketStatus.inprogress) {
+        final isCheckedIn = _checkInStatus != null;
         actions.add({
-          'label': l10n.markFinished,
-          'icon': Icons.check_circle,
-          'color': Colors.purple,
+          'label': isCheckedIn
+              ? '${l10n.markFinished} 🔒'
+              : l10n.markFinished,
+          'icon': isCheckedIn ? Icons.lock : Icons.check_circle,
+          'color': isCheckedIn ? Colors.grey : Colors.purple,
           'onPressed': () => _showFinishDialog()
         });
         actions.add({
@@ -7812,6 +7818,23 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
   }
 
   void _showFinishDialog() {
+    if (_checkInStatus != null) {
+      final l10n = AppLocalizations.safeOf(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.login, color: Colors.white, size: 18),
+              const SizedBox(width: 10),
+              Expanded(child: Text(l10n.mustCheckOutFirst)),
+            ],
+          ),
+          backgroundColor: Colors.red[700],
+          duration: const Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
     showDialog(
       context: context,
       builder: (context) => FinishTicketDialog(

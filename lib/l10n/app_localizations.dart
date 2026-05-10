@@ -264,6 +264,7 @@ class AppLocalizations {
   String get supervisionInfoAdmin => translate('supervision_info_admin');
   String get checkIn => translate('check_in');
   String get checkOut => translate('check_out');
+  String get mustCheckOutFirst => translate('must_check_out_first');
   String get addNote => translate('add_note');
   String get markFinished => translate('mark_finished');
   String get markUnderSupervision => translate('mark_under_supervision');
@@ -1378,6 +1379,7 @@ const Map<String, String> _enValues = {
       'This ticket is under supervision. Only the assigned admin can reject it before auto-approval.',
   'check_in': 'Check In',
   'check_out': 'Check Out',
+  'must_check_out_first': 'You must check out from your current visit before changing the ticket status.',
   'add_note': 'Add Note',
   'mark_finished': 'Mark Finished',
   'mark_under_supervision': 'Mark Under Supervision',
@@ -2416,6 +2418,7 @@ const Map<String, String> _arValues = {
       'هذه التذكرة تحت الإشراف. فقط المسؤول المكلف يمكنه رفضها قبل الموافقة التلقائية.',
   'check_in': 'تسجيل دخول',
   'check_out': 'تسجيل خروج',
+  'must_check_out_first': 'يجب تسجيل الخروج من زيارتك الحالية قبل تغيير حالة التذكرة.',
   'add_note': 'إضافة ملاحظة',
   'mark_finished': 'تحديد كمنتهي',
   'mark_under_supervision': 'تحديد تحت الإشراف',
