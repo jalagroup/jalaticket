@@ -1488,19 +1488,29 @@ class TicketService {
 /// The TicketsScreen registers a listener in initState and removes it in dispose.
 class TicketNavigationService {
   static String? _pendingTicketId;
+  static String? _pendingTargetStatus;
   static VoidCallback? _listener;
 
   /// Called by main.dart when a notification is tapped.
-  static void navigateTo(String ticketId) {
+  /// [targetStatus] is the TicketStatus.value to switch to (e.g. 'inprogress').
+  static void navigateTo(String ticketId, {String? targetStatus}) {
     _pendingTicketId = ticketId;
+    _pendingTargetStatus = targetStatus;
     _listener?.call();
   }
 
-  /// Called by _TicketsScreenState to consume and act on the pending ID.
+  /// Consumes the pending ticket ID.
   static String? consume() {
     final id = _pendingTicketId;
     _pendingTicketId = null;
     return id;
+  }
+
+  /// Consumes the pending target status (call after consume()).
+  static String? consumeTargetStatus() {
+    final s = _pendingTargetStatus;
+    _pendingTargetStatus = null;
+    return s;
   }
 
   static void setListener(VoidCallback cb) => _listener = cb;

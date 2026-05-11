@@ -928,7 +928,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     if (type == 'new_message' || type == 'chat_mention') {
       _navigateToChat(ticketId, chatRoomId);
     } else {
-      _navigateToTicket(ticketId);
+      _navigateToTicket(ticketId, type: type);
     }
   }
 
@@ -939,14 +939,34 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     } else {
       setState(() => _currentIndex = 2);
     }
-    // Highlight the associated ticket in the ticket list too.
-    TicketNavigationService.navigateTo(ticketId);
+    TicketNavigationService.navigateTo(ticketId, targetStatus: 'inprogress');
   }
 
-  void _navigateToTicket(String? ticketId) {
+  void _navigateToTicket(String? ticketId, {String? type}) {
     if (ticketId == null) return;
     setState(() => _currentIndex = 1);
-    TicketNavigationService.navigateTo(ticketId);
+    TicketNavigationService.navigateTo(
+      ticketId,
+      targetStatus: _targetStatusForType(type),
+    );
+  }
+
+  /// Maps a notification type to the TicketStatus.value the ticket will be in.
+  String? _targetStatusForType(String? type) {
+    switch (type) {
+      case 'ticket_assigned':
+      case 'ticket_rejected':
+        return 'inprogress';
+      case 'ticket_approved':
+      case 'ticket_auto_approved':
+        return 'closed';
+      case 'ticket_created':
+        return 'pending';
+      case 'ticket_prefinished':
+        return 'prefinished';
+      default:
+        return null;
+    }
   }
 
   void _showInAppNotification(message) {

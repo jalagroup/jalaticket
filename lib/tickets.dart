@@ -1446,16 +1446,17 @@ class _TicketsScreenState extends State<TicketsScreen>
 
   void _onNavigationRequested() {
     final ticketId = TicketNavigationService.consume();
+    final targetStatus = TicketNavigationService.consumeTargetStatus();
     if (ticketId == null || !mounted || _isDisposed) return;
     // Brief delay so the tab switcher has time to become visible.
     Future.delayed(const Duration(milliseconds: 350), () {
       if (!mounted || _isDisposed) return;
-      _jumpToTicket(ticketId);
+      _jumpToTicket(ticketId, targetStatus: targetStatus);
     });
   }
 
-  void _jumpToTicket(String ticketId) {
-    // Search every loaded tab for this ticket.
+  void _jumpToTicket(String ticketId, {String? targetStatus}) {
+    // 1. Search every already-loaded tab first.
     for (int i = 0; i < _statuses.length; i++) {
       final tickets = _ticketsByStatus[_statuses[i]] ?? [];
       if (tickets.any((t) => t.id == ticketId)) {
@@ -1466,8 +1467,37 @@ class _TicketsScreenState extends State<TicketsScreen>
         return;
       }
     }
-    // Ticket not yet in any loaded list — just highlight without tab switch.
-    _highlightTicket(ticketId);
+
+    // 2. Ticket not in any loaded list yet. Switch to the hinted tab and
+    //    refresh so the ticket appears, then highlight it.
+    if (targetStatus != null) {
+      final hintedStatus = TicketStatus.values.firstWhere(
+        (s) => s.value == targetStatus,
+        orElse: () => TicketStatus.inprogress,
+      );
+      final tabIndex = _statuses.indexOf(hintedStatus);
+      if (tabIndex >= 0) _tabController.animateTo(tabIndex);
+    }
+
+    // Refresh the (now-current) tab so the freshly-moved ticket loads,
+    // then highlight once data arrives.
+    _loadCurrentTabTickets();
+    Future.delayed(const Duration(milliseconds: 900), () {
+      if (!mounted || _isDisposed) return;
+      // Re-search now that data has refreshed.
+      for (int i = 0; i < _statuses.length; i++) {
+        final tickets = _ticketsByStatus[_statuses[i]] ?? [];
+        if (tickets.any((t) => t.id == ticketId)) {
+          _tabController.animateTo(i);
+          Future.delayed(const Duration(milliseconds: 200), () {
+            if (mounted && !_isDisposed) _highlightTicket(ticketId);
+          });
+          return;
+        }
+      }
+      // Still not found (rare edge case) — just highlight wherever we are.
+      _highlightTicket(ticketId);
+    });
   }
 
   @override
