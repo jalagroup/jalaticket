@@ -2,6 +2,9 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+// The channel ID must match what the edge function sends (channel_id field).
+const _kChannelId = 'high_importance_channel';
+
 class FirebaseApi {
   final _firebaseMessaging = FirebaseMessaging.instance;
   final _localNotifications = FlutterLocalNotificationsPlugin();
@@ -13,42 +16,19 @@ class FirebaseApi {
       sound: true,
     );
 
-    // Show notifications while app is in foreground on iOS
+    // iOS: show banner + sound even when app is in foreground.
     await _firebaseMessaging.setForegroundNotificationPresentationOptions(
       alert: true,
       badge: true,
       sound: true,
     );
 
-    final fCMToken = await _firebaseMessaging.getToken();
-    if (kDebugMode) print('📲 FCM Token: $fCMToken');
+    if (kDebugMode) {
+      final token = await _firebaseMessaging.getToken();
+      print('📲 FCM Token: $token');
+    }
 
     await initLocalNotifications();
-
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      if (kDebugMode) print('🔔 Foreground message: ${message.notification?.title}');
-      final notification = message.notification;
-      if (notification != null && !kIsWeb) {
-        // On iOS, setForegroundNotificationPresentationOptions handles display.
-        // Local notifications are used as a fallback for custom UI.
-        if (defaultTargetPlatform == TargetPlatform.android) {
-          _localNotifications.show(
-            notification.hashCode,
-            notification.title,
-            notification.body,
-            const NotificationDetails(
-              android: AndroidNotificationDetails(
-                'high_importance_channel',
-                'High Importance Notifications',
-                importance: Importance.max,
-                priority: Priority.high,
-                playSound: true,
-              ),
-            ),
-          );
-        }
-      }
-    });
   }
 
   Future<void> initLocalNotifications() async {
@@ -60,5 +40,22 @@ class FirebaseApi {
     );
     const settings = InitializationSettings(android: android, iOS: ios);
     await _localNotifications.initialize(settings);
+
+    // Register the high-importance Android channel so FCM background/killed
+    // notifications are displayed as heads-up alerts with sound and vibration.
+    await _localNotifications
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(
+          const AndroidNotificationChannel(
+            _kChannelId,
+            'High Importance Notifications',
+            description: 'Used for all Jala Support push notifications.',
+            importance: Importance.max,
+            playSound: true,
+            enableVibration: true,
+            showBadge: true,
+          ),
+        );
   }
 }

@@ -21,12 +21,14 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 final GlobalKey<_MyAppMobileState> myAppMobileKey =
     GlobalKey<_MyAppMobileState>();
 
-// Background message handler
+// Background message handler — must be minimal; runs in a separate isolate.
+// FCM automatically shows the system notification from the payload.
+// Navigation is handled by onMessageOpenedApp / getInitialMessage when the
+// user taps the notification and the app comes to the foreground.
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  print('📱 Background message: ${message.notification?.title}');
-  FCMService.handleNotificationTap(message);
+  if (kDebugMode) print('📱 Background message: ${message.notification?.title}');
 }
 
 class MyAppMobile extends StatefulWidget {

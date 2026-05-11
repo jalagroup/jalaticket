@@ -2,6 +2,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:jalasupport/FCMService.dart';
+import 'package:jalasupport/widgets/in_app_notification_banner.dart';
 import 'package:jalasupport/complaints_screen.dart';
 import 'package:jalasupport/dashboard_mobile.dart';
 import 'package:jalasupport/dashboard_web.dart';
@@ -951,35 +952,14 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void _showInAppNotification(message) {
     final title = message.notification?.title ?? 'New Notification';
     final body = message.notification?.body ?? '';
+    final type = message.data['type'] as String?;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.notifications, color: Colors.white),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(title,
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
-                  Text(body, style: const TextStyle(fontSize: 12)),
-                ],
-              ),
-            ),
-          ],
-        ),
-        action: SnackBarAction(
-          label: 'View',
-          textColor: Colors.white,
-          onPressed: () => _handleMessageTap(message),
-        ),
-        duration: const Duration(seconds: 4),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: AppColors.primary,
-      ),
+    InAppNotificationBanner.show(
+      context: context,
+      title: title,
+      body: body,
+      notificationType: type,
+      onTap: () => _handleMessageTap(message),
     );
   }
 
