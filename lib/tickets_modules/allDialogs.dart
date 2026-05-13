@@ -58,10 +58,28 @@ class _IndividualsMaintenanceTicketDialogState
   Future<void> _loadData() async {
     try {
       final departmentsResponse = await supabase.from('departments').select();
+      List<DepartmentModel> departments = departmentsResponse
+          .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
+          .toList();
+
+      final placeId = widget.currentUser.placeId;
+      if (placeId != null) {
+        try {
+          final placeData = await supabase
+              .from('places')
+              .select('allowed_department_ids')
+              .eq('id', placeId)
+              .maybeSingle();
+          final rawIds = placeData?['allowed_department_ids'];
+          if (rawIds is List && rawIds.isNotEmpty) {
+            final allowed = rawIds.map((e) => e.toString()).toSet();
+            departments = departments.where((d) => allowed.contains(d.id)).toList();
+          }
+        } catch (_) {}
+      }
+
       setState(() {
-        _departments = departmentsResponse
-            .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
-            .toList();
+        _departments = departments;
       });
     } catch (e) {
       print('Error loading data: $e');
@@ -966,6 +984,10 @@ class _PlacesMaintenanceTicketDialogState
   Future<void> _loadData() async {
     try {
       final departmentsResponse = await supabase.from('departments').select();
+      List<DepartmentModel> departments = departmentsResponse
+          .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
+          .toList();
+
       List<PlaceModel> places;
       if (widget.currentUser.userType == UserType.branchAdmin) {
         places = await BranchAdminService.getBranchAdminPlaces(widget.currentUser.id);
@@ -975,10 +997,25 @@ class _PlacesMaintenanceTicketDialogState
             .map<PlaceModel>((json) => PlaceModel.fromJson(json))
             .toList();
       }
+
+      final placeId = widget.currentUser.placeId;
+      if (placeId != null) {
+        try {
+          final placeData = await supabase
+              .from('places')
+              .select('allowed_department_ids')
+              .eq('id', placeId)
+              .maybeSingle();
+          final rawIds = placeData?['allowed_department_ids'];
+          if (rawIds is List && rawIds.isNotEmpty) {
+            final allowed = rawIds.map((e) => e.toString()).toSet();
+            departments = departments.where((d) => allowed.contains(d.id)).toList();
+          }
+        } catch (_) {}
+      }
+
       setState(() {
-        _departments = departmentsResponse
-            .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
-            .toList();
+        _departments = departments;
         _places = places;
         if (widget.currentUser.userType == UserType.branchAdmin &&
             places.length == 1) {
