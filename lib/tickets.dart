@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:jalasupport/FCMService.dart';
 import 'package:jalasupport/chat.dart' hide AppColors;
 import 'package:jalasupport/create_complaint_dialog.dart';
+import 'package:jalasupport/truck_maintenance_dialog.dart';
 import 'package:jalasupport/l10n/app_localizations.dart';
 import 'package:jalasupport/tickets_modules/allDialogs.dart';
 import 'package:jalasupport/main.dart';
@@ -2959,6 +2960,8 @@ class _TicketsScreenState extends State<TicketsScreen>
                   _showIndividualsMaintenanceTicketDialog();
                 } else if (value == 'requests') {
                   _showRequestsTicketDialog();
+                } else if (value == 'trucks_maintenance') {
+                  _showTrucksMaintenanceDialog();
                 }
               },
               tooltip: l10n.createNewTicket,
@@ -3015,6 +3018,16 @@ class _TicketsScreenState extends State<TicketsScreen>
                       Icon(Icons.request_page, size: 18, color: Colors.teal),
                       SizedBox(width: 8),
                       Text(l10n.requestsTicket),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'trucks_maintenance',
+                  child: Row(
+                    children: [
+                      Icon(Icons.local_shipping, size: 18, color: Colors.brown),
+                      SizedBox(width: 8),
+                      Text('صيانة الشاحنات'),
                     ],
                   ),
                 ),
@@ -3964,6 +3977,18 @@ class _TicketsScreenState extends State<TicketsScreen>
         ),
       );
     }
+  }
+
+  void _showTrucksMaintenanceDialog() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => TrucksMaintenanceTicketScreen(
+          currentUser: widget.currentUser,
+          onTicketCreated: _refreshData,
+        ),
+      ),
+    );
   }
 
   void _showCreateTicketDialog() {
@@ -10922,8 +10947,12 @@ class _CreateTicketDialogState extends State<CreateTicketDialog> {
   }
 
   Future<void> _pickImages() async {
+    final source = await showImageSourceBottomSheet(context);
+    if (source == null) return;
     try {
-      final List<XFile> images = await _imagePicker.pickMultiImage();
+      final List<XFile> images = source == ImageSource.camera
+          ? [await _imagePicker.pickImage(source: ImageSource.camera, maxWidth: 1200, maxHeight: 1200, imageQuality: 85)].whereType<XFile>().toList()
+          : await _imagePicker.pickMultiImage();
 
       if (images.isNotEmpty) {
         List<PlatformFile> imageFiles = [];
@@ -10942,7 +10971,6 @@ class _CreateTicketDialogState extends State<CreateTicketDialog> {
         });
       }
     } catch (e) {
-      print('Error picking images: $e');
       if (mounted) {
         final l10n = AppLocalizations.safeOf(context);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -12719,8 +12747,12 @@ class _ITSolutionTicketScreenState extends State<ITSolutionTicketScreen> {
 
   Future<void> _pickImages() async {
     final l10n = AppLocalizations.safeOf(context);
+    final source = await showImageSourceBottomSheet(context);
+    if (source == null) return;
     try {
-      final List<XFile> images = await _imagePicker.pickMultiImage();
+      final List<XFile> images = source == ImageSource.camera
+          ? [await _imagePicker.pickImage(source: ImageSource.camera, maxWidth: 1200, maxHeight: 1200, imageQuality: 85)].whereType<XFile>().toList()
+          : await _imagePicker.pickMultiImage();
 
       if (images.isNotEmpty) {
         List<PlatformFile> imageFiles = [];
@@ -13745,8 +13777,12 @@ class _PlacesMaintenanceTicketScreenState
 
   Future<void> _pickImages() async {
     final l10n = AppLocalizations.safeOf(context);
+    final source = await showImageSourceBottomSheet(context);
+    if (source == null) return;
     try {
-      final List<XFile> images = await _imagePicker.pickMultiImage();
+      final List<XFile> images = source == ImageSource.camera
+          ? [await _imagePicker.pickImage(source: ImageSource.camera, maxWidth: 1200, maxHeight: 1200, imageQuality: 85)].whereType<XFile>().toList()
+          : await _imagePicker.pickMultiImage();
 
       if (images.isNotEmpty) {
         List<PlatformFile> imageFiles = [];
@@ -15111,8 +15147,12 @@ class _IndividualsMaintenanceTicketScreenState
 
   Future<void> _pickImages() async {
     final l10n = AppLocalizations.safeOf(context);
+    final source = await showImageSourceBottomSheet(context);
+    if (source == null) return;
     try {
-      final List<XFile> images = await _imagePicker.pickMultiImage();
+      final List<XFile> images = source == ImageSource.camera
+          ? [await _imagePicker.pickImage(source: ImageSource.camera, maxWidth: 1200, maxHeight: 1200, imageQuality: 85)].whereType<XFile>().toList()
+          : await _imagePicker.pickMultiImage();
 
       if (images.isNotEmpty) {
         List<PlatformFile> imageFiles = [];
@@ -16384,8 +16424,12 @@ class _RequestsTicketScreenState extends State<RequestsTicketScreen> {
 
   Future<void> _pickImages() async {
     final l10n = AppLocalizations.safeOf(context);
+    final source = await showImageSourceBottomSheet(context);
+    if (source == null) return;
     try {
-      final List<XFile> images = await _imagePicker.pickMultiImage();
+      final List<XFile> images = source == ImageSource.camera
+          ? [await _imagePicker.pickImage(source: ImageSource.camera, maxWidth: 1200, maxHeight: 1200, imageQuality: 85)].whereType<XFile>().toList()
+          : await _imagePicker.pickMultiImage();
 
       if (images.isNotEmpty) {
         List<PlatformFile> imageFiles = [];
@@ -17454,8 +17498,12 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
   }
 
   Future<void> _pickImages() async {
+    final source = await showImageSourceBottomSheet(context);
+    if (source == null) return;
     try {
-      final List<XFile> images = await _imagePicker.pickMultiImage();
+      final List<XFile> images = source == ImageSource.camera
+          ? [await _imagePicker.pickImage(source: ImageSource.camera, maxWidth: 1200, maxHeight: 1200, imageQuality: 85)].whereType<XFile>().toList()
+          : await _imagePicker.pickMultiImage();
 
       if (images.isNotEmpty) {
         List<PlatformFile> imageFiles = [];
@@ -17474,7 +17522,6 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
         });
       }
     } catch (e) {
-      print('Error picking images: $e');
       if (mounted) {
         final l10n = AppLocalizations.safeOf(context);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -18680,8 +18727,12 @@ class _CreateSubticketDialogState extends State<CreateSubticketDialog> {
   Future<void> _pickImages() async {
     final l10n = AppLocalizations.safeOf(context);
 
+    final source = await showImageSourceBottomSheet(context);
+    if (source == null) return;
     try {
-      final List<XFile> images = await _imagePicker.pickMultiImage();
+      final List<XFile> images = source == ImageSource.camera
+          ? [await _imagePicker.pickImage(source: ImageSource.camera, maxWidth: 1200, maxHeight: 1200, imageQuality: 85)].whereType<XFile>().toList()
+          : await _imagePicker.pickMultiImage();
 
       if (images.isNotEmpty) {
         List<PlatformFile> imageFiles = [];
@@ -19813,8 +19864,12 @@ class _CreateSubticketScreenState extends State<CreateSubticketScreen> {
   Future<void> _pickImages() async {
     final l10n = AppLocalizations.safeOf(context);
 
+    final source = await showImageSourceBottomSheet(context);
+    if (source == null) return;
     try {
-      final List<XFile> images = await _imagePicker.pickMultiImage();
+      final List<XFile> images = source == ImageSource.camera
+          ? [await _imagePicker.pickImage(source: ImageSource.camera, maxWidth: 1200, maxHeight: 1200, imageQuality: 85)].whereType<XFile>().toList()
+          : await _imagePicker.pickMultiImage();
 
       if (images.isNotEmpty) {
         List<PlatformFile> imageFiles = [];

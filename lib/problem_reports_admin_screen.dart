@@ -188,45 +188,51 @@ class _ProblemReportsAdminScreenState
                                   fontSize: 14, height: 1.5)),
                         ),
 
-                        // Screenshot
-                        if (report['image_url'] != null) ...[
-                          const SizedBox(height: 16),
-                          Text(isRtl ? 'الصورة المرفقة' : 'Screenshot',
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold, fontSize: 14)),
-                          const SizedBox(height: 6),
-                          GestureDetector(
-                            onTap: () => _showImageFullscreen(
-                                ctx, report['image_url']),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(10),
-                              child: Image.network(
-                                report['image_url'],
-                                height: 160,
-                                width: double.infinity,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => Container(
-                                  height: 80,
-                                  color: Colors.grey[100],
-                                  child: const Center(
-                                      child: Icon(Icons.broken_image,
-                                          color: Colors.grey)),
+                        // Screenshots (array)
+                        Builder(builder: (context) {
+                          final rawUrls = report['image_urls'];
+                          final urls = (rawUrls is List)
+                              ? rawUrls.map((e) => e.toString()).where((u) => u.isNotEmpty).toList()
+                              : <String>[];
+                          if (urls.isEmpty) return const SizedBox.shrink();
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: 16),
+                              Text(
+                                isRtl ? 'الصور المرفقة (${urls.length})' : 'Screenshots (${urls.length})',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                              ),
+                              const SizedBox(height: 6),
+                              SizedBox(
+                                height: 120,
+                                child: ListView.separated(
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: urls.length,
+                                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                                  itemBuilder: (_, i) => GestureDetector(
+                                    onTap: () => _showImageFullscreen(ctx, urls[i]),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: Image.network(
+                                        urls[i],
+                                        width: 120,
+                                        height: 120,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) => Container(
+                                          width: 120,
+                                          height: 120,
+                                          color: Colors.grey[100],
+                                          child: const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ),
-                            ),
-                          ),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton.icon(
-                              onPressed: () =>
-                                  _showImageFullscreen(ctx, report['image_url']),
-                              icon: const Icon(Icons.open_in_full, size: 16),
-                              label: Text(isRtl ? 'عرض كامل' : 'Full view'),
-                              style: TextButton.styleFrom(
-                                  foregroundColor: AppColors.primary),
-                            ),
-                          ),
-                        ],
+                            ],
+                          );
+                        }),
 
                         const Divider(height: 28),
 
@@ -495,7 +501,8 @@ class _ProblemReportsAdminScreenState
   Widget _buildReportCard(Map<String, dynamic> report, bool isRtl) {
     final status = report['status'] ?? 'new';
     final color = _statusColors[status] ?? AppColors.primary;
-    final hasImage = report['image_url'] != null;
+    final rawUrls = report['image_urls'];
+    final hasImage = rawUrls is List && rawUrls.isNotEmpty;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),

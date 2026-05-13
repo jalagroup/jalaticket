@@ -6,9 +6,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:jalasupport/FCMService.dart';
 import 'package:jalasupport/auth.dart';
+import 'package:jalasupport/models.dart';
 import 'package:jalasupport/onboarding_screen.dart';
 import 'package:jalasupport/firebase_options.dart';
 import 'package:jalasupport/l10n/app_localizations.dart';
+import 'package:jalasupport/report_problem_screen.dart';
+import 'package:jalasupport/shake_service.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'main.dart';
@@ -124,8 +127,33 @@ class _MyAppMobileState extends State<MyAppMobile> {
         setState(() {
           _isInitializing = false;
         });
+        ShakeService.start(_onShake);
       }
     }
+  }
+
+  void _onShake() async {
+    final session = supabase.auth.currentSession;
+    if (session == null) return;
+    final ctx = navigatorKey.currentContext;
+    if (ctx == null) return;
+    await ShakeService.showReportDialog(ctx, onReport: () async {
+      final nav = navigatorKey.currentState;
+      if (nav == null) return;
+      try {
+        final data = await supabase
+            .from('users')
+            .select()
+            .eq('auth_id', session.user.id)
+            .single();
+        final user = UserModel.fromJson(data);
+        nav.push(MaterialPageRoute(
+          builder: (_) => ReportProblemScreen(currentUser: user),
+        ));
+      } catch (e) {
+        debugPrint('⚠️ Shake report: could not load user: $e');
+      }
+    });
   }
 
   // ✨ Load user locale before showing UI
@@ -218,6 +246,7 @@ class _MyAppMobileState extends State<MyAppMobile> {
 
   @override
   void dispose() {
+    ShakeService.stop();
     _authSubscription?.cancel();
     super.dispose();
   }

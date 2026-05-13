@@ -20,7 +20,7 @@ class ReportProblemScreen extends StatefulWidget {
 class _ReportProblemScreenState extends State<ReportProblemScreen> {
   final _descriptionController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
-  XFile? _pickedImage;
+  List<XFile> _pickedImages = [];
   bool _isSubmitting = false;
 
   @override
@@ -29,28 +29,78 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
     super.dispose();
   }
 
-  Future<void> _pickImage() async {
+  Future<void> _pickImages() async {
+    final source = await _showImageSourceSheet();
+    if (source == null) return;
     final picker = ImagePicker();
-    final img = await picker.pickImage(
-      source: ImageSource.gallery,
-      maxWidth: 1200,
-      maxHeight: 1200,
-      imageQuality: 85,
-    );
-    if (img != null) setState(() => _pickedImage = img);
+    if (source == ImageSource.camera) {
+      final img = await picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1200,
+        maxHeight: 1200,
+        imageQuality: 85,
+      );
+      if (img != null) setState(() => _pickedImages.add(img));
+    } else {
+      final imgs = await picker.pickMultiImage(
+        maxWidth: 1200,
+        maxHeight: 1200,
+        imageQuality: 85,
+      );
+      if (imgs.isNotEmpty) setState(() => _pickedImages.addAll(imgs));
+    }
   }
 
-  Future<String?> _uploadImage() async {
-    if (_pickedImage == null) return null;
-    final bytes = await _pickedImage!.readAsBytes();
-    final ext = _pickedImage!.name.split('.').last.toLowerCase();
-    final path = 'problem_reports/${const Uuid().v4()}.$ext';
-    await supabase.storage.from('problem_reports').uploadBinary(
-          path,
-          bytes,
-          fileOptions: FileOptions(cacheControl: '3600', upsert: false),
-        );
-    return supabase.storage.from('problem_reports').getPublicUrl(path);
+  Future<ImageSource?> _showImageSourceSheet() {
+    final isRtl = Localizations.localeOf(context).languageCode == 'ar';
+    return showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(2))),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: Text(isRtl ? 'اختر من المعرض' : 'Choose from Gallery'),
+                onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+              ),
+              ListTile(
+                leading: const Icon(Icons.camera_alt_outlined),
+                title: Text(isRtl ? 'التقط صورة' : 'Take a Photo'),
+                onTap: () => Navigator.pop(ctx, ImageSource.camera),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<List<String>> _uploadImages() async {
+    final urls = <String>[];
+    for (final img in _pickedImages) {
+      final bytes = await img.readAsBytes();
+      final ext = img.name.split('.').last.toLowerCase();
+      final path = 'problem_reports/${const Uuid().v4()}.$ext';
+      await supabase.storage.from('problem_reports').uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(cacheControl: '3600', upsert: false),
+          );
+      urls.add(supabase.storage.from('problem_reports').getPublicUrl(path));
+    }
+    return urls;
   }
 
   void _notifySystemAdmins() async {
@@ -80,19 +130,17 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
     setState(() => _isSubmitting = true);
 
     try {
-      String? imageUrl;
-      if (_pickedImage != null) imageUrl = await _uploadImage();
+      final imageUrls = _pickedImages.isNotEmpty ? await _uploadImages() : <String>[];
 
       await supabase.from('problem_reports').insert({
         'user_id': widget.currentUser.id,
         'user_name': widget.currentUser.fullName,
         'user_email': widget.currentUser.email,
         'description': _descriptionController.text.trim(),
-        'image_url': imageUrl,
+        'image_urls': imageUrls,
         'status': 'new',
       });
 
-      // Notify all system admins in-app + push
       _notifySystemAdmins();
 
       if (!mounted) return;
@@ -256,67 +304,39 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
 
                 const SizedBox(height: 24),
 
-                // Image picker
-                Text(
-                  isRtl ? 'إرفاق صورة (اختياري)' : 'Attach Screenshot (Optional)',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 15,
-                    color: AppColors.onBackground,
-                  ),
+                // Images section
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      isRtl ? 'الصور المرفقة (اختياري)' : 'Attached Screenshots (Optional)',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                        color: AppColors.onBackground,
+                      ),
+                    ),
+                    if (_pickedImages.isNotEmpty)
+                      TextButton.icon(
+                        onPressed: _pickImages,
+                        icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
+                        label: Text(isRtl ? 'إضافة' : 'Add'),
+                        style: TextButton.styleFrom(
+                            foregroundColor: AppColors.primary,
+                            padding: EdgeInsets.zero),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 8),
 
-                if (_pickedImage != null) ...[
-                  Stack(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: kIsWeb
-                            ? Image.network(_pickedImage!.path,
-                                height: 200,
-                                width: double.infinity,
-                                fit: BoxFit.cover)
-                            : Image.file(File(_pickedImage!.path),
-                                height: 200,
-                                width: double.infinity,
-                                fit: BoxFit.cover),
-                      ),
-                      Positioned(
-                        top: 8,
-                        right: 8,
-                        child: GestureDetector(
-                          onTap: () => setState(() => _pickedImage = null),
-                          child: Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              color: Colors.black54,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(Icons.close,
-                                color: Colors.white, size: 18),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  TextButton.icon(
-                    onPressed: _pickImage,
-                    icon: const Icon(Icons.image),
-                    label: Text(isRtl ? 'تغيير الصورة' : 'Change Image'),
-                    style: TextButton.styleFrom(
-                        foregroundColor: AppColors.primary),
-                  ),
-                ] else ...[
+                if (_pickedImages.isEmpty)
                   GestureDetector(
-                    onTap: _pickImage,
+                    onTap: _pickImages,
                     child: Container(
                       height: 130,
                       decoration: BoxDecoration(
                         color: Colors.grey[50],
-                        border: Border.all(
-                            color: Colors.grey[300]!, style: BorderStyle.solid),
+                        border: Border.all(color: Colors.grey[300]!),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Column(
@@ -326,15 +346,53 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
                               size: 40, color: Colors.grey[400]),
                           const SizedBox(height: 8),
                           Text(
-                            isRtl ? 'أضف صورة توضيحية' : 'Add a screenshot',
-                            style: TextStyle(
-                                color: Colors.grey[500], fontSize: 14),
+                            isRtl ? 'أضف صوراً توضيحية' : 'Add screenshots',
+                            style: TextStyle(color: Colors.grey[500], fontSize: 14),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            isRtl ? 'معرض الصور أو الكاميرا' : 'Gallery or Camera',
+                            style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  SizedBox(
+                    height: 110,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _pickedImages.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 8),
+                      itemBuilder: (_, i) => Stack(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: kIsWeb
+                                ? Image.network(_pickedImages[i].path,
+                                    width: 110, height: 110, fit: BoxFit.cover)
+                                : Image.file(File(_pickedImages[i].path),
+                                    width: 110, height: 110, fit: BoxFit.cover),
+                          ),
+                          Positioned(
+                            top: 4,
+                            right: 4,
+                            child: GestureDetector(
+                              onTap: () => setState(() => _pickedImages.removeAt(i)),
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: const BoxDecoration(
+                                    color: Colors.black54, shape: BoxShape.circle),
+                                child: const Icon(Icons.close,
+                                    color: Colors.white, size: 14),
+                              ),
+                            ),
                           ),
                         ],
                       ),
                     ),
                   ),
-                ],
 
                 const SizedBox(height: 32),
 

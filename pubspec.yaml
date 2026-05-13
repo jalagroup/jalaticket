@@ -1,6 +1,6 @@
 name: jalasupport
 description: Jala Support Ticketing System
-version: 1.0.2+23
+version: 1.0.2+24
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -55,6 +55,7 @@ dependencies:
   audioplayers: ^6.1.0
   url_launcher: ^6.3.0
   shared_preferences: ^2.3.2
+  sensors_plus: ^4.0.2
 
 dev_dependencies:
   flutter_test:
