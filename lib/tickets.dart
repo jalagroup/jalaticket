@@ -24,6 +24,27 @@ import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+/// Filters a department list to only those allowed by the user's place.
+/// If the place has no restrictions (empty list) or the placeId is null,
+/// the full list is returned unchanged.
+Future<List<DepartmentModel>> _filterDeptsByPlaceId(
+    List<DepartmentModel> all, String? placeId) async {
+  if (placeId == null) return all;
+  try {
+    final data = await supabase
+        .from('places')
+        .select('allowed_department_ids')
+        .eq('id', placeId)
+        .maybeSingle();
+    final rawIds = data?['allowed_department_ids'];
+    if (rawIds is! List || rawIds.isEmpty) return all;
+    final allowed = rawIds.map((e) => e.toString()).toSet();
+    return all.where((d) => allowed.contains(d.id)).toList();
+  } catch (_) {
+    return all;
+  }
+}
+
 // REPLACE the entire OptimizedDialog class
 
 class OptimizedDialog extends StatelessWidget {
@@ -13532,10 +13553,13 @@ class _PlacesMaintenanceTicketScreenState
             .map<PlaceModel>((json) => PlaceModel.fromJson(json))
             .toList();
       }
+      var departments = departmentsResponse
+          .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
+          .toList();
+      departments = await _filterDeptsByPlaceId(departments, widget.currentUser.placeId);
+
       setState(() {
-        _departments = departmentsResponse
-            .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
-            .toList();
+        _departments = departments;
         _places = places;
         if (widget.currentUser.userType == UserType.branchAdmin &&
             places.length == 1) {
@@ -14919,11 +14943,13 @@ class _IndividualsMaintenanceTicketScreenState
   Future<void> _loadData() async {
     try {
       final departmentsResponse = await supabase.from('departments').select();
+      var departments = departmentsResponse
+          .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
+          .toList();
+      departments = await _filterDeptsByPlaceId(departments, widget.currentUser.placeId);
 
       setState(() {
-        _departments = departmentsResponse
-            .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
-            .toList();
+        _departments = departments;
       });
     } catch (e) {
       print('Error loading data: $e');
@@ -16231,11 +16257,13 @@ class _RequestsTicketScreenState extends State<RequestsTicketScreen> {
   Future<void> _loadData() async {
     try {
       final departmentsResponse = await supabase.from('departments').select();
+      var departments = departmentsResponse
+          .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
+          .toList();
+      departments = await _filterDeptsByPlaceId(departments, widget.currentUser.placeId);
 
       setState(() {
-        _departments = departmentsResponse
-            .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
-            .toList();
+        _departments = departments;
       });
     } catch (e) {
       print('Error loading data: $e');
@@ -17424,11 +17452,13 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
     try {
       final departmentsResponse = await supabase.from('departments').select();
       final placesResponse = await supabase.from('places').select();
+      var departments = departmentsResponse
+          .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
+          .toList();
+      departments = await _filterDeptsByPlaceId(departments, widget.currentUser.placeId);
 
       setState(() {
-        _departments = departmentsResponse
-            .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
-            .toList();
+        _departments = departments;
         _places = placesResponse
             .map<PlaceModel>((json) => PlaceModel.fromJson(json))
             .toList();
@@ -18713,11 +18743,13 @@ class _CreateSubticketDialogState extends State<CreateSubticketDialog> {
   Future<void> _loadData() async {
     try {
       final departmentsResponse = await supabase.from('departments').select();
+      var departments = departmentsResponse
+          .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
+          .toList();
+      departments = await _filterDeptsByPlaceId(departments, widget.currentUser.placeId);
 
       setState(() {
-        _departments = departmentsResponse
-            .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
-            .toList();
+        _departments = departments;
       });
     } catch (e) {
       print('Error loading data: $e');
@@ -19703,11 +19735,13 @@ class _CreateSubticketScreenState extends State<CreateSubticketScreen> {
   Future<void> _loadData() async {
     try {
       final departmentsResponse = await supabase.from('departments').select();
+      var departments = departmentsResponse
+          .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
+          .toList();
+      departments = await _filterDeptsByPlaceId(departments, widget.currentUser.placeId);
 
       setState(() {
-        _departments = departmentsResponse
-            .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
-            .toList();
+        _departments = departments;
       });
     } catch (e) {
       print('Error loading data: $e');
