@@ -1384,6 +1384,10 @@ class _TicketsScreenState extends State<TicketsScreen>
   Timer? _connectionMonitorTimer;
   DateTime? _lastSuccessfulUpdate;
 
+  // Place-level permissions (loaded from Supabase)
+  List<String> _allowedTicketTypes = [];
+  List<String> _allowedDepartmentIds = [];
+
   final List<TicketStatus> _statuses = [
     TicketStatus.pending,
     TicketStatus.inprogress,
@@ -1443,6 +1447,29 @@ class _TicketsScreenState extends State<TicketsScreen>
 
     // Register for in-app notification navigation.
     TicketNavigationService.setListener(_onNavigationRequested);
+
+    _loadPlacePermissions();
+  }
+
+  Future<void> _loadPlacePermissions() async {
+    final placeId = widget.currentUser.placeId;
+    if (placeId == null) return;
+    try {
+      final data = await supabase
+          .from('places')
+          .select('allowed_department_ids, allowed_ticket_types')
+          .eq('id', placeId)
+          .maybeSingle();
+      if (data == null || !mounted) return;
+      List<String> parseList(dynamic v) =>
+          v is List ? v.map((e) => e.toString()).toList() : [];
+      setState(() {
+        _allowedDepartmentIds = parseList(data['allowed_department_ids']);
+        _allowedTicketTypes = parseList(data['allowed_ticket_types']);
+      });
+    } catch (e) {
+      debugPrint('⚠️ Could not load place permissions: $e');
+    }
   }
 
   void _onNavigationRequested() {
@@ -1456,49 +1483,56 @@ class _TicketsScreenState extends State<TicketsScreen>
     });
   }
 
-  void _jumpToTicket(String ticketId, {String? targetStatus}) {
+  Future<void> _jumpToTicket(String ticketId, {String? targetStatus}) async {
     // 1. Search every already-loaded tab first.
     for (int i = 0; i < _statuses.length; i++) {
       final tickets = _ticketsByStatus[_statuses[i]] ?? [];
       if (tickets.any((t) => t.id == ticketId)) {
         _tabController.animateTo(i);
-        Future.delayed(const Duration(milliseconds: 300), () {
-          if (mounted && !_isDisposed) _highlightTicket(ticketId);
-        });
+        await Future.delayed(const Duration(milliseconds: 300));
+        if (mounted && !_isDisposed) _highlightTicket(ticketId);
         return;
       }
     }
 
-    // 2. Ticket not in any loaded list yet. Switch to the hinted tab and
-    //    refresh so the ticket appears, then highlight it.
-    if (targetStatus != null) {
-      final hintedStatus = TicketStatus.values.firstWhere(
-        (s) => s.value == targetStatus,
-        orElse: () => TicketStatus.inprogress,
+    // 2. Not in any loaded tab — fetch the ticket's actual current status
+    //    from Supabase so we always land on the correct tab.
+    String? actualStatus = targetStatus;
+    try {
+      final data = await supabase
+          .from('tickets')
+          .select('status')
+          .eq('id', ticketId)
+          .maybeSingle();
+      if (data != null) actualStatus = data['status'] as String?;
+    } catch (_) {}
+
+    if (!mounted || _isDisposed) return;
+
+    if (actualStatus != null) {
+      final status = TicketStatus.values.firstWhere(
+        (s) => s.value == actualStatus,
+        orElse: () => TicketStatus.pending,
       );
-      final tabIndex = _statuses.indexOf(hintedStatus);
+      final tabIndex = _statuses.indexOf(status);
       if (tabIndex >= 0) _tabController.animateTo(tabIndex);
     }
 
-    // Refresh the (now-current) tab so the freshly-moved ticket loads,
-    // then highlight once data arrives.
+    // Refresh the now-current tab so the ticket loads, then highlight.
     _loadCurrentTabTickets();
-    Future.delayed(const Duration(milliseconds: 900), () {
-      if (!mounted || _isDisposed) return;
-      // Re-search now that data has refreshed.
-      for (int i = 0; i < _statuses.length; i++) {
-        final tickets = _ticketsByStatus[_statuses[i]] ?? [];
-        if (tickets.any((t) => t.id == ticketId)) {
-          _tabController.animateTo(i);
-          Future.delayed(const Duration(milliseconds: 200), () {
-            if (mounted && !_isDisposed) _highlightTicket(ticketId);
-          });
-          return;
-        }
+    await Future.delayed(const Duration(milliseconds: 900));
+    if (!mounted || _isDisposed) return;
+
+    for (int i = 0; i < _statuses.length; i++) {
+      final tickets = _ticketsByStatus[_statuses[i]] ?? [];
+      if (tickets.any((t) => t.id == ticketId)) {
+        _tabController.animateTo(i);
+        await Future.delayed(const Duration(milliseconds: 200));
+        if (mounted && !_isDisposed) _highlightTicket(ticketId);
+        return;
       }
-      // Still not found (rare edge case) — just highlight wherever we are.
-      _highlightTicket(ticketId);
-    });
+    }
+    if (mounted && !_isDisposed) _highlightTicket(ticketId);
   }
 
   @override
@@ -2968,70 +3002,66 @@ class _TicketsScreenState extends State<TicketsScreen>
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
               ),
-              itemBuilder: (context) => [
-                PopupMenuItem(
-                  value: 'it_solution',
-                  child: Row(
-                    children: [
-                      Icon(Icons.computer, size: 18, color: Colors.blue),
-                      SizedBox(width: 8),
-                      Text(l10n.itSolutionTicket),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'places_maintenance',
-                  child: Row(
-                    children: [
-                      Icon(Icons.home_repair_service,
-                          size: 18, color: Colors.green),
-                      SizedBox(width: 8),
-                      Text(l10n.placesMaintenanceTicket),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'complaint',
-                  child: Row(
-                    children: [
-                      Icon(Icons.report_problem,
-                          size: 18, color: Colors.orange),
-                      SizedBox(width: 8),
-                      Text(l10n.qualityComplaint),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'individuals_maintenance',
-                  child: Row(
-                    children: [
-                      Icon(Icons.person_pin, size: 18, color: Colors.purple),
-                      SizedBox(width: 8),
-                      Text(l10n.individualsMaintenanceTicket),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'requests',
-                  child: Row(
-                    children: [
-                      Icon(Icons.request_page, size: 18, color: Colors.teal),
-                      SizedBox(width: 8),
-                      Text(l10n.requestsTicket),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'trucks_maintenance',
-                  child: Row(
-                    children: [
-                      Icon(Icons.local_shipping, size: 18, color: Colors.brown),
-                      SizedBox(width: 8),
-                      Text('صيانة الشاحنات'),
-                    ],
-                  ),
-                ),
-              ],
+              itemBuilder: (context) {
+                bool allowed(String type) =>
+                    _allowedTicketTypes.isEmpty || _allowedTicketTypes.contains(type);
+                return [
+                  if (allowed('it_solution'))
+                    PopupMenuItem(
+                      value: 'it_solution',
+                      child: Row(children: [
+                        Icon(Icons.computer, size: 18, color: Colors.blue),
+                        SizedBox(width: 8),
+                        Text(l10n.itSolutionTicket),
+                      ]),
+                    ),
+                  if (allowed('places_maintenance'))
+                    PopupMenuItem(
+                      value: 'places_maintenance',
+                      child: Row(children: [
+                        Icon(Icons.home_repair_service, size: 18, color: Colors.green),
+                        SizedBox(width: 8),
+                        Text(l10n.placesMaintenanceTicket),
+                      ]),
+                    ),
+                  if (allowed('complaint'))
+                    PopupMenuItem(
+                      value: 'complaint',
+                      child: Row(children: [
+                        Icon(Icons.report_problem, size: 18, color: Colors.orange),
+                        SizedBox(width: 8),
+                        Text(l10n.qualityComplaint),
+                      ]),
+                    ),
+                  if (allowed('individuals_maintenance'))
+                    PopupMenuItem(
+                      value: 'individuals_maintenance',
+                      child: Row(children: [
+                        Icon(Icons.person_pin, size: 18, color: Colors.purple),
+                        SizedBox(width: 8),
+                        Text(l10n.individualsMaintenanceTicket),
+                      ]),
+                    ),
+                  if (allowed('requests'))
+                    PopupMenuItem(
+                      value: 'requests',
+                      child: Row(children: [
+                        Icon(Icons.request_page, size: 18, color: Colors.teal),
+                        SizedBox(width: 8),
+                        Text(l10n.requestsTicket),
+                      ]),
+                    ),
+                  if (allowed('trucks_maintenance'))
+                    PopupMenuItem(
+                      value: 'trucks_maintenance',
+                      child: Row(children: [
+                        Icon(Icons.local_shipping, size: 18, color: Colors.brown),
+                        SizedBox(width: 8),
+                        Text('صيانة الشاحنات'),
+                      ]),
+                    ),
+                ];
+              },
               child: Container(
                 padding: EdgeInsets.symmetric(
                   horizontal: isMobile ? 12 : 16,
@@ -3997,6 +4027,7 @@ class _TicketsScreenState extends State<TicketsScreen>
       builder: (context) => CreateTicketDialog(
         currentUser: widget.currentUser,
         onTicketCreated: _refreshData,
+        allowedDepartmentIds: _allowedDepartmentIds,
       ),
     );
   }
@@ -10757,12 +10788,14 @@ class CreateTicketDialog extends StatefulWidget {
   final UserModel currentUser;
   final VoidCallback onTicketCreated;
   final TicketModel? prefillFromTicket;
+  final List<String> allowedDepartmentIds;
 
   const CreateTicketDialog({
     super.key,
     required this.currentUser,
     required this.onTicketCreated,
     this.prefillFromTicket,
+    this.allowedDepartmentIds = const [],
   });
 
   @override
@@ -10831,10 +10864,18 @@ class _CreateTicketDialogState extends State<CreateTicketDialog> {
       final departmentsResponse = await supabase.from('departments').select();
       final placesResponse = await supabase.from('places').select();
 
-      setState(() {
-        _departments = departmentsResponse
-            .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
+      var departments = departmentsResponse
+          .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
+          .toList();
+
+      if (widget.allowedDepartmentIds.isNotEmpty) {
+        departments = departments
+            .where((d) => widget.allowedDepartmentIds.contains(d.id))
             .toList();
+      }
+
+      setState(() {
+        _departments = departments;
         _places = placesResponse
             .map<PlaceModel>((json) => PlaceModel.fromJson(json))
             .toList();

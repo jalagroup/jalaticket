@@ -395,6 +395,8 @@ class PlaceModel {
   final bool isActive;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final List<String> allowedDepartmentIds;
+  final List<String> allowedTicketTypes;
 
   PlaceModel({
     required this.id,
@@ -405,6 +407,8 @@ class PlaceModel {
     required this.isActive,
     required this.createdAt,
     required this.updatedAt,
+    this.allowedDepartmentIds = const [],
+    this.allowedTicketTypes = const [],
   });
 
   String localizedName(String languageCode) {
@@ -418,6 +422,11 @@ class PlaceModel {
   }
 
   factory PlaceModel.fromJson(Map<String, dynamic> json) {
+    List<String> parseList(dynamic v) {
+      if (v is List) return v.map((e) => e.toString()).toList();
+      return [];
+    }
+
     return PlaceModel(
       id: json['id'],
       name: json['name'],
@@ -427,6 +436,8 @@ class PlaceModel {
       isActive: json['is_active'],
       createdAt: DateTime.parse(json['created_at']),
       updatedAt: DateTime.parse(json['updated_at']),
+      allowedDepartmentIds: parseList(json['allowed_department_ids']),
+      allowedTicketTypes: parseList(json['allowed_ticket_types']),
     );
   }
 }

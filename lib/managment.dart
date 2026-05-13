@@ -1918,167 +1918,13 @@ class _PlacesManagementState extends State<PlacesManagement>
     );
   }
 
-// Replace the existing _showCreateDialog with this updated version that supports edit
   void _showCreateDialog({PlaceModel? place}) {
-    final l10n = AppLocalizations.safeOf(context);
-    final nameEnController = TextEditingController(text: place?.nameEn ?? place?.name ?? '');
-    final nameArController = TextEditingController(text: place?.nameAr ?? '');
-    final descriptionController =
-        TextEditingController(text: place?.description ?? '');
-    final isEditing = place != null;
-
     showDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppColors.secondary.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  isEditing ? Icons.edit : Icons.location_on,
-                  color: AppColors.secondary,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Text(
-                isEditing ? l10n.edit : l10n.createPlace,
-                style:
-                    const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameEnController,
-                  decoration: InputDecoration(
-                    labelText: 'Name (English) *',
-                    prefixIcon: const Icon(Icons.label_outline, color: Color(0xFFf16936), size: 20),
-                    filled: true,
-                    fillColor: Colors.grey.shade50,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
-                    focusedBorder: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12)), borderSide: BorderSide(color: Color(0xFFf16936), width: 1.5)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  ),
-                  textCapitalization: TextCapitalization.words,
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: nameArController,
-                  decoration: InputDecoration(
-                    labelText: 'الاسم (عربي)',
-                    prefixIcon: const Icon(Icons.label_outline, color: Color(0xFFf16936), size: 20),
-                    filled: true,
-                    fillColor: Colors.grey.shade50,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
-                    focusedBorder: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12)), borderSide: BorderSide(color: Color(0xFFf16936), width: 1.5)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  ),
-                  textAlign: TextAlign.right,
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: descriptionController,
-                  decoration: InputDecoration(
-                    labelText: l10n.description,
-                    prefixIcon: const Icon(Icons.description_outlined, color: Color(0xFFf16936), size: 20),
-                    filled: true,
-                    fillColor: Colors.grey.shade50,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
-                    focusedBorder: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12)), borderSide: BorderSide(color: Color(0xFFf16936), width: 1.5)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  ),
-                  maxLines: 3,
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            OutlinedButton(
-              onPressed: () => Navigator.pop(context),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.grey[700],
-                side: BorderSide(color: Colors.grey.shade300),
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-              child: Text(l10n.cancel),
-            ),
-            const SizedBox(width: 8),
-            ElevatedButton(
-              onPressed: () async {
-                final enName = nameEnController.text.trim();
-                final arName = nameArController.text.trim();
-                if (enName.isEmpty && arName.isEmpty) {
-                  _showError(l10n.nameIsRequired);
-                  return;
-                }
-                final baseName = enName.isNotEmpty ? enName : arName;
-
-                try {
-                  if (isEditing) {
-                    // Update existing place
-                    await supabase.from('places').update({
-                      'name': baseName,
-                      'name_en': enName.isEmpty ? null : enName,
-                      'name_ar': arName.isEmpty ? null : arName,
-                      'description': descriptionController.text.trim().isEmpty
-                          ? null
-                          : descriptionController.text.trim(),
-                    }).eq('id', place.id);
-
-                    Navigator.pop(context);
-                    _loadPlaces();
-                    _showSuccess(l10n.placeUpdatedSuccessfully);
-                  } else {
-                    // Create new place
-                    await supabase.from('places').insert({
-                      'name': baseName,
-                      'name_en': enName.isEmpty ? null : enName,
-                      'name_ar': arName.isEmpty ? null : arName,
-                      'description': descriptionController.text.trim().isEmpty
-                          ? null
-                          : descriptionController.text.trim(),
-                    });
-
-                    Navigator.pop(context);
-                    _loadPlaces();
-                    _showSuccess(l10n.placeCreatedSuccessfully);
-                  }
-                } catch (e) {
-                  _showError(isEditing
-                      ? l10n.failedToUpdatePlace
-                      : l10n.failedToCreatePlace);
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 11),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-              child: Text(
-                isEditing ? l10n.update : l10n.create,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-            ),
-          ],
-        );
-      },
+      builder: (context) => _PlaceEditDialog(
+        place: place,
+        onSaved: _loadPlaces,
+      ),
     );
   }
 
@@ -2199,6 +2045,8 @@ class _PlacesManagementState extends State<PlacesManagement>
             isActive: newStatus,
             createdAt: place.createdAt,
             updatedAt: DateTime.now(),
+            allowedDepartmentIds: place.allowedDepartmentIds,
+            allowedTicketTypes: place.allowedTicketTypes,
           );
         }
       });
@@ -2449,6 +2297,256 @@ class _PlacesManagementState extends State<PlacesManagement>
 // ============================================================================
 // OPTIMIZED USERS MANAGEMENT
 // ============================================================================
+// ─── Place create / edit dialog ──────────────────────────────────────────────
+
+class _PlaceEditDialog extends StatefulWidget {
+  final PlaceModel? place;
+  final VoidCallback onSaved;
+
+  const _PlaceEditDialog({this.place, required this.onSaved});
+
+  @override
+  State<_PlaceEditDialog> createState() => _PlaceEditDialogState();
+}
+
+class _PlaceEditDialogState extends State<_PlaceEditDialog> {
+  final _nameEnCtrl = TextEditingController();
+  final _nameArCtrl = TextEditingController();
+  final _descCtrl = TextEditingController();
+
+  List<Map<String, dynamic>> _allDepartments = [];
+  Set<String> _selectedDeptIds = {};
+  Set<String> _selectedTicketTypes = {};
+  bool _loadingDepts = true;
+  bool _saving = false;
+
+  static const _ticketTypeOptions = [
+    ('it_solution', 'IT Solution / حلول تقنية', Icons.computer, Colors.blue),
+    ('places_maintenance', 'Places Maintenance / صيانة المواقع', Icons.home_repair_service, Colors.green),
+    ('complaint', 'Complaint / شكوى جودة', Icons.report_problem, Colors.orange),
+    ('individuals_maintenance', 'Individuals Maintenance / صيانة أفراد', Icons.person_pin, Colors.purple),
+    ('requests', 'Requests / طلبات', Icons.request_page, Colors.teal),
+    ('trucks_maintenance', 'Truck Maintenance / صيانة الشاحنات', Icons.local_shipping, Colors.brown),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    final p = widget.place;
+    if (p != null) {
+      _nameEnCtrl.text = p.nameEn ?? p.name;
+      _nameArCtrl.text = p.nameAr ?? '';
+      _descCtrl.text = p.description ?? '';
+      _selectedDeptIds = Set.from(p.allowedDepartmentIds);
+      _selectedTicketTypes = Set.from(p.allowedTicketTypes);
+    }
+    _loadDepartments();
+  }
+
+  @override
+  void dispose() {
+    _nameEnCtrl.dispose();
+    _nameArCtrl.dispose();
+    _descCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadDepartments() async {
+    try {
+      final data = await supabase
+          .from('departments')
+          .select('id, name, name_ar')
+          .order('name');
+      if (mounted) {
+        setState(() {
+          _allDepartments = List<Map<String, dynamic>>.from(data);
+          _loadingDepts = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingDepts = false);
+    }
+  }
+
+  Future<void> _save() async {
+    final enName = _nameEnCtrl.text.trim();
+    final arName = _nameArCtrl.text.trim();
+    if (enName.isEmpty && arName.isEmpty) return;
+    final baseName = enName.isNotEmpty ? enName : arName;
+    setState(() => _saving = true);
+    try {
+      final payload = {
+        'name': baseName,
+        'name_en': enName.isEmpty ? null : enName,
+        'name_ar': arName.isEmpty ? null : arName,
+        'description': _descCtrl.text.trim().isEmpty ? null : _descCtrl.text.trim(),
+        'allowed_department_ids': _selectedDeptIds.toList(),
+        'allowed_ticket_types': _selectedTicketTypes.toList(),
+      };
+      if (widget.place != null) {
+        await supabase.from('places').update(payload).eq('id', widget.place!.id);
+      } else {
+        await supabase.from('places').insert(payload);
+      }
+      if (mounted) {
+        Navigator.pop(context);
+        widget.onSaved();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isEditing = widget.place != null;
+    final isRtl = Localizations.localeOf(context).languageCode == 'ar';
+
+    InputDecoration fieldDecor(String label, IconData icon) => InputDecoration(
+          labelText: label,
+          prefixIcon: Icon(icon, color: AppColors.primary, size: 20),
+          filled: true,
+          fillColor: Colors.grey.shade50,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        );
+
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Row(children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(color: AppColors.secondary.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+          child: Icon(isEditing ? Icons.edit : Icons.location_on, color: AppColors.secondary, size: 20),
+        ),
+        const SizedBox(width: 12),
+        Text(isEditing ? (isRtl ? 'تعديل الموقع' : 'Edit Place') : (isRtl ? 'إنشاء موقع' : 'Create Place'),
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+      ]),
+      content: SizedBox(
+        width: 480,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Name fields
+              TextField(controller: _nameEnCtrl, decoration: fieldDecor('Name (English) *', Icons.label_outline), textCapitalization: TextCapitalization.words),
+              const SizedBox(height: 12),
+              TextField(controller: _nameArCtrl, decoration: fieldDecor('الاسم (عربي)', Icons.label_outline), textAlign: TextAlign.right),
+              const SizedBox(height: 12),
+              TextField(controller: _descCtrl, decoration: fieldDecor(isRtl ? 'الوصف' : 'Description', Icons.description_outlined), maxLines: 2),
+
+              const SizedBox(height: 20),
+
+              // Departments section
+              Row(children: [
+                Icon(Icons.business, size: 16, color: AppColors.primary),
+                const SizedBox(width: 6),
+                Text(isRtl ? 'الأقسام المسموح بها' : 'Allowed Departments',
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                const SizedBox(width: 6),
+                Text(isRtl ? '(فارغ = الكل)' : '(empty = all)',
+                    style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+              ]),
+              const SizedBox(height: 8),
+              if (_loadingDepts)
+                const Center(child: SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2)))
+              else
+                Container(
+                  decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade200), borderRadius: BorderRadius.circular(10)),
+                  constraints: const BoxConstraints(maxHeight: 180),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _allDepartments.length,
+                    itemBuilder: (_, i) {
+                      final dept = _allDepartments[i];
+                      final id = dept['id'] as String;
+                      final name = (isRtl ? dept['name_ar'] : dept['name']) as String? ?? dept['name'] as String;
+                      final checked = _selectedDeptIds.contains(id);
+                      return CheckboxListTile(
+                        dense: true,
+                        value: checked,
+                        title: Text(name, style: const TextStyle(fontSize: 13)),
+                        activeColor: AppColors.primary,
+                        onChanged: (v) => setState(() {
+                          if (v == true) _selectedDeptIds.add(id);
+                          else _selectedDeptIds.remove(id);
+                        }),
+                      );
+                    },
+                  ),
+                ),
+
+              const SizedBox(height: 20),
+
+              // Ticket types section
+              Row(children: [
+                Icon(Icons.confirmation_number_outlined, size: 16, color: AppColors.primary),
+                const SizedBox(width: 6),
+                Text(isRtl ? 'أنواع التذاكر المسموح بها' : 'Allowed Ticket Types',
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                const SizedBox(width: 6),
+                Text(isRtl ? '(فارغ = الكل)' : '(empty = all)',
+                    style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+              ]),
+              const SizedBox(height: 8),
+              Container(
+                decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade200), borderRadius: BorderRadius.circular(10)),
+                child: Column(
+                  children: _ticketTypeOptions.map((opt) {
+                    final (value, label, icon, color) = opt;
+                    final checked = _selectedTicketTypes.contains(value);
+                    return CheckboxListTile(
+                      dense: true,
+                      value: checked,
+                      title: Row(children: [
+                        Icon(icon, size: 15, color: color),
+                        const SizedBox(width: 6),
+                        Expanded(child: Text(label, style: const TextStyle(fontSize: 12))),
+                      ]),
+                      activeColor: AppColors.primary,
+                      onChanged: (v) => setState(() {
+                        if (v == true) _selectedTicketTypes.add(value);
+                        else _selectedTicketTypes.remove(value);
+                      }),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        OutlinedButton(
+          onPressed: _saving ? null : () => Navigator.pop(context),
+          style: OutlinedButton.styleFrom(foregroundColor: Colors.grey[700], side: BorderSide(color: Colors.grey.shade300), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+          child: Text(isRtl ? 'إلغاء' : 'Cancel'),
+        ),
+        const SizedBox(width: 8),
+        ElevatedButton(
+          onPressed: _saving ? null : _save,
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+          child: _saving
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+              : Text(isEditing ? (isRtl ? 'تحديث' : 'Update') : (isRtl ? 'إنشاء' : 'Create'),
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 class UsersManagement extends StatefulWidget {
   final UserModel currentUser;
 
