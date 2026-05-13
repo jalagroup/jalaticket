@@ -20,7 +20,8 @@ class FCMService {
 
   // Navigation callback for handling message tap navigation
   static Function(String?, String?)? _onNavigateToChat;
-  static Function(String?)? _onNavigateToTicket;
+  // Second param is notification type (e.g. 'ticket_assigned')
+  static Function(String?, String?)? _onNavigateToTicket;
   static Map<String, dynamic>? _pendingNavigation;
 
   // VAPID key for web push notifications.
@@ -103,7 +104,7 @@ class FCMService {
   // Set navigation callbacks
   static void setNavigationCallbacks({
     Function(String?, String?)? onNavigateToChat,
-    Function(String?)? onNavigateToTicket,
+    Function(String?, String?)? onNavigateToTicket,
   }) {
     _onNavigateToChat = onNavigateToChat;
     _onNavigateToTicket = onNavigateToTicket;
@@ -276,7 +277,7 @@ class FCMService {
             if (chatRoomId != null) {
               _navigateToChat(ticketId, chatRoomId);
             } else {
-              _navigateToTicket(ticketId);
+              _navigateToTicket(ticketId, type);
             }
             break;
           case 'ticket_created':
@@ -284,13 +285,13 @@ class FCMService {
           case 'ticket_status_changed':
           case 'ticket_approved':
           case 'ticket_rejected':
-            _navigateToTicket(ticketId);
+            _navigateToTicket(ticketId, type);
             break;
           case 'subticket_created':
-            _navigateToTicket(ticketId);
+            _navigateToTicket(ticketId, type);
             break;
           default:
-            _navigateToTicket(ticketId);
+            _navigateToTicket(ticketId, type);
         }
       }
     } catch (e) {
@@ -331,14 +332,14 @@ class FCMService {
     }
   }
 
-  static void _navigateToTicket(String ticketId) {
+  static void _navigateToTicket(String ticketId, [String? type]) {
     if (kDebugMode) {
-      print('Navigate to ticket: $ticketId');
+      print('Navigate to ticket: $ticketId (type: $type)');
     }
 
     // Use the callback if available
     if (_onNavigateToTicket != null) {
-      _onNavigateToTicket!(ticketId);
+      _onNavigateToTicket!(ticketId, type);
       return;
     }
 
@@ -520,7 +521,7 @@ class FCMService {
         chatRoomId != null) {
       _onNavigateToChat?.call(ticketId, chatRoomId);
     } else if (ticketId != null) {
-      _onNavigateToTicket?.call(ticketId);
+      _onNavigateToTicket?.call(ticketId, type);
     }
   }
 

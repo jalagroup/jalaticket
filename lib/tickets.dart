@@ -1779,22 +1779,28 @@ class _TicketsScreenState extends State<TicketsScreen>
     if (navigation == null) return;
 
     final ticketId = navigation['ticket_id'] as String?;
+    final type = navigation['type'] as String?;
     if (ticketId == null) return;
 
     await Future.delayed(const Duration(milliseconds: 1000));
 
     if (!mounted || _isDisposed) return;
 
-    for (int i = 0; i < _statuses.length; i++) {
-      final tickets = _ticketsByStatus[_statuses[i]] ?? [];
-      if (tickets.any((t) => t.id == ticketId)) {
-        _tabController.animateTo(i);
-        _highlightTicket(ticketId);
-        Future.delayed(const Duration(milliseconds: 500), () {
-          _scrollToTicket(ticketId);
-        });
-        break;
-      }
+    _jumpToTicket(ticketId, targetStatus: _targetStatusForType(type));
+  }
+
+  String? _targetStatusForType(String? type) {
+    switch (type) {
+      case 'ticket_assigned':
+      case 'ticket_rejected':
+        return 'inprogress';
+      case 'ticket_approved':
+      case 'ticket_auto_approved':
+        return 'closed';
+      case 'ticket_created':
+        return 'pending';
+      default:
+        return null;
     }
   }
 
@@ -1816,10 +1822,6 @@ class _TicketsScreenState extends State<TicketsScreen>
         });
       }
     });
-  }
-
-  void _scrollToTicket(String ticketId) {
-    debugPrint('🎯 Ticket $ticketId should be highlighted');
   }
 
   bool _isTicketHighlighted(String ticketId) {

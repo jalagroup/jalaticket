@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:jalasupport/FCMService.dart';
 import 'package:jalasupport/auth.dart';
+import 'package:jalasupport/onboarding_screen.dart';
 import 'package:jalasupport/firebase_options.dart';
 import 'package:jalasupport/l10n/app_localizations.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -263,7 +264,7 @@ class _MyAppMobileState extends State<MyAppMobile> {
           labelSmall:    TextStyle(fontSize: 11, fontWeight: FontWeight.w400, height: 1.3),
         ),
       ),
-      home: _isInitializing ? _buildLoadingScreen() : const AuthWrapper(),
+      home: _isInitializing ? _buildLoadingScreen() : const OnboardingGate(),
       builder: (context, child) {
         return Directionality(
           textDirection: _locale.languageCode == 'ar'

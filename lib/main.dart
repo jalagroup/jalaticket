@@ -367,16 +367,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           _hasNavigatedFromFCM = false;
         });
       },
-      onNavigateToTicket: (ticketId) {
+      onNavigateToTicket: (String? ticketId, String? type) {
         if (!mounted || _hasNavigatedFromFCM) return;
 
-        print('🎯 FCM Callback: Navigate to ticket - ticket: $ticketId');
+        print('🎯 FCM Callback: Navigate to ticket - ticket: $ticketId type: $type');
 
         _hasNavigatedFromFCM = true;
-
-        setState(() {
-          _currentIndex = 1; // Tickets screen index
-        });
+        _navigateToTicket(ticketId, type: type);
 
         Future.delayed(const Duration(seconds: 2), () {
           _hasNavigatedFromFCM = false;
@@ -1144,7 +1141,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     if (type == 'new_message' || type == 'chat_mention') {
       _navigateToChat(ticketId, chatRoomId);
     } else if (ticketId != null) {
-      _navigateToTicket(ticketId);
+      _navigateToTicket(ticketId, type: type);
     }
   }
 
