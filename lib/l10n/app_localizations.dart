@@ -265,6 +265,8 @@ class AppLocalizations {
   String get checkIn => translate('check_in');
   String get checkOut => translate('check_out');
   String get mustCheckOutFirst => translate('must_check_out_first');
+  String get reportProblem => translate('report_problem');
+  String get problemReports => translate('problem_reports');
   String get addNote => translate('add_note');
   String get markFinished => translate('mark_finished');
   String get markUnderSupervision => translate('mark_under_supervision');
@@ -1380,6 +1382,8 @@ const Map<String, String> _enValues = {
   'check_in': 'Check In',
   'check_out': 'Check Out',
   'must_check_out_first': 'You must check out from your current visit before changing the ticket status.',
+  'report_problem': 'Report a Problem',
+  'problem_reports': 'Problem Reports',
   'add_note': 'Add Note',
   'mark_finished': 'Mark Finished',
   'mark_under_supervision': 'Mark Under Supervision',
@@ -2419,6 +2423,8 @@ const Map<String, String> _arValues = {
   'check_in': 'تسجيل دخول',
   'check_out': 'تسجيل خروج',
   'must_check_out_first': 'يجب تسجيل الخروج من زيارتك الحالية قبل تغيير حالة التذكرة.',
+  'report_problem': 'الإبلاغ عن مشكلة',
+  'problem_reports': 'تقارير المشكلات',
   'add_note': 'إضافة ملاحظة',
   'mark_finished': 'تحديد كمنتهي',
   'mark_under_supervision': 'تحديد تحت الإشراف',

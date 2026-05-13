@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:jalasupport/l10n/app_localizations.dart';
 import 'package:jalasupport/main.dart';
 import 'package:jalasupport/main_mobile.dart';
+import 'package:jalasupport/report_problem_screen.dart';
 import 'package:jalasupport/models.dart';
 import 'package:jalasupport/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -3127,6 +3128,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.orange[700],
                 side: BorderSide(color: Colors.orange[700]!),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Divider(),
+          const SizedBox(height: 8),
+          // Report a Problem button
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ReportProblemScreen(
+                        currentUser: widget.currentUser),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.bug_report_rounded),
+              label: Text(
+                l10n.reportProblem,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.deepPurple,
+                side: const BorderSide(color: Colors.deepPurple),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12)),
               ),

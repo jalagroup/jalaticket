@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:jalasupport/activity.dart';
 import 'package:jalasupport/ai_insights.dart';
 import 'package:jalasupport/branch_admin_management_screen.dart';
+import 'package:jalasupport/problem_reports_admin_screen.dart';
 import 'package:jalasupport/l10n/app_localizations.dart';
 import 'package:jalasupport/main.dart';
 import 'package:jalasupport/models.dart';
@@ -909,7 +910,7 @@ class _ManagementScreenState extends State<ManagementScreen>
   int _getTabCount() {
     switch (widget.currentUser.userType) {
       case UserType.systemAdmin:
-        return 12;
+        return 13;
       case UserType.superAdmin:
         return 8;
       case UserType.superUser:
@@ -943,6 +944,7 @@ class _ManagementScreenState extends State<ManagementScreen>
         Tab(icon: const Icon(Icons.history, size: 20), text: l10n.logs),
         Tab(icon: const Icon(Icons.settings, size: 20), text: l10n.preferences),
         Tab(icon: const Icon(Icons.auto_awesome, size: 20), text: l10n.aiInsights),
+        Tab(icon: const Icon(Icons.bug_report_rounded, size: 20), text: l10n.problemReports),
       ]);
     } else if (widget.currentUser.userType == UserType.superAdmin) {
       tabs.addAll([
@@ -1014,6 +1016,9 @@ class _ManagementScreenState extends State<ManagementScreen>
           break;
         case 11:
           view = AiInsightsView(currentUser: widget.currentUser);
+          break;
+        case 12:
+          view = ProblemReportsAdminScreen(currentUser: widget.currentUser);
           break;
         default:
           view =
