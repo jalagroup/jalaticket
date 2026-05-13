@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:jalasupport/main.dart';
 import 'package:jalasupport/models.dart';
+import 'package:jalasupport/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
@@ -52,6 +53,28 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
     return supabase.storage.from('problem_reports').getPublicUrl(path);
   }
 
+  void _notifySystemAdmins() async {
+    try {
+      final admins = await supabase
+          .from('users')
+          .select('id')
+          .eq('user_type', UserType.systemAdmin.value)
+          .eq('is_active', true);
+
+      for (final admin in admins) {
+        await NotificationService.createAndSendNotification(
+          userId: admin['id'] as String,
+          type: 'problem_report',
+          title: 'New Problem Report',
+          message:
+              '${widget.currentUser.fullName} submitted a problem report. Tap to review it.',
+        );
+      }
+    } catch (e) {
+      debugPrint('⚠️ Could not notify system admin: $e');
+    }
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isSubmitting = true);
@@ -68,6 +91,9 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
         'image_url': imageUrl,
         'status': 'new',
       });
+
+      // Notify all system admins in-app + push
+      _notifySystemAdmins();
 
       if (!mounted) return;
       Navigator.pop(context);
