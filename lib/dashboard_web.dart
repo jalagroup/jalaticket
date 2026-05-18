@@ -20,7 +20,7 @@ class AppColors {
 
 class DashboardWeb extends StatefulWidget {
   final UserModel currentUser;
-  final VoidCallback onNavigateToTickets;
+  final void Function(String? status) onNavigateToTickets;
 
   const DashboardWeb({
     super.key,
@@ -300,6 +300,7 @@ class _DashboardWebState extends State<DashboardWeb>
                   Colors.orange,
                   Icons.pending_actions_rounded,
                   isSmallScreen,
+                  statusFilter: 'pending',
                 ),
               ),
               const SizedBox(width: 8),
@@ -310,6 +311,7 @@ class _DashboardWebState extends State<DashboardWeb>
                   AppColors.secondary,
                   Icons.work_outline_rounded,
                   isSmallScreen,
+                  statusFilter: 'inprogress',
                 ),
               ),
             ],
@@ -324,6 +326,7 @@ class _DashboardWebState extends State<DashboardWeb>
                   Colors.purple,
                   Icons.timer_outlined,
                   isSmallScreen,
+                  statusFilter: 'prefinished',
                 ),
               ),
               const SizedBox(width: 8),
@@ -334,6 +337,7 @@ class _DashboardWebState extends State<DashboardWeb>
                   Colors.green,
                   Icons.check_circle_outline_rounded,
                   isSmallScreen,
+                  statusFilter: 'closed',
                 ),
               ),
             ],
@@ -351,6 +355,7 @@ class _DashboardWebState extends State<DashboardWeb>
             Colors.orange,
             Icons.pending_actions_rounded,
             isSmallScreen,
+            statusFilter: 'pending',
           ),
         ),
         const SizedBox(width: 12),
@@ -361,6 +366,7 @@ class _DashboardWebState extends State<DashboardWeb>
             AppColors.secondary,
             Icons.work_outline_rounded,
             isSmallScreen,
+            statusFilter: 'inprogress',
           ),
         ),
         const SizedBox(width: 12),
@@ -371,6 +377,7 @@ class _DashboardWebState extends State<DashboardWeb>
             Colors.purple,
             Icons.timer_outlined,
             isSmallScreen,
+            statusFilter: 'prefinished',
           ),
         ),
         const SizedBox(width: 12),
@@ -381,6 +388,7 @@ class _DashboardWebState extends State<DashboardWeb>
             Colors.green,
             Icons.check_circle_outline_rounded,
             isSmallScreen,
+            statusFilter: 'closed',
           ),
         ),
       ],
@@ -670,7 +678,7 @@ class _DashboardWebState extends State<DashboardWeb>
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: TextButton(
-                      onPressed: widget.onNavigateToTickets,
+                      onPressed: () => widget.onNavigateToTickets(null),
                       style: TextButton.styleFrom(
                         foregroundColor: AppColors.primary,
                         padding: const EdgeInsets.symmetric(vertical: 12),
@@ -914,6 +922,23 @@ class _DashboardWebState extends State<DashboardWeb>
     int count,
     Color color,
     IconData icon,
+    bool isSmallScreen, {
+    String? statusFilter,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: statusFilter != null
+          ? () => widget.onNavigateToTickets(statusFilter)
+          : null,
+      child: _buildStatCardInner(title, count, color, icon, isSmallScreen),
+    );
+  }
+
+  Widget _buildStatCardInner(
+    String title,
+    int count,
+    Color color,
+    IconData icon,
     bool isSmallScreen,
   ) {
     return Container(
@@ -1007,7 +1032,7 @@ class _DashboardWebState extends State<DashboardWeb>
   Widget _buildTicketItem(Map<String, dynamic> ticket, bool isMobile) {
     final l10n = AppLocalizations.safeOf(context);
     return InkWell(
-      onTap: widget.onNavigateToTickets,
+      onTap: () => widget.onNavigateToTickets(null),
       borderRadius: BorderRadius.circular(6),
       child: Container(
         padding: EdgeInsets.all(isMobile ? 8 : 10),

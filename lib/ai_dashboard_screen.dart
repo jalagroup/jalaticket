@@ -22,7 +22,7 @@ class _DashItem {
   final String id;
   final _Kind kind;
   dynamic raw;
-  String chartType;  // 'bar' | 'pie' | 'line'
+  String chartType;  // 'bar' | 'pie' | 'line' | 'area' | 'horizontal_bar'
   int heightLevel;   // 0=160  1=220  2=320
   int colorTheme;    // index into _themes
   int colSpan;       // 1-4 (columns in a 4-column grid)
@@ -111,6 +111,12 @@ class _AiDashboardScreenState extends State<AiDashboardScreen>
   Map<String, dynamic>? _result;
   String? _error;
   bool _showTips = false;
+  bool _showFilters = false;
+
+  // ── data source filters ──────────────────────────────────────────────────────
+  int _daysBack = 30;
+  final Set<String> _statusFilter = {'pending','inprogress','prefinished','closed','resolved'};
+  final Set<String> _priorityFilter = {'low','medium','high','critical','urgent'};
 
   @override
   void initState() {
@@ -127,11 +133,19 @@ class _AiDashboardScreenState extends State<AiDashboardScreen>
 
   Future<Map<String, dynamic>> _gatherAggregatedData() async {
     // ── 1. Tickets ────────────────────────────────────────────────────────────
+    final since = DateTime.now().subtract(Duration(days: _daysBack)).toIso8601String();
     var q = supabase.from('tickets').select(
         'id,status,priority,target_department_id,place_id,created_at,assigned_to,'
         'departments:target_department_id(name),places(name)');
     if (widget.currentUser.departmentId != null) {
       q = q.eq('target_department_id', widget.currentUser.departmentId!);
+    }
+    q = q.gte('created_at', since);
+    if (_statusFilter.length < 6) {
+      q = q.inFilter('status', _statusFilter.toList());
+    }
+    if (_priorityFilter.length < 5) {
+      q = q.inFilter('priority', _priorityFilter.toList());
     }
     final rows = await q.order('created_at', ascending: false).limit(500);
 
@@ -478,7 +492,15 @@ class _AiDashboardScreenState extends State<AiDashboardScreen>
               result: _result,
               error: _error,
               showTips: _showTips,
+              showFilters: _showFilters,
+              daysBack: _daysBack,
+              statusFilter: _statusFilter,
+              priorityFilter: _priorityFilter,
               onToggleTips: () => setState(() => _showTips = !_showTips),
+              onToggleFilters: () => setState(() => _showFilters = !_showFilters),
+              onDaysChanged: (v) => setState(() => _daysBack = v),
+              onStatusToggle: (s) => setState(() => _statusFilter.contains(s) ? _statusFilter.remove(s) : _statusFilter.add(s)),
+              onPriorityToggle: (p) => setState(() => _priorityFilter.contains(p) ? _priorityFilter.remove(p) : _priorityFilter.add(p)),
               onGenerate: _generate,
               onSave: _showSaveDialog,
               dashKey: _dashKey,
@@ -499,7 +521,15 @@ class _BuilderTab extends StatelessWidget {
   final Map<String, dynamic>? result;
   final String? error;
   final bool showTips;
+  final bool showFilters;
+  final int daysBack;
+  final Set<String> statusFilter;
+  final Set<String> priorityFilter;
   final VoidCallback onToggleTips;
+  final VoidCallback onToggleFilters;
+  final ValueChanged<int> onDaysChanged;
+  final ValueChanged<String> onStatusToggle;
+  final ValueChanged<String> onPriorityToggle;
   final VoidCallback onGenerate;
   final VoidCallback onSave;
   final GlobalKey<_InteractiveDashboardState> dashKey;
@@ -510,7 +540,15 @@ class _BuilderTab extends StatelessWidget {
     required this.result,
     required this.error,
     required this.showTips,
+    required this.showFilters,
+    required this.daysBack,
+    required this.statusFilter,
+    required this.priorityFilter,
     required this.onToggleTips,
+    required this.onToggleFilters,
+    required this.onDaysChanged,
+    required this.onStatusToggle,
+    required this.onPriorityToggle,
     required this.onGenerate,
     required this.onSave,
     required this.dashKey,
@@ -519,11 +557,25 @@ class _BuilderTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.safeOf(context);
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         _TipsCard(l10n: l10n, expanded: showTips, onToggle: onToggleTips),
-        const SizedBox(height: 14),
+        const SizedBox(height: 10),
+        // ── data source filter panel ──────────────────────────────────────────
+        _FiltersPanel(
+          expanded: showFilters,
+          onToggle: onToggleFilters,
+          daysBack: daysBack,
+          statusFilter: statusFilter,
+          priorityFilter: priorityFilter,
+          onDaysChanged: onDaysChanged,
+          onStatusToggle: onStatusToggle,
+          onPriorityToggle: onPriorityToggle,
+          isAr: isAr,
+        ),
+        const SizedBox(height: 10),
         Container(
           decoration: BoxDecoration(
             color: Colors.white,
@@ -762,6 +814,155 @@ class _TipsCard extends StatelessWidget {
       );
 }
 
+/// Public wrapper so main.dart can embed a saved dashboard on the home tab.
+class AiDashboardView extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const AiDashboardView({super.key, required this.data});
+
+  @override
+  Widget build(BuildContext context) => _InteractiveDashboard(
+        data: data,
+        l10n: AppLocalizations.safeOf(context),
+      );
+}
+
+// ─── filters panel ────────────────────────────────────────────────────────────
+class _FiltersPanel extends StatelessWidget {
+  final bool expanded;
+  final VoidCallback onToggle;
+  final int daysBack;
+  final Set<String> statusFilter;
+  final Set<String> priorityFilter;
+  final ValueChanged<int> onDaysChanged;
+  final ValueChanged<String> onStatusToggle;
+  final ValueChanged<String> onPriorityToggle;
+  final bool isAr;
+
+  const _FiltersPanel({
+    required this.expanded,
+    required this.onToggle,
+    required this.daysBack,
+    required this.statusFilter,
+    required this.priorityFilter,
+    required this.onDaysChanged,
+    required this.onStatusToggle,
+    required this.onPriorityToggle,
+    required this.isAr,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.teal.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.teal.shade100),
+      ),
+      child: Column(children: [
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+          leading: Icon(Icons.filter_list_rounded, color: Colors.teal.shade700, size: 20),
+          title: Text(
+            isAr ? '⚙️ مصدر البيانات والفلاتر' : '⚙️ Data Source & Filters',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.teal.shade700),
+          ),
+          trailing: expanded
+              ? Icon(Icons.expand_less, color: Colors.teal.shade600)
+              : Icon(Icons.expand_more, color: Colors.teal.shade600),
+          onTap: onToggle,
+        ),
+        if (expanded)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // Date range
+              Text(isAr ? 'نطاق التاريخ:' : 'Date range:',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.teal.shade800)),
+              const SizedBox(height: 6),
+              Wrap(spacing: 6, children: [7, 30, 90, 180, 365].map((d) {
+                final sel = daysBack == d;
+                return GestureDetector(
+                  onTap: () => onDaysChanged(d),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: sel ? Colors.teal : Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: sel ? Colors.teal : Colors.teal.shade200),
+                    ),
+                    child: Text(
+                      isAr ? '$d يوم' : '${d}d',
+                      style: TextStyle(fontSize: 12, color: sel ? Colors.white : Colors.teal.shade700, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                );
+              }).toList()),
+              const SizedBox(height: 12),
+              // Status filter
+              Text(isAr ? 'الحالة:' : 'Status:',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.teal.shade800)),
+              const SizedBox(height: 6),
+              Wrap(spacing: 6, runSpacing: 4, children: {
+                'pending': isAr ? 'معلق' : 'Pending',
+                'inprogress': isAr ? 'قيد التنفيذ' : 'In Progress',
+                'prefinished': isAr ? 'شبه منتهي' : 'Pre-finished',
+                'closed': isAr ? 'مغلق' : 'Closed',
+                'resolved': isAr ? 'تم الحل' : 'Resolved',
+              }.entries.map((e) {
+                final sel = statusFilter.contains(e.key);
+                return GestureDetector(
+                  onTap: () => onStatusToggle(e.key),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: sel ? Colors.indigo.shade600 : Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: sel ? Colors.indigo.shade600 : Colors.grey.shade300),
+                    ),
+                    child: Text(e.value,
+                        style: TextStyle(fontSize: 11.5, color: sel ? Colors.white : Colors.grey[700], fontWeight: FontWeight.w500)),
+                  ),
+                );
+              }).toList()),
+              const SizedBox(height: 12),
+              // Priority filter
+              Text(isAr ? 'الأولوية:' : 'Priority:',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.teal.shade800)),
+              const SizedBox(height: 6),
+              Wrap(spacing: 6, children: {
+                'low': isAr ? 'منخفضة' : 'Low',
+                'medium': isAr ? 'متوسطة' : 'Medium',
+                'high': isAr ? 'عالية' : 'High',
+                'critical': isAr ? 'حرجة' : 'Critical',
+                'urgent': isAr ? 'عاجل' : 'Urgent',
+              }.entries.map((e) {
+                final sel = priorityFilter.contains(e.key);
+                final col = e.key == 'critical' || e.key == 'urgent' ? Colors.red.shade600
+                    : e.key == 'high' ? Colors.orange.shade700 : Colors.green.shade700;
+                return GestureDetector(
+                  onTap: () => onPriorityToggle(e.key),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: sel ? col : Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: sel ? col : Colors.grey.shade300),
+                    ),
+                    child: Text(e.value,
+                        style: TextStyle(fontSize: 11.5, color: sel ? Colors.white : Colors.grey[700], fontWeight: FontWeight.w500)),
+                  ),
+                );
+              }).toList()),
+            ]),
+          ),
+      ]),
+    );
+  }
+}
+
 // ─── interactive dashboard ────────────────────────────────────────────────────
 class _InteractiveDashboard extends StatefulWidget {
   final Map<String, dynamic> data;
@@ -774,6 +975,7 @@ class _InteractiveDashboard extends StatefulWidget {
 
 class _InteractiveDashboardState extends State<_InteractiveDashboard> {
   late List<_DashItem> _items;
+  final _dragAccum = <String, double>{}; // per-item resize drag accumulator
 
   @override
   void initState() {
@@ -810,27 +1012,65 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
     };
   }
 
-  List<List<_DashItem>> _groupIntoRows(List<_DashItem> vis) {
+  List<List<_DashItem>> _groupIntoRows(List<_DashItem> vis) =>
+      _groupIntoRowsN(vis, 4, (cs) => cs.clamp(1, 4).toInt());
+
+  List<List<_DashItem>> _groupIntoRowsN(
+      List<_DashItem> vis, int cols, int Function(int) eff) {
     final rows = <List<_DashItem>>[];
     var row = <_DashItem>[];
     var span = 0;
     for (final item in vis) {
-      final cs = item.colSpan.clamp(1, 4);
-      if (span + cs > 4 && row.isNotEmpty) {
-        rows.add(row);
-        row = [];
-        span = 0;
+      final cs = eff(item.colSpan);
+      if (span + cs > cols && row.isNotEmpty) {
+        rows.add(row); row = []; span = 0;
       }
       row.add(item);
       span += cs;
-      if (span >= 4) {
-        rows.add(row);
-        row = [];
-        span = 0;
+      if (span >= cols) {
+        rows.add(row); row = []; span = 0;
       }
     }
     if (row.isNotEmpty) rows.add(row);
     return rows;
+  }
+
+  // Wraps a draggable card with a right-edge resize handle.
+  Widget _buildResizableCard(_DashItem item, List<_DashItem> vis, double totalWidth, int gridCols) {
+    return Stack(
+      children: [
+        _buildDraggableCard(item, vis),
+        // Right-edge resize handle (12 px wide, full card height)
+        Positioned(
+          right: 0, top: 0, bottom: 0, width: 16,
+          child: MouseRegion(
+            cursor: SystemMouseCursors.resizeLeftRight,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onPanUpdate: (d) {
+                _dragAccum[item.id] = (_dragAccum[item.id] ?? 0) + d.delta.dx;
+                final unitPx = totalWidth / gridCols;
+                if (_dragAccum[item.id]! > unitPx && item.colSpan < gridCols) {
+                  setState(() { item.colSpan++; _dragAccum[item.id] = 0; });
+                } else if (_dragAccum[item.id]! < -unitPx && item.colSpan > 1) {
+                  setState(() { item.colSpan--; _dragAccum[item.id] = 0; });
+                }
+              },
+              onPanEnd: (_) => _dragAccum[item.id] = 0,
+              child: Center(
+                child: Container(
+                  width: 4, height: 36,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade400.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -838,51 +1078,59 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
     final isAr = Localizations.localeOf(context).languageCode == 'ar';
     final title = widget.data['dashboard_title'] as String? ?? widget.l10n.aiDashboard;
     final vis = _items.where((i) => !i.deleted).toList();
-    final rows = _groupIntoRows(vis);
 
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-      Padding(
-        padding: const EdgeInsets.only(top: 4, bottom: 12),
-        child: Text(
-          isAr
-              ? 'اضغط مطولاً للسحب  •  ◀ ▶ لتغيير العرض  •  ▲ ▼ للارتفاع  •  ✕ للحذف'
-              : 'Long-press to drag  •  ◀ ▶ width  •  ▲ ▼ height  •  ✕ to remove',
-          style: TextStyle(fontSize: 11, color: Colors.grey[500]),
-        ),
-      ),
-      ...rows.map((rowItems) {
-        final usedSpan = rowItems.fold<int>(0, (s, i) => s + i.colSpan.clamp(1, 4));
-        final remSpan  = 4 - usedSpan;
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                ...rowItems.asMap().entries.map((e) {
-                  final item = e.value;
-                  return Expanded(
-                    flex: item.colSpan.clamp(1, 4),
-                    child: Padding(
-                      padding: EdgeInsets.only(left: e.key == 0 ? 0 : 8),
-                      child: _buildDraggableCard(item, vis),
-                    ),
-                  );
-                }),
-                if (remSpan > 0) Expanded(
-                  flex: remSpan,
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: _buildEmptySlot(insertAfterId: rowItems.last.id),
-                  ),
-                ),
-              ],
-            ),
+    return LayoutBuilder(builder: (ctx, constraints) {
+      final isMobile = constraints.maxWidth < 560;
+      final gridCols = isMobile ? 2 : 4;
+      // clamp each item's colSpan to the active grid size
+      int eff(int cs) => cs.clamp(1, gridCols).toInt();
+
+      final rows = _groupIntoRowsN(vis, gridCols, eff);
+
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        Padding(
+          padding: const EdgeInsets.only(top: 4, bottom: 12),
+          child: Text(
+            isAr
+                ? 'اضغط مطولاً للسحب  •  اسحب الحافة اليمنى لتغيير العرض  •  ▲ ▼ للارتفاع  •  ✕ للحذف'
+                : 'Long-press to drag  •  Drag right edge to resize  •  ▲ ▼ height  •  ✕ to remove',
+            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
           ),
-        );
-      }),
-    ]);
+        ),
+        ...rows.map((rowItems) {
+          final usedSpan = rowItems.fold<int>(0, (s, i) => s + eff(i.colSpan));
+          final remSpan  = gridCols - usedSpan;
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ...rowItems.asMap().entries.map((e) {
+                    final item = e.value;
+                    return Expanded(
+                      flex: eff(item.colSpan),
+                      child: Padding(
+                        padding: EdgeInsets.only(left: e.key == 0 ? 0 : 8),
+                        child: _buildResizableCard(item, vis, constraints.maxWidth, gridCols),
+                      ),
+                    );
+                  }),
+                  if (remSpan > 0) Expanded(
+                    flex: remSpan,
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 8),
+                      child: _buildEmptySlot(insertAfterId: rowItems.last.id),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ]);
+    });
   }
 
   Widget _buildDraggableCard(_DashItem item, List<_DashItem> vis) {
@@ -993,9 +1241,9 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
                 const SizedBox(width: 6),
                 GestureDetector(
                   onTap: () => setState(() {
-                    final types = ['bar', 'pie', 'line'];
+                    final types = ['bar', 'pie', 'line', 'area', 'horizontal_bar'];
                     final idx = types.indexOf(item.chartType);
-                    item.chartType = types[(idx + 1) % 3];
+                    item.chartType = types[(idx + 1) % types.length];
                   }),
                   child: Container(
                     padding: const EdgeInsets.all(4),
@@ -1025,8 +1273,13 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
 
   String _spanLabel(int cs) => const ['¼', '½', '¾', '■'][cs.clamp(1, 4) - 1];
   String _heightLabel(int lvl) => const ['S', 'M', 'L'][lvl.clamp(0, 2)];
-  IconData _chartTypeIcon(String t) =>
-      t == 'pie' ? Icons.pie_chart : t == 'line' ? Icons.show_chart : Icons.bar_chart;
+  IconData _chartTypeIcon(String t) => switch (t) {
+        'pie' => Icons.pie_chart,
+        'line' => Icons.show_chart,
+        'area' => Icons.area_chart,
+        'horizontal_bar' => Icons.bar_chart_outlined,
+        _ => Icons.bar_chart,
+      };
 
   Widget _buildEmptySlot({required String insertAfterId}) {
     return DragTarget<String>(
@@ -1177,12 +1430,13 @@ class _ChartCard extends StatelessWidget {
         SizedBox(
           height: height,
           child: switch (type) {
-            'pie' || 'donut' => _PieChart(chart: chart, colorOffset: colorOffset),
-            'line'           => _LineChart(chart: chart, colorOffset: colorOffset),
-            _                => _BarChart(chart: chart, colorOffset: colorOffset),
+            'pie' || 'donut'          => _PieChart(chart: chart, colorOffset: colorOffset),
+            'line'                    => _LineChart(chart: chart, colorOffset: colorOffset, filled: false),
+            'area'                    => _LineChart(chart: chart, colorOffset: colorOffset, filled: true),
+            'horizontal_bar'          => _BarChart(chart: chart, colorOffset: colorOffset, horizontal: true),
+            _                         => _BarChart(chart: chart, colorOffset: colorOffset),
           },
         ),
-        // Legend — pie already has one built-in; show for bar & line
         if (!isPie && series.isNotEmpty) _Legend(series: series, colorOffset: colorOffset),
       ],
     );
@@ -1222,7 +1476,8 @@ class _Legend extends StatelessWidget {
 class _BarChart extends StatelessWidget {
   final Map chart;
   final int colorOffset;
-  const _BarChart({required this.chart, this.colorOffset = 0});
+  final bool horizontal;
+  const _BarChart({required this.chart, this.colorOffset = 0, this.horizontal = false});
 
   @override
   Widget build(BuildContext context) {
@@ -1238,8 +1493,10 @@ class _BarChart extends StatelessWidget {
           final data = (se.value['data'] as List?)?.cast<num>() ?? [];
           final val  = i < data.length ? data[i].toDouble() : 0.0;
           return BarChartRodData(
-            toY: val, color: _color(se.key + colorOffset), width: 14,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(4)));
+            toY: val, color: _color(se.key + colorOffset), width: horizontal ? 10 : 14,
+            borderRadius: horizontal
+                ? const BorderRadius.horizontal(right: Radius.circular(4))
+                : const BorderRadius.vertical(top: Radius.circular(4)));
         }).toList(),
       );
     }).toList();
@@ -1248,24 +1505,38 @@ class _BarChart extends StatelessWidget {
         .expand((s) => (s['data'] as List? ?? []).cast<num>())
         .fold<double>(0, (m, v) => v.toDouble() > m ? v.toDouble() : m);
 
+    Widget labelWidget(double v, _) {
+      final idx = v.toInt();
+      if (idx < 0 || idx >= labels.length) return const SizedBox.shrink();
+      final lbl = labels[idx];
+      return Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Text(lbl.length > 8 ? '${lbl.substring(0, 7)}…' : lbl,
+            style: const TextStyle(fontSize: 9)),
+      );
+    }
+
     return BarChart(BarChartData(
       barGroups: groups, maxY: maxY * 1.2,
-      gridData: const FlGridData(drawVerticalLine: false),
+      gridData: FlGridData(drawVerticalLine: !horizontal, drawHorizontalLine: horizontal),
       borderData: FlBorderData(show: false),
       titlesData: FlTitlesData(
-        leftTitles:  const AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 32)),
+        leftTitles: AxisTitles(sideTitles: SideTitles(
+          showTitles: true, reservedSize: horizontal ? 64 : 32,
+          getTitlesWidget: (v, meta) {
+            if (!horizontal) return const SizedBox.shrink();
+            final idx = v.toInt();
+            if (idx < 0 || idx >= labels.length) return const SizedBox.shrink();
+            final lbl = labels[idx];
+            return Padding(padding: const EdgeInsets.only(right: 4),
+                child: Text(lbl.length > 9 ? '${lbl.substring(0, 8)}…' : lbl,
+                    style: const TextStyle(fontSize: 9), textAlign: TextAlign.right));
+          },
+        )),
         topTitles:   const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         bottomTitles: AxisTitles(sideTitles: SideTitles(
-          showTitles: true,
-          getTitlesWidget: (v, _) {
-            final idx = v.toInt();
-            if (idx >= labels.length) return const SizedBox.shrink();
-            final lbl = labels[idx];
-            return Padding(padding: const EdgeInsets.only(top: 4),
-                child: Text(lbl.length > 8 ? '${lbl.substring(0, 7)}…' : lbl,
-                    style: const TextStyle(fontSize: 9)));
-          },
+          showTitles: !horizontal, getTitlesWidget: labelWidget,
         )),
       ),
     ));
@@ -1329,7 +1600,8 @@ class _PieChart extends StatelessWidget {
 class _LineChart extends StatelessWidget {
   final Map chart;
   final int colorOffset;
-  const _LineChart({required this.chart, this.colorOffset = 0});
+  final bool filled;
+  const _LineChart({required this.chart, this.colorOffset = 0, this.filled = false});
 
   @override
   Widget build(BuildContext context) {
@@ -1339,11 +1611,15 @@ class _LineChart extends StatelessWidget {
 
     final lineBars = series.asMap().entries.map((se) {
       final data = (se.value['data'] as List?)?.cast<num>() ?? [];
+      final col  = _color(se.key + colorOffset);
       return LineChartBarData(
         spots: data.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.toDouble())).toList(),
-        color: _color(se.key + colorOffset), isCurved: true, barWidth: 2.5,
+        color: col, isCurved: true, barWidth: filled ? 2 : 2.5,
         dotData: const FlDotData(show: false),
-        belowBarData: BarAreaData(show: true, color: _color(se.key + colorOffset).withValues(alpha: 0.08)),
+        belowBarData: BarAreaData(
+          show: true,
+          color: col.withValues(alpha: filled ? 0.22 : 0.08),
+        ),
       );
     }).toList();
 
@@ -1385,15 +1661,43 @@ class _TableCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final columns = (table['columns'] as List?)?.cast<String>() ?? [];
     final rows    = (table['rows'] as List?)?.map((r) => (r as List).cast<String>()).toList() ?? [];
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        headingRowColor: WidgetStateProperty.all(Colors.grey.shade50),
-        columnSpacing: 24, horizontalMargin: 0,
-        headingTextStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-        dataTextStyle:    const TextStyle(fontSize: 12),
-        columns: columns.map((c) => DataColumn(label: Text(c))).toList(),
-        rows:    rows.map((r) => DataRow(cells: r.map((cell) => DataCell(Text(cell))).toList())).toList(),
+    if (columns.isEmpty) return const SizedBox.shrink();
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Table(
+          defaultColumnWidth: const IntrinsicColumnWidth(),
+          border: TableBorder(
+            horizontalInside: BorderSide(color: Colors.grey.shade100, width: 1),
+            bottom: BorderSide(color: Colors.grey.shade200, width: 1),
+          ),
+          children: [
+            // Header row
+            TableRow(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [const Color(0xFFf16936).withValues(alpha: 0.12), const Color(0xFFf16936).withValues(alpha: 0.06)],
+                ),
+              ),
+              children: columns.map((c) => Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                child: Text(c, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: Color(0xFF333333))),
+              )).toList(),
+            ),
+            // Data rows
+            ...rows.asMap().entries.map((re) => TableRow(
+              decoration: BoxDecoration(
+                color: re.key.isEven ? Colors.white : Colors.grey.shade50,
+              ),
+              children: re.value.map((cell) => Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                child: Text(cell, style: TextStyle(fontSize: 12, color: Colors.grey[800])),
+              )).toList(),
+            )),
+          ],
+        ),
       ),
     );
   }

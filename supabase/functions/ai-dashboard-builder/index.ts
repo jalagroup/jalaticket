@@ -33,7 +33,7 @@ The JSON structure must be exactly:
   ],
   "charts": [
     {
-      "type": "bar" | "pie" | "line",
+      "type": "bar" | "pie" | "line" | "area" | "horizontal_bar",
       "title": "string",
       "x_labels": ["string"],
       "series": [
@@ -76,7 +76,9 @@ WRONG (never do this):
   ]
 }
 
-For bar/line charts: x_labels = category names, each series = one data set with data[] matching x_labels length.`;
+For bar/line/area charts: x_labels = category names, each series = one data set with data[] matching x_labels length.
+Use "area" for filled trend charts (time-series, cumulative values).
+Use "horizontal_bar" for ranked comparisons (e.g. top departments by ticket count).`;
 
     const userMessage = `Ticket data summary (aggregated, not raw records):
 ${JSON.stringify(data, null, 2)}

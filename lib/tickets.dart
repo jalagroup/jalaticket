@@ -1317,8 +1317,9 @@ class _TrackingTimelineWidgetState extends State<TrackingTimelineWidget> {
 
 class TicketsScreen extends StatefulWidget {
   final UserModel currentUser;
+  final String? initialStatus;
 
-  const TicketsScreen({super.key, required this.currentUser});
+  const TicketsScreen({super.key, required this.currentUser, this.initialStatus});
 
   @override
   State<TicketsScreen> createState() => _TicketsScreenState();
@@ -1435,6 +1436,13 @@ class _TicketsScreenState extends State<TicketsScreen>
 
     _tabController = TabController(length: _statuses.length, vsync: this);
     _tabController.addListener(_onTabChanged);
+
+    if (widget.initialStatus != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final idx = _statuses.indexWhere((s) => s.value == widget.initialStatus);
+        if (idx >= 0) _tabController.animateTo(idx);
+      });
+    }
 
     for (var status in _statuses) {
       _ticketsByStatus[status] = [];

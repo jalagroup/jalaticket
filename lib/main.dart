@@ -34,6 +34,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:jalasupport/main_mobile.dart' show myAppMobileKey;
 import 'package:jalasupport/sound_service.dart';
 import 'package:jalasupport/ai_dashboard_onboarding.dart';
+import 'package:jalasupport/ai_dashboard_screen.dart';
 
 import 'dart:ui' as ui;
 
@@ -301,7 +302,7 @@ class _MyAppState extends State<MyApp> {
 }
 
 Widget getDashboardScreen(
-    UserModel currentUser, VoidCallback onNavigateToTickets) {
+    UserModel currentUser, void Function(String? status) onNavigateToTickets) {
   if (kIsWeb) {
     return DashboardWeb(
       currentUser: currentUser,
@@ -342,6 +343,14 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   List<NavigationItem> _webNavItems = [];
   List<NavigationItem> _mobileNavItems = [];
+
+  // KPI tap — navigate to tickets with a pre-selected status tab
+  String? _initialTicketStatus;
+
+  // Main dashboard preference
+  String _mainDashMode = 'default'; // 'default' | 'saved'
+  String? _mainDashSavedId;
+  Map<String, dynamic>? _mainDashSavedData;
 
   List<Map<String, dynamic>> _notifications = [];
   int _unreadCount = 0;
@@ -588,6 +597,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           }
         });
 
+        // Load main dashboard preference
+        _loadMainDashPreference();
+
         await Future.wait([
           _setupConnectivityMonitoring(),
           _checkComplaintPermission(),
@@ -609,6 +621,122 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }
 
   void navigateToNotification() {}
+
+  Future<void> _loadMainDashPreference() async {
+    if (_currentUser == null) return;
+    try {
+      final row = await supabase
+          .from('user_main_dashboard')
+          .select('mode,saved_dashboard_id')
+          .eq('user_id', _currentUser!.id)
+          .maybeSingle();
+      if (row == null || !mounted) return;
+      final mode = row['mode'] as String? ?? 'default';
+      final savedId = row['saved_dashboard_id'] as String?;
+      if (mode == 'saved' && savedId != null) {
+        final dash = await supabase
+            .from('saved_dashboards')
+            .select('result')
+            .eq('id', savedId)
+            .maybeSingle();
+        if (dash != null && mounted) {
+          setState(() {
+            _mainDashMode = 'saved';
+            _mainDashSavedId = savedId;
+            _mainDashSavedData = Map<String, dynamic>.from(dash['result'] as Map);
+          });
+        }
+      } else if (mounted) {
+        setState(() { _mainDashMode = 'default'; });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveMainDashPreference(String mode, String? savedId) async {
+    if (_currentUser == null) return;
+    try {
+      await supabase.from('user_main_dashboard').upsert(
+        {'user_id': _currentUser!.id, 'mode': mode, 'saved_dashboard_id': savedId},
+        onConflict: 'user_id',
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _showMainDashCustomizer() async {
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
+    List<Map<String, dynamic>> saved = [];
+    try {
+      final res = await supabase
+          .from('saved_dashboards')
+          .select('id,title')
+          .eq('created_by', _currentUser!.id)
+          .order('created_at', ascending: false);
+      saved = List<Map<String, dynamic>>.from(res);
+    } catch (_) {}
+
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(isAr ? 'تخصيص لوحة التحكم الرئيسية' : 'Customize Main Dashboard',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 16),
+            _dashOptionTile(
+              icon: Icons.dashboard_rounded,
+              title: isAr ? 'لوحة النظام الافتراضية' : 'System Default Dashboard',
+              selected: _mainDashMode == 'default',
+              onTap: () async {
+                Navigator.pop(ctx);
+                await _saveMainDashPreference('default', null);
+                if (mounted) setState(() { _mainDashMode = 'default'; _mainDashSavedData = null; });
+              },
+            ),
+            if (saved.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(isAr ? 'لوحات الذكاء الاصطناعي المحفوظة:' : 'Saved AI Dashboards:',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              ...saved.map((d) => _dashOptionTile(
+                icon: Icons.auto_awesome_rounded,
+                title: d['title'] as String? ?? '',
+                selected: _mainDashSavedId == d['id'],
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final dash = await supabase
+                      .from('saved_dashboards').select('result').eq('id', d['id']).maybeSingle();
+                  if (dash != null && mounted) {
+                    await _saveMainDashPreference('saved', d['id'] as String);
+                    setState(() {
+                      _mainDashMode = 'saved';
+                      _mainDashSavedId = d['id'] as String;
+                      _mainDashSavedData = Map<String, dynamic>.from(dash['result'] as Map);
+                    });
+                  }
+                },
+              )),
+            ],
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _dashOptionTile({required IconData icon, required String title, required bool selected, required VoidCallback onTap}) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      leading: Icon(icon, color: selected ? const Color(0xFFf16936) : Colors.grey),
+      title: Text(title, style: TextStyle(fontSize: 13, fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+          color: selected ? const Color(0xFFf16936) : Colors.black87)),
+      trailing: selected ? const Icon(Icons.check_circle_rounded, color: Color(0xFFf16936), size: 20) : null,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      tileColor: selected ? const Color(0xFFf16936).withValues(alpha: 0.07) : null,
+      onTap: onTap,
+    );
+  }
 
   Future<void> _checkComplaintPermission() async {
     if (_currentUser == null) {
@@ -1299,8 +1427,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   Widget _buildCurrentScreen() {
     if (_currentUser == null) return Container();
 
-    void navigateToTickets() {
-      setState(() => _currentIndex = 1);
+    void navigateToTickets(String? status) {
+      setState(() {
+        _currentIndex = 1;
+        _initialTicketStatus = status;
+      });
     }
 
     final screenWidth = MediaQuery.of(context).size.width;
@@ -1309,12 +1440,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     if (isMobile) {
       switch (_currentIndex) {
         case 0:
-          return DashboardMobile(
-            currentUser: _currentUser!,
-            onNavigateToTickets: navigateToTickets,
-          );
+          return _buildDashboardTab(isMobile, navigateToTickets);
         case 1:
-          return TicketsScreen(currentUser: _currentUser!);
+          final status = _initialTicketStatus;
+          _initialTicketStatus = null;
+          return TicketsScreen(currentUser: _currentUser!, initialStatus: status);
         case 2:
           WidgetsBinding.instance.addPostFrameCallback((_) {
             _loadUnreadChatRoomsCount();
@@ -1343,20 +1473,16 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                 _handleProfileImageUpdate, // ✨ Added callback
           );
         default:
-          return DashboardMobile(
-            currentUser: _currentUser!,
-            onNavigateToTickets: navigateToTickets,
-          );
+          return _buildDashboardTab(isMobile, navigateToTickets);
       }
     } else {
       switch (_currentIndex) {
         case 0:
-          return DashboardWeb(
-            currentUser: _currentUser!,
-            onNavigateToTickets: navigateToTickets,
-          );
+          return _buildDashboardTab(isMobile, navigateToTickets);
         case 1:
-          return TicketsScreen(currentUser: _currentUser!);
+          final status = _initialTicketStatus;
+          _initialTicketStatus = null;
+          return TicketsScreen(currentUser: _currentUser!, initialStatus: status);
         case 2:
           WidgetsBinding.instance.addPostFrameCallback((_) {
             _loadUnreadChatRoomsCount();
@@ -1373,16 +1499,53 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         case 5:
           return ProfileScreen(
             currentUser: _currentUser!,
-            onProfileImageUpdated:
-                _handleProfileImageUpdate, // ✨ Added callback
+            onProfileImageUpdated: _handleProfileImageUpdate,
           );
         default:
-          return DashboardWeb(
-            currentUser: _currentUser!,
-            onNavigateToTickets: navigateToTickets,
-          );
+          return _buildDashboardTab(isMobile, navigateToTickets);
       }
     }
+  }
+
+  Widget _buildDashboardTab(bool isMobile, void Function(String?) onNavigate) {
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
+    Widget dash;
+    if (_mainDashMode == 'saved' && _mainDashSavedData != null) {
+      dash = SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(
+            _mainDashSavedData!['dashboard_title'] as String? ?? (isAr ? 'لوحتي' : 'My Dashboard'),
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          AiDashboardView(data: _mainDashSavedData!),
+        ]),
+      );
+    } else {
+      dash = isMobile
+          ? DashboardMobile(currentUser: _currentUser!, onNavigateToTickets: onNavigate)
+          : DashboardWeb(currentUser: _currentUser!, onNavigateToTickets: onNavigate);
+    }
+
+    return Stack(
+      children: [
+        dash,
+        Positioned(
+          bottom: 80,
+          right: 16,
+          child: FloatingActionButton.small(
+            heroTag: 'dashCustomize',
+            backgroundColor: Colors.white,
+            foregroundColor: const Color(0xFFf16936),
+            tooltip: isAr ? 'تخصيص لوحة التحكم' : 'Customize Dashboard',
+            elevation: 3,
+            onPressed: _showMainDashCustomizer,
+            child: const Icon(Icons.tune_rounded),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildNoAccessScreen() {

@@ -20,7 +20,7 @@ class AppColors {
 
 class DashboardMobile extends StatefulWidget {
   final UserModel currentUser;
-  final VoidCallback onNavigateToTickets;
+  final void Function(String? status) onNavigateToTickets;
 
   const DashboardMobile({
     super.key,
@@ -372,45 +372,13 @@ class _DashboardMobileState extends State<DashboardMobile>
         if (isTablet)
           Row(
             children: [
-              Expanded(
-                child: _buildStatCard(
-                  l10n.pending,
-                  _ticketCounts['pending'] ?? 0,
-                  Colors.orange,
-                  Icons.pending_actions_rounded,
-                  isTablet,
-                ),
-              ),
+              Expanded(child: _buildStatCard(l10n.pending, _ticketCounts['pending'] ?? 0, Colors.orange, Icons.pending_actions_rounded, isTablet, statusFilter: 'pending')),
               const SizedBox(width: 12),
-              Expanded(
-                child: _buildStatCard(
-                  l10n.inProgress,
-                  _ticketCounts['inprogress'] ?? 0,
-                  AppColors.secondary,
-                  Icons.work_outline_rounded,
-                  isTablet,
-                ),
-              ),
+              Expanded(child: _buildStatCard(l10n.inProgress, _ticketCounts['inprogress'] ?? 0, AppColors.secondary, Icons.work_outline_rounded, isTablet, statusFilter: 'inprogress')),
               const SizedBox(width: 12),
-              Expanded(
-                child: _buildStatCard(
-                  l10n.prefinished,
-                  _ticketCounts['prefinished'] ?? 0,
-                  Colors.purple,
-                  Icons.timer_outlined,
-                  isTablet,
-                ),
-              ),
+              Expanded(child: _buildStatCard(l10n.prefinished, _ticketCounts['prefinished'] ?? 0, Colors.purple, Icons.timer_outlined, isTablet, statusFilter: 'prefinished')),
               const SizedBox(width: 12),
-              Expanded(
-                child: _buildStatCard(
-                  l10n.closed,
-                  _ticketCounts['closed'] ?? 0,
-                  Colors.green,
-                  Icons.check_circle_outline_rounded,
-                  isTablet,
-                ),
-              ),
+              Expanded(child: _buildStatCard(l10n.closed, _ticketCounts['closed'] ?? 0, Colors.green, Icons.check_circle_outline_rounded, isTablet, statusFilter: 'closed')),
             ],
           )
         else
@@ -422,34 +390,10 @@ class _DashboardMobileState extends State<DashboardMobile>
             mainAxisSpacing: 12,
             childAspectRatio: 1.4,
             children: [
-              _buildStatCard(
-                l10n.pending,
-                _ticketCounts['pending'] ?? 0,
-                Colors.orange,
-                Icons.pending_actions_rounded,
-                isTablet,
-              ),
-              _buildStatCard(
-                l10n.inProgress,
-                _ticketCounts['inprogress'] ?? 0,
-                AppColors.secondary,
-                Icons.work_outline_rounded,
-                isTablet,
-              ),
-              _buildStatCard(
-                l10n.prefinished,
-                _ticketCounts['prefinished'] ?? 0,
-                Colors.purple,
-                Icons.timer_outlined,
-                isTablet,
-              ),
-              _buildStatCard(
-                l10n.closed,
-                _ticketCounts['closed'] ?? 0,
-                Colors.green,
-                Icons.check_circle_outline_rounded,
-                isTablet,
-              ),
+              _buildStatCard(l10n.pending, _ticketCounts['pending'] ?? 0, Colors.orange, Icons.pending_actions_rounded, isTablet, statusFilter: 'pending'),
+              _buildStatCard(l10n.inProgress, _ticketCounts['inprogress'] ?? 0, AppColors.secondary, Icons.work_outline_rounded, isTablet, statusFilter: 'inprogress'),
+              _buildStatCard(l10n.prefinished, _ticketCounts['prefinished'] ?? 0, Colors.purple, Icons.timer_outlined, isTablet, statusFilter: 'prefinished'),
+              _buildStatCard(l10n.closed, _ticketCounts['closed'] ?? 0, Colors.green, Icons.check_circle_outline_rounded, isTablet, statusFilter: 'closed'),
             ],
           ),
       ],
@@ -700,7 +644,7 @@ class _DashboardMobileState extends State<DashboardMobile>
                 borderRadius: BorderRadius.circular(20),
               ),
               child: TextButton(
-                onPressed: widget.onNavigateToTickets,
+                onPressed: () => widget.onNavigateToTickets(null),
                 style: TextButton.styleFrom(
                   foregroundColor: AppColors.primary,
                   padding: EdgeInsets.symmetric(
@@ -791,12 +735,11 @@ class _DashboardMobileState extends State<DashboardMobile>
     int count,
     Color color,
     IconData icon,
-    bool isTablet,
-  ) {
-    // Reduced height for tablet
+    bool isTablet, {
+    String? statusFilter,
+  }) {
     final cardHeight = isTablet ? 90.0 : null;
-
-    return Container(
+    final inner = Container(
       height: cardHeight,
       padding: EdgeInsets.all(isTablet ? 10 : 12),
       decoration: BoxDecoration(
@@ -882,12 +825,19 @@ class _DashboardMobileState extends State<DashboardMobile>
         ],
       ),
     );
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: statusFilter != null
+          ? () => widget.onNavigateToTickets(statusFilter)
+          : null,
+      child: inner,
+    );
   }
 
   Widget _buildRecentTicketCard(Map<String, dynamic> ticket, bool isTablet) {
     final l10n = AppLocalizations.safeOf(context);
     return InkWell(
-      onTap: widget.onNavigateToTickets,
+      onTap: () => widget.onNavigateToTickets(null),
       borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: EdgeInsets.all(isTablet ? 18 : 16),
