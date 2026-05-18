@@ -23,9 +23,9 @@ class _DashItem {
   final _Kind kind;
   dynamic raw;
   String chartType;  // 'bar' | 'pie' | 'line' | 'area' | 'horizontal_bar'
-  int heightLevel;   // 0=160  1=220  2=320
+  int heightLevel;   // 0-5 → XS/S/M/L/XL/XXL
   int colorTheme;    // index into _themes
-  int colSpan;       // 1-4 (columns in a 4-column grid)
+  int colSpan;       // 1-8 (columns in an 8-column grid)
   bool deleted;
 
   _DashItem({
@@ -40,7 +40,7 @@ class _DashItem {
   });
 }
 
-const _heights = [160.0, 220.0, 320.0];
+const _heights = [100.0, 140.0, 180.0, 240.0, 320.0, 440.0]; // XS S M L XL XXL
 
 List<_DashItem> _parseItems(Map<String, dynamic> data) {
   final layoutList = (data['_layout'] as List?)?.cast<Map>() ?? [];
@@ -57,7 +57,7 @@ List<_DashItem> _parseItems(Map<String, dynamic> data) {
     final l = lOf('kpis');
     items.add(_DashItem(
       id: 'kpis', kind: _Kind.kpiGroup, raw: kpis,
-      colSpan:     (l['colSpan']     as int?) ?? 4,
+      colSpan:     (l['colSpan']     as int?) ?? 8,
       heightLevel: (l['heightLevel'] as int?) ?? 1,
       colorTheme:  (l['colorTheme']  as int?) ?? 0,
     ));
@@ -69,8 +69,8 @@ List<_DashItem> _parseItems(Map<String, dynamic> data) {
     items.add(_DashItem(
       id: id, kind: _Kind.chart, raw: charts[i],
       chartType:   (l['chartType']   as String?) ?? (charts[i]['type'] as String? ?? 'bar').toLowerCase(),
-      colSpan:     (l['colSpan']     as int?) ?? 2,
-      heightLevel: (l['heightLevel'] as int?) ?? 1,
+      colSpan:     (l['colSpan']     as int?) ?? 4,
+      heightLevel: (l['heightLevel'] as int?) ?? 2,
       colorTheme:  (l['colorTheme']  as int?) ?? 0,
     ));
   }
@@ -80,8 +80,8 @@ List<_DashItem> _parseItems(Map<String, dynamic> data) {
     final l = lOf(id);
     items.add(_DashItem(
       id: id, kind: _Kind.table, raw: tables[i],
-      colSpan:     (l['colSpan']     as int?) ?? 4,
-      heightLevel: (l['heightLevel'] as int?) ?? 1,
+      colSpan:     (l['colSpan']     as int?) ?? 8,
+      heightLevel: (l['heightLevel'] as int?) ?? 2,
       colorTheme:  (l['colorTheme']  as int?) ?? 0,
     ));
   }
@@ -817,12 +817,14 @@ class _TipsCard extends StatelessWidget {
 /// Public wrapper so main.dart can embed a saved dashboard on the home tab.
 class AiDashboardView extends StatelessWidget {
   final Map<String, dynamic> data;
-  const AiDashboardView({super.key, required this.data});
+  final bool showTitle;
+  const AiDashboardView({super.key, required this.data, this.showTitle = true});
 
   @override
   Widget build(BuildContext context) => _InteractiveDashboard(
         data: data,
         l10n: AppLocalizations.safeOf(context),
+        showTitle: showTitle,
       );
 }
 
@@ -967,7 +969,8 @@ class _FiltersPanel extends StatelessWidget {
 class _InteractiveDashboard extends StatefulWidget {
   final Map<String, dynamic> data;
   final AppLocalizations l10n;
-  const _InteractiveDashboard({super.key, required this.data, required this.l10n});
+  final bool showTitle;
+  const _InteractiveDashboard({super.key, required this.data, required this.l10n, this.showTitle = true});
 
   @override
   State<_InteractiveDashboard> createState() => _InteractiveDashboardState();
@@ -975,7 +978,8 @@ class _InteractiveDashboard extends StatefulWidget {
 
 class _InteractiveDashboardState extends State<_InteractiveDashboard> {
   late List<_DashItem> _items;
-  final _dragAccum = <String, double>{}; // per-item resize drag accumulator
+  final _dragAccum   = <String, double>{};
+  final _resizingIds = <String>{};
 
   @override
   void initState() {
@@ -1035,18 +1039,26 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
     return rows;
   }
 
-  // Wraps a draggable card with a right-edge resize handle.
   Widget _buildResizableCard(_DashItem item, List<_DashItem> vis, double totalWidth, int gridCols) {
+    final isResizing = _resizingIds.contains(item.id);
     return Stack(
       children: [
-        _buildDraggableCard(item, vis),
-        // Right-edge resize handle (12 px wide, full card height)
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          decoration: isResizing
+              ? BoxDecoration(
+                  border: Border.all(color: const Color(0xFFf16936), width: 2),
+                  borderRadius: BorderRadius.circular(16))
+              : null,
+          child: _buildDraggableCard(item, vis),
+        ),
         Positioned(
-          right: 0, top: 0, bottom: 0, width: 16,
+          right: 0, top: 0, bottom: 0, width: 20,
           child: MouseRegion(
             cursor: SystemMouseCursors.resizeLeftRight,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
+              onPanStart: (_) => setState(() => _resizingIds.add(item.id)),
               onPanUpdate: (d) {
                 _dragAccum[item.id] = (_dragAccum[item.id] ?? 0) + d.delta.dx;
                 final unitPx = totalWidth / gridCols;
@@ -1056,13 +1068,20 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
                   setState(() { item.colSpan--; _dragAccum[item.id] = 0; });
                 }
               },
-              onPanEnd: (_) => _dragAccum[item.id] = 0,
+              onPanEnd: (_) => setState(() {
+                _resizingIds.remove(item.id);
+                _dragAccum[item.id] = 0;
+              }),
               child: Center(
-                child: Container(
-                  width: 4, height: 36,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  width: isResizing ? 5 : 4,
+                  height: isResizing ? 48 : 36,
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade400.withValues(alpha: 0.7),
-                    borderRadius: BorderRadius.circular(2),
+                    color: isResizing
+                        ? const Color(0xFFf16936)
+                        : Colors.grey.shade400.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(3),
                   ),
                 ),
               ),
@@ -1081,20 +1100,21 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
 
     return LayoutBuilder(builder: (ctx, constraints) {
       final isMobile = constraints.maxWidth < 560;
-      final gridCols = isMobile ? 2 : 4;
-      // clamp each item's colSpan to the active grid size
+      final gridCols = isMobile ? 4 : 8;
       int eff(int cs) => cs.clamp(1, gridCols).toInt();
 
       final rows = _groupIntoRowsN(vis, gridCols, eff);
 
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        if (widget.showTitle) ...[
+          Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        ],
         Padding(
-          padding: const EdgeInsets.only(top: 4, bottom: 12),
+          padding: EdgeInsets.only(top: widget.showTitle ? 4 : 0, bottom: 12),
           child: Text(
             isAr
-                ? 'اضغط مطولاً للسحب  •  اسحب الحافة اليمنى لتغيير العرض  •  ▲ ▼ للارتفاع  •  ✕ للحذف'
-                : 'Long-press to drag  •  Drag right edge to resize  •  ▲ ▼ height  •  ✕ to remove',
+                ? 'اسحب المقبض للتحريك  •  اسحب الحافة اليمنى لتغيير العرض  •  ▲ ▼ للارتفاع  •  انقر للخصائص  •  ✕ للحذف'
+                : 'Drag handle to move  •  Drag right edge to resize  •  ▲ ▼ height  •  Tap card to edit  •  ✕ to remove',
             style: TextStyle(fontSize: 11, color: Colors.grey[500]),
           ),
         ),
@@ -1155,112 +1175,130 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
                   border: Border.all(color: const Color(0xFFf16936), width: 2),
                   borderRadius: BorderRadius.circular(16))
               : null,
-          child: LongPressDraggable<String>(
-            data: item.id,
-            delay: const Duration(milliseconds: 350),
-            feedback: Material(
-              elevation: 12, borderRadius: BorderRadius.circular(14),
-              child: SizedBox(
-                width: (MediaQuery.of(ctx).size.width - 32) * item.colSpan / 4,
-                child: Opacity(opacity: 0.9, child: _card(item)),
-              ),
-            ),
-            childWhenDragging: Opacity(opacity: 0.25, child: _card(item)),
-            child: _card(item),
-          ),
+          child: _card(item, ctx),
         );
       },
     );
   }
 
-  Widget _card(_DashItem item) => Container(
-        decoration: BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.circular(14),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 2))],
+  Widget _card(_DashItem item, BuildContext ctx) {
+    // Ghost preview shown while dragging
+    Widget ghostPreview() => Material(
+      elevation: 8, borderRadius: BorderRadius.circular(14),
+      child: Container(
+        width: 200, height: 60, padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+        child: Row(children: [
+          const Icon(Icons.drag_indicator_rounded, color: Colors.grey, size: 18),
+          const SizedBox(width: 8),
+          Expanded(child: Text(_label(item),
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+              overflow: TextOverflow.ellipsis)),
+        ]),
+      ),
+    );
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white, borderRadius: BorderRadius.circular(14),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // ── Header: drag handle + title + close ──────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+          child: Row(children: [
+            // Explicit drag handle — only this area initiates a drag
+            Draggable<String>(
+              data: item.id,
+              feedback: ghostPreview(),
+              childWhenDragging: const Icon(Icons.drag_indicator_rounded, color: Color(0xFFf16936), size: 20),
+              child: MouseRegion(
+                cursor: SystemMouseCursors.grab,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(Icons.drag_indicator_rounded, color: Colors.grey.shade400, size: 20),
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(_label(item),
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                  overflow: TextOverflow.ellipsis),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close_rounded, size: 18, color: Colors.red),
+              padding: const EdgeInsets.all(4), constraints: const BoxConstraints(),
+              onPressed: () => setState(() => item.deleted = true),
+            ),
+          ]),
         ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Title row
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 8, 0),
-            child: Row(children: [
-              const Icon(Icons.drag_indicator_rounded, color: Colors.grey, size: 20),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(_label(item),
-                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                    overflow: TextOverflow.ellipsis),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close_rounded, size: 18, color: Colors.red),
-                padding: const EdgeInsets.all(6), constraints: const BoxConstraints(),
-                onPressed: () => setState(() => item.deleted = true),
-              ),
-            ]),
-          ),
-          // Inline controls row
-          Padding(
-            padding: const EdgeInsets.fromLTRB(10, 2, 10, 6),
-            child: Row(children: [
-              // Width ← colSpan →
-              _ctrlBtn(Icons.chevron_left,  item.colSpan > 1 ? () => setState(() => item.colSpan--) : null),
-              GestureDetector(
-                onTap: () => setState(() => item.colSpan = item.colSpan % 4 + 1),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(color: Colors.indigo.shade50, borderRadius: BorderRadius.circular(5)),
-                  child: Text(_spanLabel(item.colSpan),
-                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.indigo)),
-                ),
-              ),
-              _ctrlBtn(Icons.chevron_right, item.colSpan < 4 ? () => setState(() => item.colSpan++) : null),
-              const SizedBox(width: 6),
-              // Height ▲ level ▼
-              _ctrlBtn(Icons.expand_more, item.heightLevel > 0 ? () => setState(() => item.heightLevel--) : null),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        // ── Controls row ─────────────────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 2, 8, 4),
+          child: Row(children: [
+            _ctrlBtn(Icons.chevron_left,  item.colSpan > 1 ? () => setState(() => item.colSpan--) : null),
+            GestureDetector(
+              onTap: () => setState(() => item.colSpan = item.colSpan % 8 + 1),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                 decoration: BoxDecoration(color: Colors.indigo.shade50, borderRadius: BorderRadius.circular(5)),
-                child: Text(_heightLabel(item.heightLevel),
-                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.indigo)),
+                child: Text(_spanLabel(item.colSpan),
+                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.indigo)),
               ),
-              _ctrlBtn(Icons.expand_less, item.heightLevel < 2 ? () => setState(() => item.heightLevel++) : null),
-              const SizedBox(width: 6),
-              // Color dot — tap to cycle
+            ),
+            _ctrlBtn(Icons.chevron_right, item.colSpan < 8 ? () => setState(() => item.colSpan++) : null),
+            const SizedBox(width: 4),
+            _ctrlBtn(Icons.expand_more, item.heightLevel > 0 ? () => setState(() => item.heightLevel--) : null),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              decoration: BoxDecoration(color: Colors.indigo.shade50, borderRadius: BorderRadius.circular(5)),
+              child: Text(_heightLabel(item.heightLevel),
+                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.indigo)),
+            ),
+            _ctrlBtn(Icons.expand_less, item.heightLevel < 5 ? () => setState(() => item.heightLevel++) : null),
+            const SizedBox(width: 4),
+            GestureDetector(
+              onTap: () => setState(() => item.colorTheme = (item.colorTheme + 1) % 5),
+              child: Container(
+                width: 16, height: 16,
+                decoration: BoxDecoration(
+                  color: _color(_themes[item.colorTheme]), shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                  boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 2)],
+                ),
+              ),
+            ),
+            if (item.kind == _Kind.chart) ...[
+              const SizedBox(width: 4),
               GestureDetector(
-                onTap: () => setState(() => item.colorTheme = (item.colorTheme + 1) % 5),
+                onTap: () => setState(() {
+                  final types = ['bar', 'pie', 'line', 'area', 'horizontal_bar'];
+                  final idx = types.indexOf(item.chartType);
+                  item.chartType = types[(idx + 1) % types.length];
+                }),
                 child: Container(
-                  width: 18, height: 18,
-                  decoration: BoxDecoration(
-                    color: _color(_themes[item.colorTheme]), shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 2),
-                    boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 2)],
-                  ),
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(5)),
+                  child: Icon(_chartTypeIcon(item.chartType), size: 13, color: Colors.teal),
                 ),
               ),
-              // Chart type icon — tap to cycle (charts only)
-              if (item.kind == _Kind.chart) ...[
-                const SizedBox(width: 6),
-                GestureDetector(
-                  onTap: () => setState(() {
-                    final types = ['bar', 'pie', 'line', 'area', 'horizontal_bar'];
-                    final idx = types.indexOf(item.chartType);
-                    item.chartType = types[(idx + 1) % types.length];
-                  }),
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(5)),
-                    child: Icon(_chartTypeIcon(item.chartType), size: 14, color: Colors.teal),
-                  ),
-                ),
-              ],
-            ]),
-          ),
-          // Content
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
+            ],
+          ]),
+        ),
+        // ── Content — tap opens properties panel ─────────────────────────────
+        InkWell(
+          onTap: () => _openPropertiesPanel(ctx, item),
+          borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
             child: _content(item),
           ),
-        ]),
-      );
+        ),
+      ]),
+    );
+  }
 
   Widget _ctrlBtn(IconData icon, VoidCallback? onTap) => InkWell(
         onTap: onTap,
@@ -1271,8 +1309,11 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
         ),
       );
 
-  String _spanLabel(int cs) => const ['¼', '½', '¾', '■'][cs.clamp(1, 4) - 1];
-  String _heightLabel(int lvl) => const ['S', 'M', 'L'][lvl.clamp(0, 2)];
+  String _spanLabel(int cs) => switch (cs.clamp(1, 8)) {
+        1 => '⅛', 2 => '¼', 3 => '⅜', 4 => '½',
+        5 => '⅝', 6 => '¾', 7 => '⅞', _ => '■',
+      };
+  String _heightLabel(int lvl) => const ['XS','S','M','L','XL','XXL'][lvl.clamp(0, 5)];
   IconData _chartTypeIcon(String t) => switch (t) {
         'pie' => Icons.pie_chart,
         'line' => Icons.show_chart,
@@ -1280,6 +1321,27 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
         'horizontal_bar' => Icons.bar_chart_outlined,
         _ => Icons.bar_chart,
       };
+
+  void _openPropertiesPanel(BuildContext ctx, _DashItem item) {
+    showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.55,
+        minChildSize: 0.4,
+        maxChildSize: 0.92,
+        expand: false,
+        builder: (__, ctrl) => _PropertiesSheet(
+          item: item,
+          onChanged: () => setState(() {}),
+          scrollController: ctrl,
+        ),
+      ),
+    );
+  }
 
   Widget _buildEmptySlot({required String insertAfterId}) {
     return DragTarget<String>(
@@ -1337,7 +1399,239 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
   }
 }
 
+// ─── properties sheet ─────────────────────────────────────────────────────────
+class _PropertiesSheet extends StatefulWidget {
+  final _DashItem item;
+  final VoidCallback onChanged;
+  final ScrollController scrollController;
+  const _PropertiesSheet({required this.item, required this.onChanged, required this.scrollController});
 
+  @override
+  State<_PropertiesSheet> createState() => _PropertiesSheetState();
+}
+
+class _PropertiesSheetState extends State<_PropertiesSheet> {
+  late final TextEditingController _titleCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleCtrl = TextEditingController(text: _getTitle());
+  }
+
+  @override
+  void dispose() { _titleCtrl.dispose(); super.dispose(); }
+
+  String _getTitle() {
+    if (widget.item.kind == _Kind.kpiGroup) return 'KPIs';
+    return (widget.item.raw as Map)['title'] as String? ?? '';
+  }
+
+  void _setTitle(String v) {
+    if (widget.item.kind == _Kind.kpiGroup) return;
+    final m = Map<String, dynamic>.from(widget.item.raw as Map);
+    m['title'] = v;
+    widget.item.raw = m;
+    widget.onChanged();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
+    final item  = widget.item;
+    final col   = _color(_themes[item.colorTheme]);
+
+    return ListView(
+      controller: widget.scrollController,
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+      children: [
+        // drag pill
+        Center(child: Container(
+          width: 40, height: 4,
+          margin: const EdgeInsets.only(bottom: 16),
+          decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+        )),
+        Text(isAr ? 'خصائص المكوّن' : 'Component Properties',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        const SizedBox(height: 20),
+
+        // ── Title ────────────────────────────────────────────────────────────
+        if (item.kind != _Kind.kpiGroup) ...[
+          _sectionLabel(isAr ? 'العنوان' : 'Title'),
+          TextField(
+            controller: _titleCtrl,
+            decoration: InputDecoration(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              isDense: true,
+            ),
+            onChanged: _setTitle,
+          ),
+          const SizedBox(height: 20),
+        ],
+
+        // ── Layout ───────────────────────────────────────────────────────────
+        _sectionLabel(isAr ? 'العرض (من 8 أعمدة)' : 'Width (of 8 columns)'),
+        Row(children: List.generate(8, (i) {
+          final cs = i + 1;
+          final sel = item.colSpan == cs;
+          return Expanded(child: GestureDetector(
+            onTap: () => setState(() { item.colSpan = cs; widget.onChanged(); }),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              margin: const EdgeInsets.only(right: 4),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                color: sel ? col : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Center(child: Text('$cs',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold,
+                      color: sel ? Colors.white : Colors.grey[600]))),
+            ),
+          ));
+        })),
+        const SizedBox(height: 14),
+
+        _sectionLabel(isAr ? 'الارتفاع' : 'Height'),
+        Row(children: List.generate(_heights.length, (i) {
+          const labels = ['XS','S','M','L','XL','XXL'];
+          final sel = item.heightLevel == i;
+          return Expanded(child: GestureDetector(
+            onTap: () => setState(() { item.heightLevel = i; widget.onChanged(); }),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              margin: const EdgeInsets.only(right: 4),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                color: sel ? col : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Center(child: Text(labels[i],
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold,
+                      color: sel ? Colors.white : Colors.grey[600]))),
+            ),
+          ));
+        })),
+        const SizedBox(height: 20),
+
+        // ── Color theme ──────────────────────────────────────────────────────
+        _sectionLabel(isAr ? 'اللون' : 'Color Theme'),
+        Row(children: List.generate(5, (i) {
+          final c = _color(_themes[i]);
+          final sel = item.colorTheme == i;
+          return Padding(
+            padding: const EdgeInsets.only(right: 10),
+            child: GestureDetector(
+              onTap: () => setState(() { item.colorTheme = i; widget.onChanged(); }),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
+                width: sel ? 34 : 28, height: sel ? 34 : 28,
+                decoration: BoxDecoration(
+                  color: c, shape: BoxShape.circle,
+                  border: Border.all(color: sel ? Colors.black54 : Colors.transparent, width: 2),
+                  boxShadow: sel ? [BoxShadow(color: c.withValues(alpha: 0.5), blurRadius: 6)] : null,
+                ),
+              ),
+            ),
+          );
+        })),
+        const SizedBox(height: 20),
+
+        // ── Chart type (charts only) ─────────────────────────────────────────
+        if (item.kind == _Kind.chart) ...[
+          _sectionLabel(isAr ? 'نوع الرسم البياني' : 'Chart Type'),
+          Wrap(spacing: 8, runSpacing: 8,
+            children: [
+              for (final t in ['bar','horizontal_bar','pie','line','area'])
+                _chartTypeChip(t, item, isAr),
+            ],
+          ),
+          const SizedBox(height: 20),
+        ],
+
+        // ── KPI list (kpiGroup only) ─────────────────────────────────────────
+        if (item.kind == _Kind.kpiGroup) ...[
+          _sectionLabel(isAr ? 'مؤشرات KPI' : 'KPI Items'),
+          ...((item.raw as List).cast<Map>().asMap().entries.map((e) {
+            final kpi = e.value;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(children: [
+                Container(width: 4, height: 36,
+                    decoration: BoxDecoration(
+                      color: _color(e.key + _themes[item.colorTheme]),
+                      borderRadius: BorderRadius.circular(2))),
+                const SizedBox(width: 8),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(kpi['label']?.toString() ?? '', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  Text(kpi['value']?.toString() ?? '', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                ])),
+              ]),
+            );
+          })),
+          const SizedBox(height: 20),
+        ],
+
+        // ── Table data info (tables only) ────────────────────────────────────
+        if (item.kind == _Kind.table) ...[
+          _sectionLabel(isAr ? 'بيانات الجدول' : 'Table Data'),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade200)),
+            child: Text(
+              isAr
+                  ? 'الجدول يحتوي على ${((item.raw as Map)['rows'] as List?)?.length ?? 0} صف(ف) و ${((item.raw as Map)['columns'] as List?)?.length ?? 0} عمود(أعمدة).'
+                  : 'Table has ${((item.raw as Map)['rows'] as List?)?.length ?? 0} row(s) across ${((item.raw as Map)['columns'] as List?)?.length ?? 0} column(s).',
+              style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+            ),
+          ),
+          const SizedBox(height: 20),
+        ],
+      ],
+    );
+  }
+
+  Widget _sectionLabel(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey[700])),
+  );
+
+  Widget _chartTypeChip(String type, _DashItem item, bool isAr) {
+    final labels = {
+      'bar': isAr ? 'عمودي' : 'Bar',
+      'horizontal_bar': isAr ? 'أفقي' : 'H-Bar',
+      'pie': isAr ? 'دائري' : 'Pie',
+      'line': isAr ? 'خطي' : 'Line',
+      'area': isAr ? 'مساحة' : 'Area',
+    };
+    final icons = {
+      'bar': Icons.bar_chart, 'horizontal_bar': Icons.bar_chart_outlined,
+      'pie': Icons.pie_chart, 'line': Icons.show_chart, 'area': Icons.area_chart,
+    };
+    final sel = item.chartType == type;
+    final col = _color(_themes[item.colorTheme]);
+    return GestureDetector(
+      onTap: () => setState(() { item.chartType = type; widget.onChanged(); }),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: sel ? col : Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: sel ? col : Colors.grey.shade300),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icons[type], size: 16, color: sel ? Colors.white : Colors.grey[700]),
+          const SizedBox(width: 5),
+          Text(labels[type]!, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+              color: sel ? Colors.white : Colors.grey[700])),
+        ]),
+      ),
+    );
+  }
+}
 
 // ─── kpi grid ─────────────────────────────────────────────────────────────────
 class _KpiGrid extends StatelessWidget {
@@ -1568,31 +1862,46 @@ class _PieChart extends StatelessWidget {
       return PieChartSectionData(
         value: e.value.toDouble(), color: _color(e.key + colorOffset),
         title: '${pct.toStringAsFixed(1)}%',
-        titleStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
-        radius: 80,
+        titleStyle: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white),
+        radius: 70,
       );
     }).toList();
 
-    return Row(children: [
-      Expanded(child: PieChart(PieChartData(sections: sections, sectionsSpace: 2, centerSpaceRadius: 28))),
-      const SizedBox(width: 12),
-      Flexible(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: labels.asMap().entries.map((e) => Padding(
-            padding: const EdgeInsets.only(bottom: 5),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Container(width: 10, height: 10,
-                  decoration: BoxDecoration(color: _color(e.key + colorOffset), shape: BoxShape.circle)),
-              const SizedBox(width: 5),
-              Flexible(child: Text(e.value.length > 12 ? '${e.value.substring(0, 11)}…' : e.value,
-                  style: const TextStyle(fontSize: 10))),
-            ]),
-          )).toList(),
+    final legendItems = labels.asMap().entries.map((e) => Padding(
+      padding: const EdgeInsets.only(bottom: 5),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(width: 9, height: 9,
+            decoration: BoxDecoration(color: _color(e.key + colorOffset), shape: BoxShape.circle)),
+        const SizedBox(width: 4),
+        Flexible(child: Text(e.value.length > 14 ? '${e.value.substring(0, 13)}…' : e.value,
+            style: const TextStyle(fontSize: 10))),
+      ]),
+    )).toList();
+
+    return LayoutBuilder(builder: (context, constraints) {
+      final narrow = constraints.maxWidth < 220;
+      final pieWidget = PieChart(PieChartData(
+          sections: sections, sectionsSpace: 2, centerSpaceRadius: narrow ? 20 : 28));
+
+      if (narrow) {
+        return Column(children: [
+          SizedBox(height: constraints.maxWidth * 0.8, child: pieWidget),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 4, children: legendItems),
+        ]);
+      }
+      return Row(children: [
+        Expanded(child: pieWidget),
+        const SizedBox(width: 10),
+        Flexible(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: legendItems,
+          ),
         ),
-      ),
-    ]);
+      ]);
+    });
   }
 }
 
@@ -1653,53 +1962,134 @@ class _LineChart extends StatelessWidget {
 }
 
 // ─── table card ───────────────────────────────────────────────────────────────
-class _TableCard extends StatelessWidget {
+class _TableCard extends StatefulWidget {
   final Map table;
   const _TableCard({required this.table});
+  @override
+  State<_TableCard> createState() => _TableCardState();
+}
+
+class _TableCardState extends State<_TableCard> {
+  int?   _sortCol;
+  bool   _sortAsc = true;
+  String _filter  = '';
 
   @override
   Widget build(BuildContext context) {
-    final columns = (table['columns'] as List?)?.cast<String>() ?? [];
-    final rows    = (table['rows'] as List?)?.map((r) => (r as List).cast<String>()).toList() ?? [];
+    final isAr    = Localizations.localeOf(context).languageCode == 'ar';
+    final columns = (widget.table['columns'] as List?)?.cast<String>() ?? [];
+    var   rows    = (widget.table['rows'] as List?)
+            ?.map((r) => (r as List).cast<String>()).toList() ?? [];
     if (columns.isEmpty) return const SizedBox.shrink();
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Table(
-          defaultColumnWidth: const IntrinsicColumnWidth(),
-          border: TableBorder(
-            horizontalInside: BorderSide(color: Colors.grey.shade100, width: 1),
-            bottom: BorderSide(color: Colors.grey.shade200, width: 1),
+    // Apply filter
+    if (_filter.isNotEmpty) {
+      final q = _filter.toLowerCase();
+      rows = rows.where((r) => r.any((cell) => cell.toLowerCase().contains(q))).toList();
+    }
+
+    // Apply sort
+    if (_sortCol != null && _sortCol! < columns.length) {
+      rows.sort((a, b) {
+        final av = _sortCol! < a.length ? a[_sortCol!] : '';
+        final bv = _sortCol! < b.length ? b[_sortCol!] : '';
+        final numA = double.tryParse(av.replaceAll(',', ''));
+        final numB = double.tryParse(bv.replaceAll(',', ''));
+        final cmp = (numA != null && numB != null)
+            ? numA.compareTo(numB)
+            : av.compareTo(bv);
+        return _sortAsc ? cmp : -cmp;
+      });
+    }
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // Filter bar
+      Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: TextField(
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: isAr ? 'بحث...' : 'Filter...',
+            prefixIcon: const Icon(Icons.search, size: 16),
+            suffixIcon: _filter.isNotEmpty
+                ? IconButton(
+                    icon: const Icon(Icons.close, size: 16),
+                    onPressed: () => setState(() => _filter = ''),
+                  )
+                : null,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
           ),
-          children: [
-            // Header row
-            TableRow(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [const Color(0xFFf16936).withValues(alpha: 0.12), const Color(0xFFf16936).withValues(alpha: 0.06)],
-                ),
-              ),
-              children: columns.map((c) => Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                child: Text(c, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: Color(0xFF333333))),
-              )).toList(),
-            ),
-            // Data rows
-            ...rows.asMap().entries.map((re) => TableRow(
-              decoration: BoxDecoration(
-                color: re.key.isEven ? Colors.white : Colors.grey.shade50,
-              ),
-              children: re.value.map((cell) => Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                child: Text(cell, style: TextStyle(fontSize: 12, color: Colors.grey[800])),
-              )).toList(),
-            )),
-          ],
+          onChanged: (v) => setState(() => _filter = v),
         ),
       ),
-    );
+      if (rows.isEmpty)
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: Text(isAr ? 'لا توجد نتائج' : 'No matching rows',
+              style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+        )
+      else
+        ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Table(
+              defaultColumnWidth: const IntrinsicColumnWidth(),
+              border: TableBorder(
+                horizontalInside: BorderSide(color: Colors.grey.shade100, width: 1),
+                bottom: BorderSide(color: Colors.grey.shade200, width: 1),
+              ),
+              children: [
+                // Header row — tappable to sort
+                TableRow(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(colors: [
+                      const Color(0xFFf16936).withValues(alpha: 0.12),
+                      const Color(0xFFf16936).withValues(alpha: 0.06),
+                    ]),
+                  ),
+                  children: columns.asMap().entries.map((e) {
+                    final isSorted = _sortCol == e.key;
+                    return InkWell(
+                      onTap: () => setState(() {
+                        if (_sortCol == e.key) {
+                          _sortAsc = !_sortAsc;
+                        } else {
+                          _sortCol = e.key;
+                          _sortAsc = true;
+                        }
+                      }),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Text(e.value,
+                              style: const TextStyle(fontWeight: FontWeight.bold,
+                                  fontSize: 12.5, color: Color(0xFF333333))),
+                          if (isSorted) ...[
+                            const SizedBox(width: 4),
+                            Icon(_sortAsc ? Icons.arrow_upward : Icons.arrow_downward,
+                                size: 12, color: const Color(0xFFf16936)),
+                          ],
+                        ]),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                // Data rows
+                ...rows.asMap().entries.map((re) => TableRow(
+                  decoration: BoxDecoration(
+                      color: re.key.isEven ? Colors.white : Colors.grey.shade50),
+                  children: re.value.map((cell) => Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                    child: Text(cell, style: TextStyle(fontSize: 12, color: Colors.grey[800])),
+                  )).toList(),
+                )),
+              ],
+            ),
+          ),
+        ),
+    ]);
   }
 }
 
@@ -2398,5 +2788,764 @@ class _FullDashboardPageState extends State<_FullDashboardPage> {
         ),
       ]),
     );
+  }
+}
+
+// ─── custom dashboard screen ──────────────────────────────────────────────────
+// Lets a super-admin build a dashboard from scratch with live Supabase data.
+
+enum _CAggFn { count, sum, avg }
+enum _CGroupBy { status, priority, department, place, month }
+
+class _CDataSource {
+  _CAggFn aggFn;
+  String? aggField;
+  _CGroupBy? groupBy;
+  int daysBack;
+  Set<String> statusFilter;
+  Set<String> priorityFilter;
+  String format; // 'number' | 'percent' | 'duration'
+
+  _CDataSource({
+    this.aggFn = _CAggFn.count,
+    this.aggField,
+    this.groupBy,
+    this.daysBack = 30,
+    Set<String>? statusFilter,
+    Set<String>? priorityFilter,
+    this.format = 'number',
+  })  : statusFilter  = statusFilter  ?? {'pending','inprogress','prefinished','closed','resolved'},
+        priorityFilter = priorityFilter ?? {'low','medium','high','critical','urgent'};
+
+  Map<String, dynamic> toJson() => {
+    'aggFn': aggFn.name, 'aggField': aggField, 'groupBy': groupBy?.name,
+    'daysBack': daysBack,
+    'statusFilter': statusFilter.toList(),
+    'priorityFilter': priorityFilter.toList(),
+    'format': format,
+  };
+
+  factory _CDataSource.fromJson(Map<String, dynamic> j) => _CDataSource(
+    aggFn: _CAggFn.values.firstWhere((e) => e.name == j['aggFn'], orElse: () => _CAggFn.count),
+    aggField: j['aggField'] as String?,
+    groupBy: j['groupBy'] != null
+        ? _CGroupBy.values.firstWhere((e) => e.name == j['groupBy'], orElse: () => _CGroupBy.status)
+        : null,
+    daysBack: (j['daysBack'] as int?) ?? 30,
+    statusFilter:  Set<String>.from((j['statusFilter'] as List?) ?? []),
+    priorityFilter: Set<String>.from((j['priorityFilter'] as List?) ?? []),
+    format: j['format'] as String? ?? 'number',
+  );
+}
+
+class _CComponent {
+  String id;
+  String type; // 'kpi' | 'chart' | 'table'
+  String title;
+  String chartType;
+  int colSpan;
+  int heightLevel;
+  int colorTheme;
+  _CDataSource datasource;
+  dynamic _cachedData;
+  bool _loading = false;
+
+  _CComponent({
+    required this.id,
+    required this.type,
+    required this.title,
+    this.chartType = 'bar',
+    this.colSpan = 4,
+    this.heightLevel = 2,
+    this.colorTheme = 0,
+    _CDataSource? datasource,
+  }) : datasource = datasource ?? _CDataSource();
+
+  Map<String, dynamic> toJson() => {
+    'id': id, 'type': type, 'title': title,
+    'chartType': chartType, 'colSpan': colSpan,
+    'heightLevel': heightLevel, 'colorTheme': colorTheme,
+    'datasource': datasource.toJson(),
+  };
+
+  factory _CComponent.fromJson(Map<String, dynamic> j) => _CComponent(
+    id: j['id'] as String? ?? UniqueKey().toString(),
+    type: j['type'] as String? ?? 'kpi',
+    title: j['title'] as String? ?? '',
+    chartType: j['chartType'] as String? ?? 'bar',
+    colSpan: (j['colSpan'] as int?) ?? 4,
+    heightLevel: (j['heightLevel'] as int?) ?? 2,
+    colorTheme: (j['colorTheme'] as int?) ?? 0,
+    datasource: j['datasource'] != null
+        ? _CDataSource.fromJson(Map<String, dynamic>.from(j['datasource'] as Map))
+        : _CDataSource(),
+  );
+}
+
+class CustomDashboardScreen extends StatefulWidget {
+  final UserModel currentUser;
+  final String? dashboardId;
+  const CustomDashboardScreen({super.key, required this.currentUser, this.dashboardId});
+
+  @override
+  State<CustomDashboardScreen> createState() => _CustomDashboardScreenState();
+}
+
+class _CustomDashboardScreenState extends State<CustomDashboardScreen> {
+  final _titleCtrl = TextEditingController(text: 'My Dashboard');
+  List<_CComponent> _components = [];
+  bool _loading = false;
+  bool _saving  = false;
+  String? _savedId;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.dashboardId != null) _loadExisting();
+  }
+
+  @override
+  void dispose() { _titleCtrl.dispose(); super.dispose(); }
+
+  Future<void> _loadExisting() async {
+    setState(() => _loading = true);
+    try {
+      final row = await supabase
+          .from('custom_dashboards')
+          .select('title,components')
+          .eq('id', widget.dashboardId!)
+          .maybeSingle();
+      if (row != null && mounted) {
+        _titleCtrl.text = row['title'] as String? ?? '';
+        final comps = (row['components'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+        setState(() {
+          _components = comps.map((c) => _CComponent.fromJson(c)).toList();
+          _savedId = widget.dashboardId;
+        });
+        for (final c in _components) _fetchData(c);
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _fetchData(_CComponent comp) async {
+    setState(() => comp._loading = true);
+    try {
+      final ds   = comp.datasource;
+      final since = DateTime.now().subtract(Duration(days: ds.daysBack)).toIso8601String();
+      var q = supabase.from('tickets').select(
+          'id,status,priority,assigned_to,created_at,'
+          'departments:target_department_id(name),places(name)');
+      if (widget.currentUser.departmentId != null) {
+        q = q.eq('target_department_id', widget.currentUser.departmentId!);
+      }
+      q = q.gte('created_at', since);
+      if (ds.statusFilter.length < 6) q = q.inFilter('status', ds.statusFilter.toList());
+      if (ds.priorityFilter.length < 5) q = q.inFilter('priority', ds.priorityFilter.toList());
+      final rows = await q.limit(500);
+
+      if (comp.type == 'kpi') {
+        num value = 0;
+        if (ds.aggFn == _CAggFn.count) {
+          value = rows.length;
+        } else if (ds.aggField != null) {
+          value = rows.fold<num>(0, (s, r) => s + ((r[ds.aggField!] as num?) ?? 0));
+          if (ds.aggFn == _CAggFn.avg && rows.isNotEmpty) value = value / rows.length;
+        }
+        String formatted;
+        if (ds.format == 'percent') {
+          final total = rows.length > 0 ? rows.length : 1;
+          formatted = '${(value / total * 100).toStringAsFixed(1)}%';
+        } else if (ds.format == 'duration') {
+          formatted = '${value.toStringAsFixed(1)}h';
+        } else {
+          formatted = value.toInt().toString();
+        }
+        if (mounted) setState(() { comp._cachedData = formatted; comp._loading = false; });
+      } else {
+        // Grouped data for charts / tables
+        final grouped = <String, num>{};
+        for (final r in rows) {
+          final key = _groupKey(r, ds.groupBy);
+          num val = 1;
+          if (ds.aggFn != _CAggFn.count && ds.aggField != null) {
+            val = (r[ds.aggField!] as num?) ?? 0;
+          }
+          grouped[key] = (grouped[key] ?? 0) + val;
+        }
+        if (mounted) setState(() { comp._cachedData = grouped; comp._loading = false; });
+      }
+    } catch (_) {
+      if (mounted) setState(() { comp._loading = false; });
+    }
+  }
+
+  String _groupKey(Map r, _CGroupBy? gb) {
+    switch (gb) {
+      case _CGroupBy.status:     return r['status'] as String? ?? 'unknown';
+      case _CGroupBy.priority:   return r['priority'] as String? ?? 'unknown';
+      case _CGroupBy.department: return (r['departments'] as Map?)?['name'] as String? ?? 'Unknown';
+      case _CGroupBy.place:      return (r['places'] as Map?)?['name'] as String? ?? 'Unknown';
+      case _CGroupBy.month:
+        final d = r['created_at'] as String? ?? '';
+        return d.length >= 7 ? d.substring(0, 7) : d;
+      default:                   return 'unknown';
+    }
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      final payload = {
+        'user_id': widget.currentUser.id,
+        'title': _titleCtrl.text.trim().isEmpty ? 'My Dashboard' : _titleCtrl.text.trim(),
+        'components': _components.map((c) => c.toJson()).toList(),
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+      if (_savedId != null) {
+        await supabase.from('custom_dashboards').update(payload).eq('id', _savedId!);
+      } else {
+        final res = await supabase.from('custom_dashboards').insert(payload).select('id').single();
+        _savedId = res['id'] as String;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Dashboard saved'),
+          backgroundColor: Colors.green, behavior: SnackBarBehavior.floating));
+        Navigator.pop(context, _savedId);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red, behavior: SnackBarBehavior.floating));
+      }
+    }
+    if (mounted) setState(() => _saving = false);
+  }
+
+  void _addComponent() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => _AddComponentSheet(
+        onAdd: (comp) {
+          setState(() => _components.add(comp));
+          _fetchData(comp);
+        },
+      ),
+    );
+  }
+
+  void _openComponentConfig(_CComponent comp) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (__, ctrl) => _ComponentConfigSheet(
+          comp: comp,
+          onChanged: () {
+            setState(() {});
+            _fetchData(comp);
+          },
+          scrollController: ctrl,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F6FA),
+      appBar: AppBar(
+        title: TextField(
+          controller: _titleCtrl,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          decoration: const InputDecoration(border: InputBorder.none),
+        ),
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF135467),
+        elevation: 1,
+        actions: [
+          if (_saving)
+            const Padding(padding: EdgeInsets.all(16), child: SizedBox(width: 20, height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2)))
+          else
+            TextButton.icon(
+              onPressed: _save,
+              icon: const Icon(Icons.save_rounded),
+              label: Text(isAr ? 'حفظ' : 'Save'),
+              style: TextButton.styleFrom(foregroundColor: const Color(0xFFf16936)),
+            ),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _components.isEmpty
+              ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(Icons.dashboard_customize_outlined, size: 64, color: Colors.grey.shade300),
+                  const SizedBox(height: 16),
+                  Text(isAr ? 'ابدأ بإضافة مكوّن' : 'Add your first component',
+                      style: TextStyle(fontSize: 16, color: Colors.grey.shade500)),
+                  const SizedBox(height: 24),
+                  ElevatedButton.icon(
+                    onPressed: _addComponent,
+                    icon: const Icon(Icons.add),
+                    label: Text(isAr ? 'إضافة مكوّن' : 'Add Component'),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFf16936),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                  ),
+                ]))
+              : SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: LayoutBuilder(builder: (ctx, constraints) {
+                    final gridCols = constraints.maxWidth < 560 ? 4 : 8;
+                    return Wrap(spacing: 10, runSpacing: 10,
+                      children: _components.map((comp) {
+                        final w = constraints.maxWidth * comp.colSpan / gridCols - 5;
+                        return SizedBox(
+                          width: w.clamp(120.0, constraints.maxWidth),
+                          child: _buildCompCard(comp),
+                        );
+                      }).toList(),
+                    );
+                  }),
+                ),
+      floatingActionButton: _components.isEmpty
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: _addComponent,
+              icon: const Icon(Icons.add),
+              label: Text(isAr ? 'إضافة' : 'Add'),
+              backgroundColor: const Color(0xFFf16936),
+              foregroundColor: Colors.white,
+            ),
+    );
+  }
+
+  Widget _buildCompCard(_CComponent comp) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white, borderRadius: BorderRadius.circular(14),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Header
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 8, 0),
+          child: Row(children: [
+            Icon(_compIcon(comp.type), size: 16, color: _color(_themes[comp.colorTheme])),
+            const SizedBox(width: 8),
+            Expanded(child: Text(comp.title,
+                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                overflow: TextOverflow.ellipsis)),
+            IconButton(
+              icon: const Icon(Icons.tune_rounded, size: 18),
+              padding: const EdgeInsets.all(4), constraints: const BoxConstraints(),
+              color: Colors.grey, onPressed: () => _openComponentConfig(comp),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close_rounded, size: 18, color: Colors.red),
+              padding: const EdgeInsets.all(4), constraints: const BoxConstraints(),
+              onPressed: () => setState(() => _components.remove(comp)),
+            ),
+          ]),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+          child: _buildCompContent(comp),
+        ),
+      ]),
+    );
+  }
+
+  IconData _compIcon(String type) {
+    switch (type) {
+      case 'chart': return Icons.bar_chart;
+      case 'table': return Icons.table_chart_outlined;
+      default:      return Icons.assessment_outlined;
+    }
+  }
+
+  Widget _buildCompContent(_CComponent comp) {
+    if (comp._loading) {
+      return const Padding(
+        padding: EdgeInsets.all(20),
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+    if (comp._cachedData == null) {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Center(child: TextButton.icon(
+          onPressed: () => _fetchData(comp),
+          icon: const Icon(Icons.refresh),
+          label: const Text('Load data'),
+        )),
+      );
+    }
+
+    if (comp.type == 'kpi') {
+      final val = comp._cachedData.toString();
+      final col = _color(_themes[comp.colorTheme]);
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border(left: BorderSide(color: col, width: 4)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(comp.title, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+          const SizedBox(height: 6),
+          Text(val, style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: col)),
+          Text('Last ${comp.datasource.daysBack}d',
+              style: TextStyle(fontSize: 10, color: Colors.grey[400])),
+        ]),
+      );
+    }
+
+    final data = comp._cachedData as Map<String, dynamic>?;
+    if (data == null || data.isEmpty) {
+      return const Center(child: Text('No data', style: TextStyle(color: Colors.grey)));
+    }
+
+    if (comp.type == 'chart') {
+      final chartData = {
+        'type': comp.chartType,
+        'title': comp.title,
+        'x_labels': data.keys.take(12).toList(),
+        'series': [{'label': comp.title, 'data': data.values.take(12).map((v) => (v as num).toDouble()).toList()}],
+      };
+      return SizedBox(
+        height: _heights[comp.heightLevel],
+        child: _ChartCard(chart: chartData, height: _heights[comp.heightLevel],
+            colorOffset: _themes[comp.colorTheme]),
+      );
+    }
+
+    // Table
+    final keys = data.keys.toList();
+    final vals = data.values.map((v) => v.toString()).toList();
+    return _TableCard(table: {
+      'columns': ['Category', 'Value'],
+      'rows': List.generate(keys.length, (i) => [keys[i], vals[i]]),
+    });
+  }
+}
+
+// ─── add component sheet ──────────────────────────────────────────────────────
+class _AddComponentSheet extends StatelessWidget {
+  final void Function(_CComponent) onAdd;
+  const _AddComponentSheet({required this.onAdd});
+
+  static const _templates = [
+    {'type': 'kpi',   'title': 'Total Tickets',   'icon': Icons.confirmation_number_outlined, 'aggFn': 'count', 'format': 'number'},
+    {'type': 'kpi',   'title': 'Closed Tickets',  'icon': Icons.check_circle_outline,         'aggFn': 'count', 'format': 'number', 'status': ['closed']},
+    {'type': 'kpi',   'title': 'Pending Tickets', 'icon': Icons.pending_outlined,             'aggFn': 'count', 'format': 'number', 'status': ['pending']},
+    {'type': 'chart', 'title': 'Tickets by Status','icon': Icons.pie_chart_outline,           'chartType': 'pie',   'groupBy': 'status'},
+    {'type': 'chart', 'title': 'Tickets by Priority','icon': Icons.bar_chart,                'chartType': 'bar',   'groupBy': 'priority'},
+    {'type': 'chart', 'title': 'Trend Over Time',  'icon': Icons.show_chart,                 'chartType': 'area',  'groupBy': 'month'},
+    {'type': 'chart', 'title': 'By Department',    'icon': Icons.bar_chart_outlined,         'chartType': 'horizontal_bar', 'groupBy': 'department'},
+    {'type': 'table', 'title': 'Summary Table',    'icon': Icons.table_chart_outlined,       'groupBy': 'status'},
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
+    return SafeArea(child: Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(isAr ? 'اختر نوع المكوّن' : 'Choose Component',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        const SizedBox(height: 16),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2, childAspectRatio: 3.0, crossAxisSpacing: 10, mainAxisSpacing: 10),
+          itemCount: _templates.length,
+          itemBuilder: (_, i) {
+            final t = _templates[i];
+            return InkWell(
+              onTap: () {
+                final ds = _CDataSource(
+                  aggFn: t['aggFn'] == 'count' ? _CAggFn.count : _CAggFn.sum,
+                  groupBy: t['groupBy'] != null
+                      ? _CGroupBy.values.firstWhere((e) => e.name == t['groupBy'],
+                          orElse: () => _CGroupBy.status)
+                      : null,
+                  statusFilter: t.containsKey('status')
+                      ? Set<String>.from(t['status'] as List)
+                      : {'pending','inprogress','prefinished','closed','resolved'},
+                  format: t['format'] as String? ?? 'number',
+                );
+                final comp = _CComponent(
+                  id: '${t['type']}_${DateTime.now().millisecondsSinceEpoch}',
+                  type: t['type'] as String,
+                  title: t['title'] as String,
+                  chartType: t['chartType'] as String? ?? 'bar',
+                  datasource: ds,
+                );
+                Navigator.pop(context);
+                onAdd(comp);
+              },
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50, borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.grey.shade200)),
+                child: Row(children: [
+                  Icon(t['icon'] as IconData, size: 20, color: const Color(0xFFf16936)),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(t['title'] as String,
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                      overflow: TextOverflow.ellipsis)),
+                ]),
+              ),
+            );
+          },
+        ),
+      ]),
+    ));
+  }
+}
+
+// ─── component config sheet ───────────────────────────────────────────────────
+class _ComponentConfigSheet extends StatefulWidget {
+  final _CComponent comp;
+  final VoidCallback onChanged;
+  final ScrollController scrollController;
+  const _ComponentConfigSheet({required this.comp, required this.onChanged, required this.scrollController});
+
+  @override
+  State<_ComponentConfigSheet> createState() => _ComponentConfigSheetState();
+}
+
+class _ComponentConfigSheetState extends State<_ComponentConfigSheet> {
+  late final TextEditingController _titleCtrl;
+
+  @override
+  void initState() { super.initState(); _titleCtrl = TextEditingController(text: widget.comp.title); }
+  @override
+  void dispose() { _titleCtrl.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
+    final comp = widget.comp;
+    final ds   = comp.datasource;
+
+    void upd(VoidCallback fn) { setState(fn); widget.onChanged(); }
+
+    return ListView(
+      controller: widget.scrollController,
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+      children: [
+        Center(child: Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)))),
+        Text(isAr ? 'تهيئة المكوّن' : 'Configure Component',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        const SizedBox(height: 20),
+
+        _lbl(isAr ? 'العنوان' : 'Title'),
+        TextField(
+          controller: _titleCtrl,
+          decoration: InputDecoration(isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
+          onChanged: (v) => upd(() => comp.title = v),
+        ),
+        const SizedBox(height: 16),
+
+        // Chart type (charts only)
+        if (comp.type == 'chart') ...[
+          _lbl(isAr ? 'نوع الرسم' : 'Chart Type'),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final t in ['bar','horizontal_bar','pie','line','area'])
+              _typeChip(t, comp.chartType,
+                  () => upd(() => comp.chartType = t), isAr),
+          ]),
+          const SizedBox(height: 16),
+        ],
+
+        // Aggregation
+        _lbl(isAr ? 'دالة التجميع' : 'Aggregation'),
+        _segmented<_CAggFn>(
+          segments: {_CAggFn.count: 'COUNT', _CAggFn.sum: 'SUM', _CAggFn.avg: 'AVG'},
+          selected: ds.aggFn,
+          onSelect: (v) => upd(() => ds.aggFn = v),
+        ),
+        const SizedBox(height: 16),
+
+        // Group By (charts + tables)
+        if (comp.type != 'kpi') ...[
+          _lbl(isAr ? 'التجميع حسب' : 'Group By'),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final gb in _CGroupBy.values)
+              _filterChip(
+                label: gb.name,
+                selected: ds.groupBy == gb,
+                onTap: () => upd(() => ds.groupBy = ds.groupBy == gb ? null : gb),
+              ),
+          ]),
+          const SizedBox(height: 16),
+        ],
+
+        // Format (kpi only)
+        if (comp.type == 'kpi') ...[
+          _lbl(isAr ? 'تنسيق القيمة' : 'Value Format'),
+          _segmented<String>(
+            segments: {'number': '123', 'percent': '%', 'duration': 'h'},
+            selected: ds.format,
+            onSelect: (v) => upd(() => ds.format = v),
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        // Date range
+        _lbl(isAr ? 'نطاق التاريخ' : 'Date Range'),
+        Wrap(spacing: 8, children: [7, 30, 90, 180, 365].map((d) => _filterChip(
+          label: '${d}d', selected: ds.daysBack == d,
+          onTap: () => upd(() => ds.daysBack = d),
+        )).toList()),
+        const SizedBox(height: 16),
+
+        // Status filter
+        _lbl(isAr ? 'الحالة' : 'Status'),
+        Wrap(spacing: 8, runSpacing: 6, children: {
+          'pending': 'Pending', 'inprogress': 'In Progress',
+          'prefinished': 'Pre-finished', 'closed': 'Closed', 'resolved': 'Resolved',
+        }.entries.map((e) => _filterChip(
+          label: e.value, selected: ds.statusFilter.contains(e.key),
+          onTap: () => upd(() => ds.statusFilter.contains(e.key)
+              ? ds.statusFilter.remove(e.key)
+              : ds.statusFilter.add(e.key)),
+        )).toList()),
+        const SizedBox(height: 16),
+
+        // Layout
+        _lbl(isAr ? 'العرض (من 8 أعمدة)' : 'Width (of 8 cols)'),
+        Row(children: List.generate(8, (i) {
+          final cs = i + 1;
+          final sel = comp.colSpan == cs;
+          return Expanded(child: GestureDetector(
+            onTap: () => upd(() => comp.colSpan = cs),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              margin: const EdgeInsets.only(right: 4),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                color: sel ? const Color(0xFFf16936) : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Center(child: Text('$cs', style: TextStyle(fontSize: 12,
+                  fontWeight: FontWeight.bold, color: sel ? Colors.white : Colors.grey[600]))),
+            ),
+          ));
+        })),
+        const SizedBox(height: 14),
+
+        _lbl(isAr ? 'الارتفاع' : 'Height'),
+        Row(children: List.generate(_heights.length, (i) {
+          const labels = ['XS','S','M','L','XL','XXL'];
+          final sel = comp.heightLevel == i;
+          return Expanded(child: GestureDetector(
+            onTap: () => upd(() => comp.heightLevel = i),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              margin: const EdgeInsets.only(right: 4),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                color: sel ? const Color(0xFFf16936) : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Center(child: Text(labels[i], style: TextStyle(fontSize: 11,
+                  fontWeight: FontWeight.bold, color: sel ? Colors.white : Colors.grey[600]))),
+            ),
+          ));
+        })),
+        const SizedBox(height: 24),
+
+        ElevatedButton(
+          onPressed: () { Navigator.pop(context); widget.onChanged(); },
+          style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFf16936), foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+          child: Text(isAr ? 'تطبيق' : 'Apply & Refresh'),
+        ),
+      ],
+    );
+  }
+
+  Widget _lbl(String t) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(t, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey[700])),
+  );
+
+  Widget _typeChip(String t, String current, VoidCallback onTap, bool isAr) {
+    final labels = {'bar':'Bar','horizontal_bar':'H-Bar','pie':'Pie','line':'Line','area':'Area'};
+    final sel = t == current;
+    return GestureDetector(onTap: onTap, child: AnimatedContainer(
+      duration: const Duration(milliseconds: 120),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: sel ? const Color(0xFFf16936) : Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: sel ? const Color(0xFFf16936) : Colors.grey.shade300),
+      ),
+      child: Text(labels[t]!, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+          color: sel ? Colors.white : Colors.grey[700])),
+    ));
+  }
+
+  Widget _filterChip({required String label, required bool selected, required VoidCallback onTap}) {
+    return GestureDetector(onTap: onTap, child: AnimatedContainer(
+      duration: const Duration(milliseconds: 120),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: selected ? const Color(0xFFf16936) : Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: selected ? const Color(0xFFf16936) : Colors.grey.shade300),
+      ),
+      child: Text(label, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w500,
+          color: selected ? Colors.white : Colors.grey[700])),
+    ));
+  }
+
+  Widget _segmented<T>({
+    required Map<T, String> segments,
+    required T selected,
+    required void Function(T) onSelect,
+  }) {
+    return Row(mainAxisSize: MainAxisSize.min, children: segments.entries.map((e) {
+      final sel = e.key == selected;
+      return GestureDetector(
+        onTap: () => onSelect(e.key),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          margin: const EdgeInsets.only(right: 6),
+          decoration: BoxDecoration(
+            color: sel ? const Color(0xFFf16936) : Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: sel ? const Color(0xFFf16936) : Colors.grey.shade300),
+          ),
+          child: Text(e.value, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold,
+              color: sel ? Colors.white : Colors.grey[700])),
+        ),
+      );
+    }).toList());
   }
 }
