@@ -352,6 +352,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   String? _mainDashSavedId;
   Map<String, dynamic>? _mainDashSavedData;
   String? _mainDashCustomId;
+  bool _loadingDashPref = true;
 
   List<Map<String, dynamic>> _notifications = [];
   int _unreadCount = 0;
@@ -652,6 +653,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         setState(() { _mainDashMode = 'default'; });
       }
     } catch (_) {}
+    if (mounted) setState(() => _loadingDashPref = false);
   }
 
   Future<void> _saveMainDashPreference(String mode, String? savedId, {String? customId}) async {
@@ -1577,6 +1579,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildDashboardTab(bool isMobile, void Function(String?) onNavigate) {
+    if (_loadingDashPref) {
+      return const Center(child: CircularProgressIndicator());
+    }
     final isAr = Localizations.localeOf(context).languageCode == 'ar';
     Widget dash;
     if (_mainDashMode == 'saved' && _mainDashSavedData != null) {
