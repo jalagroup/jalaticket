@@ -25,7 +25,7 @@ class _DashItem {
   String chartType;  // 'bar' | 'pie' | 'line' | 'area' | 'horizontal_bar'
   int heightLevel;   // 0-5 → XS/S/M/L/XL/XXL
   int colorTheme;    // index into _themes
-  int colSpan;       // 1-8 (columns in an 8-column grid)
+  int colSpan;       // 1-32 (columns in a 32-column grid)
   bool deleted;
 
   _DashItem({
@@ -57,7 +57,7 @@ List<_DashItem> _parseItems(Map<String, dynamic> data) {
     final l = lOf('kpis');
     items.add(_DashItem(
       id: 'kpis', kind: _Kind.kpiGroup, raw: kpis,
-      colSpan:     (l['colSpan']     as int?) ?? 8,
+      colSpan:     (l['colSpan']     as int?) ?? 32,
       heightLevel: (l['heightLevel'] as int?) ?? 1,
       colorTheme:  (l['colorTheme']  as int?) ?? 0,
     ));
@@ -66,11 +66,12 @@ List<_DashItem> _parseItems(Map<String, dynamic> data) {
   for (int i = 0; i < charts.length; i++) {
     final id = 'chart_$i';
     final l = lOf(id);
+    final chartType = (l['chartType'] as String?) ?? (charts[i]['type'] as String? ?? 'bar').toLowerCase();
     items.add(_DashItem(
       id: id, kind: _Kind.chart, raw: charts[i],
-      chartType:   (l['chartType']   as String?) ?? (charts[i]['type'] as String? ?? 'bar').toLowerCase(),
-      colSpan:     (l['colSpan']     as int?) ?? 4,
-      heightLevel: (l['heightLevel'] as int?) ?? 2,
+      chartType:   chartType,
+      colSpan:     (l['colSpan']     as int?) ?? 16,
+      heightLevel: (l['heightLevel'] as int?) ?? (chartType == 'pie' ? 4 : 2),
       colorTheme:  (l['colorTheme']  as int?) ?? 0,
     ));
   }
@@ -80,7 +81,7 @@ List<_DashItem> _parseItems(Map<String, dynamic> data) {
     final l = lOf(id);
     items.add(_DashItem(
       id: id, kind: _Kind.table, raw: tables[i],
-      colSpan:     (l['colSpan']     as int?) ?? 8,
+      colSpan:     (l['colSpan']     as int?) ?? 32,
       heightLevel: (l['heightLevel'] as int?) ?? 2,
       colorTheme:  (l['colorTheme']  as int?) ?? 0,
     ));
@@ -979,6 +980,7 @@ class _InteractiveDashboard extends StatefulWidget {
 class _InteractiveDashboardState extends State<_InteractiveDashboard> {
   late List<_DashItem> _items;
   final _dragAccum   = <String, double>{};
+  final _dragAccumH  = <String, double>{};
   final _resizingIds = <String>{};
 
   @override
@@ -1040,7 +1042,55 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
   }
 
   Widget _buildResizableCard(_DashItem item, List<_DashItem> vis, double totalWidth, int gridCols) {
-    final isResizing = _resizingIds.contains(item.id);
+    final isResizingW = _resizingIds.contains('w_${item.id}');
+    final isResizingH = _resizingIds.contains('h_${item.id}');
+    final isResizing  = isResizingW || isResizingH;
+
+    Widget handle({
+      double? left, double? right, double? top, double? bottom,
+      double? width, double? height,
+      required MouseCursor cursor,
+      required void Function() onStart,
+      required void Function(DragUpdateDetails) onUpdate,
+      required void Function() onEnd,
+      required bool active,
+      bool vertical = false,
+    }) {
+      return Positioned(
+        left: left, right: right, top: top, bottom: bottom,
+        width: width, height: height,
+        child: MouseRegion(
+          cursor: cursor,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onPanStart: (_) => onStart(),
+            onPanUpdate: onUpdate,
+            onPanEnd: (_) => onEnd(),
+            child: Center(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
+                width:  vertical ? (active ? 40 : 28) : (active ? 5 : 4),
+                height: vertical ? (active ? 5 : 4)   : (active ? 40 : 28),
+                decoration: BoxDecoration(
+                  color: active
+                      ? const Color(0xFFf16936)
+                      : Colors.grey.shade400.withValues(alpha: 0.7),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    void wStart()  => setState(() => _resizingIds.add('w_${item.id}'));
+    void wEnd()    => setState(() { _resizingIds.remove('w_${item.id}'); _dragAccum[item.id]  = 0; });
+    void hStart()  => setState(() => _resizingIds.add('h_${item.id}'));
+    void hEnd()    => setState(() { _resizingIds.remove('h_${item.id}'); _dragAccumH[item.id] = 0; });
+    final unitPx = totalWidth / gridCols;
+    const kHUnit  = 40.0;
+
     return Stack(
       children: [
         AnimatedContainer(
@@ -1052,41 +1102,61 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
               : null,
           child: _buildDraggableCard(item, vis),
         ),
-        Positioned(
-          right: 0, top: 0, bottom: 0, width: 20,
-          child: MouseRegion(
-            cursor: SystemMouseCursors.resizeLeftRight,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onPanStart: (_) => setState(() => _resizingIds.add(item.id)),
-              onPanUpdate: (d) {
-                _dragAccum[item.id] = (_dragAccum[item.id] ?? 0) + d.delta.dx;
-                final unitPx = totalWidth / gridCols;
-                if (_dragAccum[item.id]! > unitPx && item.colSpan < gridCols) {
-                  setState(() { item.colSpan++; _dragAccum[item.id] = 0; });
-                } else if (_dragAccum[item.id]! < -unitPx && item.colSpan > 1) {
-                  setState(() { item.colSpan--; _dragAccum[item.id] = 0; });
-                }
-              },
-              onPanEnd: (_) => setState(() {
-                _resizingIds.remove(item.id);
-                _dragAccum[item.id] = 0;
-              }),
-              child: Center(
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 120),
-                  width: isResizing ? 5 : 4,
-                  height: isResizing ? 48 : 36,
-                  decoration: BoxDecoration(
-                    color: isResizing
-                        ? const Color(0xFFf16936)
-                        : Colors.grey.shade400.withValues(alpha: 0.7),
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                ),
-              ),
-            ),
-          ),
+        // Right width handle
+        handle(
+          right: 0, top: 0, bottom: 0, width: 18,
+          cursor: SystemMouseCursors.resizeLeftRight,
+          onStart: wStart, onEnd: wEnd, active: isResizingW, vertical: false,
+          onUpdate: (d) {
+            _dragAccum[item.id] = (_dragAccum[item.id] ?? 0) + d.delta.dx;
+            if (_dragAccum[item.id]! > unitPx && item.colSpan < gridCols) {
+              setState(() { item.colSpan = (item.colSpan + 1).clamp(1, gridCols); _dragAccum[item.id] = 0; });
+            } else if (_dragAccum[item.id]! < -unitPx && item.colSpan > 1) {
+              setState(() { item.colSpan = (item.colSpan - 1).clamp(1, gridCols); _dragAccum[item.id] = 0; });
+            }
+          },
+        ),
+        // Left width handle
+        handle(
+          left: 0, top: 0, bottom: 0, width: 18,
+          cursor: SystemMouseCursors.resizeLeftRight,
+          onStart: wStart, onEnd: wEnd, active: isResizingW, vertical: false,
+          onUpdate: (d) {
+            _dragAccum[item.id] = (_dragAccum[item.id] ?? 0) - d.delta.dx;
+            if (_dragAccum[item.id]! > unitPx && item.colSpan < gridCols) {
+              setState(() { item.colSpan = (item.colSpan + 1).clamp(1, gridCols); _dragAccum[item.id] = 0; });
+            } else if (_dragAccum[item.id]! < -unitPx && item.colSpan > 1) {
+              setState(() { item.colSpan = (item.colSpan - 1).clamp(1, gridCols); _dragAccum[item.id] = 0; });
+            }
+          },
+        ),
+        // Bottom height handle
+        handle(
+          left: 0, right: 0, bottom: 0, height: 18,
+          cursor: SystemMouseCursors.resizeUpDown,
+          onStart: hStart, onEnd: hEnd, active: isResizingH, vertical: true,
+          onUpdate: (d) {
+            _dragAccumH[item.id] = (_dragAccumH[item.id] ?? 0) + d.delta.dy;
+            if (_dragAccumH[item.id]! > kHUnit && item.heightLevel < 5) {
+              setState(() { item.heightLevel++; _dragAccumH[item.id] = 0; });
+            } else if (_dragAccumH[item.id]! < -kHUnit && item.heightLevel > 0) {
+              setState(() { item.heightLevel--; _dragAccumH[item.id] = 0; });
+            }
+          },
+        ),
+        // Top height handle
+        handle(
+          left: 0, right: 0, top: 0, height: 18,
+          cursor: SystemMouseCursors.resizeUpDown,
+          onStart: hStart, onEnd: hEnd, active: isResizingH, vertical: true,
+          onUpdate: (d) {
+            _dragAccumH[item.id] = (_dragAccumH[item.id] ?? 0) - d.delta.dy;
+            if (_dragAccumH[item.id]! > kHUnit && item.heightLevel < 5) {
+              setState(() { item.heightLevel++; _dragAccumH[item.id] = 0; });
+            } else if (_dragAccumH[item.id]! < -kHUnit && item.heightLevel > 0) {
+              setState(() { item.heightLevel--; _dragAccumH[item.id] = 0; });
+            }
+          },
         ),
       ],
     );
@@ -1100,7 +1170,7 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
 
     return LayoutBuilder(builder: (ctx, constraints) {
       final isMobile = constraints.maxWidth < 600;
-      final gridCols = isMobile ? 1 : 8;
+      final gridCols = isMobile ? 8 : 32;
       int eff(int cs) => cs.clamp(1, gridCols).toInt();
 
       final rows = _groupIntoRowsN(vis, gridCols, eff);
@@ -1123,10 +1193,9 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
           final remSpan  = gridCols - usedSpan;
           return Padding(
             padding: const EdgeInsets.only(bottom: 10),
-            child: IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                   ...rowItems.asMap().entries.map((e) {
                     final item = e.value;
                     return Expanded(
@@ -1145,7 +1214,6 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
                     ),
                   ),
                 ],
-              ),
             ),
           );
         }),
@@ -1241,7 +1309,11 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
           child: Row(children: [
             _ctrlBtn(Icons.chevron_left,  item.colSpan > 1 ? () => setState(() => item.colSpan--) : null),
             GestureDetector(
-              onTap: () => setState(() => item.colSpan = item.colSpan % 8 + 1),
+              onTap: () => setState(() {
+                final steps = [4,8,12,16,20,24,28,32];
+                final idx = steps.indexWhere((s) => s >= item.colSpan);
+                item.colSpan = idx >= 0 && idx < steps.length - 1 ? steps[idx + 1] : 4;
+              }),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                 decoration: BoxDecoration(color: Colors.indigo.shade50, borderRadius: BorderRadius.circular(5)),
@@ -1249,7 +1321,7 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
                     style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.indigo)),
               ),
             ),
-            _ctrlBtn(Icons.chevron_right, item.colSpan < 8 ? () => setState(() => item.colSpan++) : null),
+            _ctrlBtn(Icons.chevron_right, item.colSpan < 32 ? () => setState(() => item.colSpan++) : null),
             const SizedBox(width: 4),
             _ctrlBtn(Icons.expand_more, item.heightLevel > 0 ? () => setState(() => item.heightLevel--) : null),
             Container(
@@ -1310,10 +1382,10 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
         ),
       );
 
-  String _spanLabel(int cs) => switch (cs.clamp(1, 8)) {
-        1 => '⅛', 2 => '¼', 3 => '⅜', 4 => '½',
-        5 => '⅝', 6 => '¾', 7 => '⅞', _ => '■',
-      };
+  String _spanLabel(int cs) {
+    const m = {4:'⅛',8:'¼',12:'⅜',16:'½',20:'⅝',24:'¾',28:'⅞',32:'■'};
+    return m[cs] ?? '$cs';
+  }
   String _heightLabel(int lvl) => const ['XS','S','M','L','XL','XXL'][lvl.clamp(0, 5)];
   IconData _chartTypeIcon(String t) => switch (t) {
         'pie' => Icons.pie_chart,
@@ -1472,9 +1544,10 @@ class _PropertiesSheetState extends State<_PropertiesSheet> {
         ],
 
         // ── Layout ───────────────────────────────────────────────────────────
-        _sectionLabel(isAr ? 'العرض (من 8 أعمدة)' : 'Width (of 8 columns)'),
-        Row(children: List.generate(8, (i) {
-          final cs = i + 1;
+        _sectionLabel(isAr ? 'العرض (من 32 عمود)' : 'Width (of 32 columns)'),
+        Row(children: [4,8,12,16,20,24,28,32].asMap().entries.map((e) {
+          final cs = e.value;
+          final labels = ['⅛','¼','⅜','½','⅝','¾','⅞','■'];
           final sel = item.colSpan == cs;
           return Expanded(child: GestureDetector(
             onTap: () => setState(() { item.colSpan = cs; widget.onChanged(); }),
@@ -1486,12 +1559,12 @@ class _PropertiesSheetState extends State<_PropertiesSheet> {
                 color: sel ? col : Colors.grey.shade100,
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: Center(child: Text('$cs',
+              child: Center(child: Text(labels[e.key],
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold,
                       color: sel ? Colors.white : Colors.grey[600]))),
             ),
           ));
-        })),
+        }).toList()),
         const SizedBox(height: 14),
 
         _sectionLabel(isAr ? 'الارتفاع' : 'Height'),
@@ -1861,12 +1934,12 @@ class _PieChart extends StatelessWidget {
     return LayoutBuilder(builder: (context, constraints) {
       final available = constraints.maxWidth;
       // Decide layout: if very narrow, stack vertically
-      final stackVertically = available < 260;
+      final stackVertically = available < 300;
       // Radius scales with available space
       final radius = stackVertically
-          ? (available / 2 * 0.72).clamp(28.0, 80.0)
-          : (available * 0.28).clamp(28.0, 80.0);
-      final centerR = (radius * 0.35).clamp(10.0, 30.0);
+          ? (available / 2 * 0.88).clamp(40.0, 130.0)
+          : (available * 0.42).clamp(44.0, 130.0);
+      final centerR = (radius * 0.22).clamp(6.0, 20.0);
 
       final sections = rawData.asMap().entries.map((e) {
         final pct = total > 0 ? e.value.toDouble() / total * 100 : 0.0;
@@ -1985,69 +2058,56 @@ class _LineChart extends StatelessWidget {
 // ─── table card ───────────────────────────────────────────────────────────────
 class _TableCard extends StatefulWidget {
   final Map table;
-  const _TableCard({required this.table});
+  final double? maxHeight;
+  const _TableCard({required this.table, this.maxHeight});
   @override
   State<_TableCard> createState() => _TableCardState();
 }
 
 class _TableCardState extends State<_TableCard> {
-  int?    _sortCol;
-  bool    _sortAsc   = true;
-  String  _globalQ   = '';
-  final   _colFilters = <int, String>{};
-  bool    _showColFilters = false;
+  int?   _sortCol;
+  bool   _sortAsc      = true;
+  String _globalQ      = '';
+  final  _colFilters   = <int, String>{};
+  bool   _showColFilters = false;
 
-  // Known value → color mappings
   static const _valueColors = {
-    'pending':    Color(0xFFFFF3E0),
-    'inprogress': Color(0xFFE3F2FD),
-    'prefinished':Color(0xFFF3E5F5),
-    'closed':     Color(0xFFE8F5E9),
-    'resolved':   Color(0xFFE8F5E9),
-    'open':       Color(0xFFE3F2FD),
-    'low':        Color(0xFFE8F5E9),
-    'medium':     Color(0xFFFFF9C4),
-    'high':       Color(0xFFFFECB3),
-    'critical':   Color(0xFFFFEBEE),
-    'urgent':     Color(0xFFFFCDD2),
+    'pending':     Color(0xFFFFF3E0), 'inprogress':  Color(0xFFE3F2FD),
+    'prefinished': Color(0xFFF3E5F5), 'closed':      Color(0xFFE8F5E9),
+    'resolved':    Color(0xFFE8F5E9), 'open':        Color(0xFFE3F2FD),
+    'low':         Color(0xFFE8F5E9), 'medium':      Color(0xFFFFF9C4),
+    'high':        Color(0xFFFFECB3), 'critical':    Color(0xFFFFEBEE),
+    'urgent':      Color(0xFFFFCDD2),
   };
   static const _valueFgColors = {
-    'pending':    Color(0xFFE65100),
-    'inprogress': Color(0xFF1565C0),
-    'prefinished':Color(0xFF6A1B9A),
-    'closed':     Color(0xFF2E7D32),
-    'resolved':   Color(0xFF2E7D32),
-    'open':       Color(0xFF1565C0),
-    'low':        Color(0xFF2E7D32),
-    'medium':     Color(0xFFF57F17),
-    'high':       Color(0xFFE65100),
-    'critical':   Color(0xFFC62828),
-    'urgent':     Color(0xFFB71C1C),
+    'pending':     Color(0xFFE65100), 'inprogress':  Color(0xFF1565C0),
+    'prefinished': Color(0xFF6A1B9A), 'closed':      Color(0xFF2E7D32),
+    'resolved':    Color(0xFF2E7D32), 'open':        Color(0xFF1565C0),
+    'low':         Color(0xFF2E7D32), 'medium':      Color(0xFFF57F17),
+    'high':        Color(0xFFE65100), 'critical':    Color(0xFFC62828),
+    'urgent':      Color(0xFFB71C1C),
   };
 
   @override
   Widget build(BuildContext context) {
-    final isAr    = Localizations.localeOf(context).languageCode == 'ar';
+    final isAr   = Localizations.localeOf(context).languageCode == 'ar';
     final columns = (widget.table['columns'] as List?)?.cast<String>() ?? [];
-    var   allRows = (widget.table['rows'] as List?)
+    var allRows   = (widget.table['rows'] as List?)
             ?.map((r) => (r as List).cast<String>()).toList() ?? [];
     if (columns.isEmpty) return const SizedBox.shrink();
 
-    // Apply global search
     var rows = allRows;
     if (_globalQ.isNotEmpty) {
       final q = _globalQ.toLowerCase();
       rows = rows.where((r) => r.any((c) => c.toLowerCase().contains(q))).toList();
     }
-    // Apply per-column filters
     _colFilters.forEach((col, fq) {
       if (fq.isEmpty) return;
       final q = fq.toLowerCase();
       rows = rows.where((r) => col < r.length && r[col].toLowerCase().contains(q)).toList();
     });
-    // Sort
     if (_sortCol != null && _sortCol! < columns.length) {
-      rows.sort((a, b) {
+      rows = List.from(rows)..sort((a, b) {
         final av = _sortCol! < a.length ? a[_sortCol!] : '';
         final bv = _sortCol! < b.length ? b[_sortCol!] : '';
         final na = double.tryParse(av.replaceAll(',', ''));
@@ -2059,27 +2119,99 @@ class _TableCardState extends State<_TableCard> {
 
     final activeFilters = _colFilters.values.where((v) => v.isNotEmpty).length;
 
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      // ── Toolbar ───────────────────────────────────────────────────────────
-      Row(children: [
-        Expanded(
-          child: TextField(
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: isAr ? 'بحث في الجدول...' : 'Search table...',
-              prefixIcon: const Icon(Icons.search, size: 16),
-              suffixIcon: _globalQ.isNotEmpty
-                  ? IconButton(icon: const Icon(Icons.close, size: 16),
-                      onPressed: () => setState(() => _globalQ = ''))
-                  : null,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+    final tableWidget = ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.vertical,
+          child: Table(
+            defaultColumnWidth: const IntrinsicColumnWidth(),
+            border: TableBorder(
+              horizontalInside: BorderSide(color: Colors.grey.shade100, width: 1),
+              bottom: BorderSide(color: Colors.grey.shade200, width: 1),
             ),
-            onChanged: (v) => setState(() => _globalQ = v),
+            children: [
+              TableRow(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(colors: [
+                    const Color(0xFFf16936).withValues(alpha: 0.12),
+                    const Color(0xFFf16936).withValues(alpha: 0.06),
+                  ]),
+                ),
+                children: columns.asMap().entries.map((e) {
+                  final isSorted = _sortCol == e.key;
+                  return InkWell(
+                    onTap: () => setState(() {
+                      if (_sortCol == e.key) {
+                        _sortAsc = !_sortAsc;
+                      } else {
+                        _sortCol = e.key;
+                        _sortAsc = true;
+                      }
+                    }),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Text(e.value, style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 12.5, color: Color(0xFF333333))),
+                        const SizedBox(width: 3),
+                        if (isSorted)
+                          Icon(_sortAsc ? Icons.arrow_upward : Icons.arrow_downward,
+                              size: 11, color: const Color(0xFFf16936))
+                        else
+                          Icon(Icons.unfold_more, size: 11, color: Colors.grey[400]),
+                      ]),
+                    ),
+                  );
+                }).toList(),
+              ),
+              ...rows.asMap().entries.map((re) => TableRow(
+                decoration: BoxDecoration(
+                    color: re.key.isEven ? Colors.white : Colors.grey.shade50),
+                children: re.value.asMap().entries.map((ce) {
+                  final cell    = ce.value;
+                  final cellKey = cell.trim().toLowerCase();
+                  final bgColor = _valueColors[cellKey];
+                  final fgColor = _valueFgColors[cellKey];
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                    child: bgColor != null
+                        ? Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                            decoration: BoxDecoration(
+                                color: bgColor, borderRadius: BorderRadius.circular(5)),
+                            child: Text(cell, style: TextStyle(
+                                fontSize: 11.5, fontWeight: FontWeight.w600, color: fgColor)),
+                          )
+                        : Text(cell, style: TextStyle(fontSize: 12, color: Colors.grey[800])),
+                  );
+                }).toList(),
+              )),
+            ],
           ),
         ),
+      ),
+    );
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // Toolbar
+      Row(children: [
+        Expanded(child: TextField(
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: isAr ? 'بحث في الجدول...' : 'Search table...',
+            prefixIcon: const Icon(Icons.search, size: 16),
+            suffixIcon: _globalQ.isNotEmpty
+                ? IconButton(icon: const Icon(Icons.close, size: 16),
+                    onPressed: () => setState(() => _globalQ = ''))
+                : null,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          onChanged: (v) => setState(() => _globalQ = v),
+        )),
         const SizedBox(width: 6),
-        // Column filter toggle
         Stack(clipBehavior: Clip.none, children: [
           IconButton(
             icon: const Icon(Icons.filter_list_rounded),
@@ -2095,14 +2227,12 @@ class _TableCardState extends State<_TableCard> {
                   style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold))),
             )),
         ]),
-        // Clear all filters
         if (_globalQ.isNotEmpty || activeFilters > 0)
           TextButton(
             onPressed: () => setState(() { _globalQ = ''; _colFilters.clear(); }),
             child: Text(isAr ? 'مسح' : 'Clear', style: const TextStyle(fontSize: 11)),
           ),
       ]),
-      // ── Per-column filter row ─────────────────────────────────────────────
       if (_showColFilters) Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: SingleChildScrollView(
@@ -2114,21 +2244,18 @@ class _TableCardState extends State<_TableCard> {
                 padding: const EdgeInsets.only(right: 6),
                 child: TextField(
                   decoration: InputDecoration(
-                    isDense: true,
-                    hintText: e.value,
+                    isDense: true, hintText: e.value,
                     hintStyle: const TextStyle(fontSize: 10),
                     contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
                     suffixIcon: (_colFilters[e.key]?.isNotEmpty ?? false)
-                        ? InkWell(
-                            onTap: () => setState(() => _colFilters.remove(e.key)),
+                        ? InkWell(onTap: () => setState(() => _colFilters.remove(e.key)),
                             child: const Icon(Icons.close, size: 13))
                         : null,
                   ),
                   style: const TextStyle(fontSize: 11),
                   onChanged: (v) => setState(() {
-                    if (v.isEmpty) _colFilters.remove(e.key);
-                    else _colFilters[e.key] = v;
+                    if (v.isEmpty) { _colFilters.remove(e.key); } else { _colFilters[e.key] = v; }
                   }),
                 ),
               ),
@@ -2136,7 +2263,6 @@ class _TableCardState extends State<_TableCard> {
           }).toList()),
         ),
       ),
-      // ── Result count ─────────────────────────────────────────────────────
       if (_globalQ.isNotEmpty || activeFilters > 0)
         Padding(
           padding: const EdgeInsets.only(bottom: 6),
@@ -2152,75 +2278,9 @@ class _TableCardState extends State<_TableCard> {
               style: TextStyle(fontSize: 12, color: Colors.grey[500])),
         )
       else
-        ClipRRect(
-          borderRadius: BorderRadius.circular(10),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Table(
-              defaultColumnWidth: const IntrinsicColumnWidth(),
-              border: TableBorder(
-                horizontalInside: BorderSide(color: Colors.grey.shade100, width: 1),
-                bottom: BorderSide(color: Colors.grey.shade200, width: 1),
-              ),
-              children: [
-                // Header — tappable to sort
-                TableRow(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(colors: [
-                      const Color(0xFFf16936).withValues(alpha: 0.12),
-                      const Color(0xFFf16936).withValues(alpha: 0.06),
-                    ]),
-                  ),
-                  children: columns.asMap().entries.map((e) {
-                    final isSorted = _sortCol == e.key;
-                    return InkWell(
-                      onTap: () => setState(() {
-                        _sortCol == e.key ? _sortAsc = !_sortAsc : (_sortCol = e.key, _sortAsc = true);
-                      }),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Text(e.value, style: const TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 12.5, color: Color(0xFF333333))),
-                          const SizedBox(width: 3),
-                          if (isSorted)
-                            Icon(_sortAsc ? Icons.arrow_upward : Icons.arrow_downward,
-                                size: 11, color: const Color(0xFFf16936))
-                          else
-                            Icon(Icons.unfold_more, size: 11, color: Colors.grey[400]),
-                        ]),
-                      ),
-                    );
-                  }).toList(),
-                ),
-                // Data rows with value-based coloring
-                ...rows.asMap().entries.map((re) => TableRow(
-                  decoration: BoxDecoration(
-                      color: re.key.isEven ? Colors.white : Colors.grey.shade50),
-                  children: re.value.asMap().entries.map((ce) {
-                    final cell     = ce.value;
-                    final cellKey  = cell.trim().toLowerCase();
-                    final bgColor  = _valueColors[cellKey];
-                    final fgColor  = _valueFgColors[cellKey];
-                    final isColored = bgColor != null;
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                      child: isColored
-                          ? Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: bgColor, borderRadius: BorderRadius.circular(5)),
-                              child: Text(cell, style: TextStyle(
-                                  fontSize: 11.5, fontWeight: FontWeight.w600, color: fgColor)),
-                            )
-                          : Text(cell, style: TextStyle(fontSize: 12, color: Colors.grey[800])),
-                    );
-                  }).toList(),
-                )),
-              ],
-            ),
-          ),
-        ),
+        widget.maxHeight != null
+            ? SizedBox(height: widget.maxHeight, child: tableWidget)
+            : tableWidget,
     ]);
   }
 }
@@ -2931,8 +2991,11 @@ enum _CGroupBy { status, priority, department, place, month }
 
 // ─── expression / column def constants ───────────────────────────────────────
 const _kTableFields = {
-  'status': 'Status', 'priority': 'Priority', 'department': 'Department',
-  'place': 'Place', 'created_at': 'Created At', 'id': 'Ticket ID', 'assigned_to': 'Assigned To',
+  'id': 'ID', 'status': 'Status', 'priority': 'Priority',
+  'department': 'Department', 'place': 'Place',
+  'created_at': 'Created At', 'assigned_to': 'Assigned To',
+  'full_name': 'Full Name', 'email': 'Email', 'role': 'Role',
+  'name': 'Name',
 };
 const _kCondFields = ['status', 'priority', 'department', 'place', 'created_at'];
 const _kCondOps = {'eq': '=', 'neq': '≠', 'contains': '∋', 'in': 'in', 'gt': '>', 'lt': '<'};
@@ -2969,6 +3032,7 @@ class _CDataSource {
   Set<String> statusFilter;
   Set<String> priorityFilter;
   String format; // 'number' | 'percent' | 'duration'
+  String tableSource; // 'tickets' | 'users' | 'places' | 'departments'
   List<_RowCondition> conditions;
   List<_ColumnDef> tableColumns;
 
@@ -2980,6 +3044,7 @@ class _CDataSource {
     Set<String>? statusFilter,
     Set<String>? priorityFilter,
     this.format = 'number',
+    this.tableSource = 'tickets',
     List<_RowCondition>? conditions,
     List<_ColumnDef>? tableColumns,
   })  : statusFilter   = statusFilter  ?? {'pending','inprogress','prefinished','closed','resolved'},
@@ -2993,6 +3058,7 @@ class _CDataSource {
     'statusFilter':  statusFilter.toList(),
     'priorityFilter': priorityFilter.toList(),
     'format': format,
+    'tableSource': tableSource,
     'conditions':   conditions.map((c) => c.toJson()).toList(),
     'tableColumns': tableColumns.map((c) => c.toJson()).toList(),
   };
@@ -3007,6 +3073,7 @@ class _CDataSource {
     statusFilter:  Set<String>.from((j['statusFilter'] as List?) ?? []),
     priorityFilter: Set<String>.from((j['priorityFilter'] as List?) ?? []),
     format: j['format'] as String? ?? 'number',
+    tableSource: j['tableSource'] as String? ?? 'tickets',
     conditions:   ((j['conditions'] as List?) ?? [])
         .map((c) => _RowCondition.fromJson(c as Map)).toList(),
     tableColumns: ((j['tableColumns'] as List?) ?? [])
@@ -3031,7 +3098,7 @@ class _CComponent {
     required this.type,
     required this.title,
     this.chartType = 'bar',
-    this.colSpan = 4,
+    this.colSpan = 16,
     this.heightLevel = 2,
     this.colorTheme = 0,
     _CDataSource? datasource,
@@ -3109,16 +3176,35 @@ class _CustomDashboardScreenState extends State<CustomDashboardScreen> {
     try {
       final ds    = comp.datasource;
       final since = DateTime.now().subtract(Duration(days: ds.daysBack)).toIso8601String();
-      var q = supabase.from('tickets').select(
-          'id,status,priority,assigned_to,created_at,'
-          'departments:target_department_id(name),places(name)');
-      if (widget.currentUser.departmentId != null) {
-        q = q.eq('target_department_id', widget.currentUser.departmentId!);
+      List<Map> rows;
+      switch (ds.tableSource) {
+        case 'users':
+          rows = List.from(await supabase
+              .from('users')
+              .select('id,full_name,email,role,created_at,departments(name),places(name)')
+              .limit(500));
+        case 'places':
+          rows = List.from(await supabase
+              .from('places')
+              .select('id,name,created_at')
+              .limit(500));
+        case 'departments':
+          rows = List.from(await supabase
+              .from('departments')
+              .select('id,name,created_at')
+              .limit(500));
+        default: // 'tickets'
+          var q = supabase.from('tickets').select(
+              'id,status,priority,assigned_to,created_at,'
+              'departments:target_department_id(name),places(name)');
+          if (widget.currentUser.departmentId != null) {
+            q = q.eq('target_department_id', widget.currentUser.departmentId!);
+          }
+          q = q.gte('created_at', since);
+          if (ds.statusFilter.length < 5) q = q.inFilter('status', ds.statusFilter.toList());
+          if (ds.priorityFilter.length < 5) q = q.inFilter('priority', ds.priorityFilter.toList());
+          rows = List.from(await q.limit(500));
       }
-      q = q.gte('created_at', since);
-      if (ds.statusFilter.length < 5) q = q.inFilter('status', ds.statusFilter.toList());
-      if (ds.priorityFilter.length < 5) q = q.inFilter('priority', ds.priorityFilter.toList());
-      List<Map> rows = List.from(await q.limit(500));
 
       // Apply row conditions (client-side expressions)
       for (final cond in ds.conditions) {
@@ -3330,12 +3416,13 @@ class _CustomDashboardScreenState extends State<CustomDashboardScreen> {
               : SingleChildScrollView(
                   padding: const EdgeInsets.all(16),
                   child: LayoutBuilder(builder: (ctx, constraints) {
-                    final gridCols = constraints.maxWidth < 560 ? 4 : 8;
+                    final gridCols = constraints.maxWidth < 560 ? 8 : 32;
                     return Wrap(spacing: 10, runSpacing: 10,
                       children: _components.map((comp) {
-                        final w = constraints.maxWidth * comp.colSpan / gridCols - 5;
+                        final w = (constraints.maxWidth + 10) * comp.colSpan / gridCols - 10;
+                        final minW = constraints.maxWidth / 4 - 10;
                         return SizedBox(
-                          width: w.clamp(120.0, constraints.maxWidth),
+                          width: w.clamp(minW, constraints.maxWidth),
                           child: _buildCompCard(comp),
                         );
                       }).toList(),
@@ -3355,38 +3442,46 @@ class _CustomDashboardScreenState extends State<CustomDashboardScreen> {
   }
 
   Widget _buildCompCard(_CComponent comp) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(14),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 2))],
+    const kHdrH = 52.0;
+    final cardH = kHdrH + _heights[comp.heightLevel.clamp(0, 5)];
+    return SizedBox(
+      height: cardH,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white, borderRadius: BorderRadius.circular(14),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 2))],
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          // Header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 0),
+            child: Row(children: [
+              Icon(_compIcon(comp.type), size: 16, color: _color(_themes[comp.colorTheme])),
+              const SizedBox(width: 8),
+              Expanded(child: Text(comp.title,
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                  overflow: TextOverflow.ellipsis)),
+              IconButton(
+                icon: const Icon(Icons.tune_rounded, size: 18),
+                padding: const EdgeInsets.all(4), constraints: const BoxConstraints(),
+                color: Colors.grey, onPressed: () => _openComponentConfig(comp),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close_rounded, size: 18, color: Colors.red),
+                padding: const EdgeInsets.all(4), constraints: const BoxConstraints(),
+                onPressed: () => setState(() => _components.remove(comp)),
+              ),
+            ]),
+          ),
+          // Content fills remaining height
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+              child: _buildCompContent(comp),
+            ),
+          ),
+        ]),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // Header
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 8, 0),
-          child: Row(children: [
-            Icon(_compIcon(comp.type), size: 16, color: _color(_themes[comp.colorTheme])),
-            const SizedBox(width: 8),
-            Expanded(child: Text(comp.title,
-                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                overflow: TextOverflow.ellipsis)),
-            IconButton(
-              icon: const Icon(Icons.tune_rounded, size: 18),
-              padding: const EdgeInsets.all(4), constraints: const BoxConstraints(),
-              color: Colors.grey, onPressed: () => _openComponentConfig(comp),
-            ),
-            IconButton(
-              icon: const Icon(Icons.close_rounded, size: 18, color: Colors.red),
-              padding: const EdgeInsets.all(4), constraints: const BoxConstraints(),
-              onPressed: () => setState(() => _components.remove(comp)),
-            ),
-          ]),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-          child: _buildCompContent(comp),
-        ),
-      ]),
     );
   }
 
@@ -3440,10 +3535,13 @@ class _CustomDashboardScreenState extends State<CustomDashboardScreen> {
       final tableRows = comp._cachedData as List;
       final cols = comp.datasource.tableColumns
           .map((c) => c.label.isNotEmpty ? c.label : c.field).toList();
-      return _TableCard(table: {
-        'columns': cols.isNotEmpty ? cols : ['Column'],
-        'rows': tableRows.map((r) => (r as List).map((v) => v.toString()).toList()).toList(),
-      });
+      return _TableCard(
+        maxHeight: _heights[comp.heightLevel.clamp(0, 5)] - 50,
+        table: {
+          'columns': cols.isNotEmpty ? cols : ['Column'],
+          'rows': tableRows.map((r) => (r as List).map((v) => v.toString()).toList()).toList(),
+        },
+      );
     }
 
     final data = comp._cachedData as Map<String, dynamic>?;
@@ -3458,20 +3556,20 @@ class _CustomDashboardScreenState extends State<CustomDashboardScreen> {
         'x_labels': data.keys.take(12).toList(),
         'series': [{'label': comp.title, 'data': data.values.take(12).map((v) => (v as num).toDouble()).toList()}],
       };
-      return SizedBox(
-        height: _heights[comp.heightLevel],
-        child: _ChartCard(chart: chartData, height: _heights[comp.heightLevel],
-            colorOffset: _themes[comp.colorTheme]),
-      );
+      return _ChartCard(chart: chartData, height: _heights[comp.heightLevel.clamp(0, 5)],
+          colorOffset: _themes[comp.colorTheme]);
     }
 
-    // Table
+    // Table (grouped)
     final keys = data.keys.toList();
     final vals = data.values.map((v) => v.toString()).toList();
-    return _TableCard(table: {
-      'columns': ['Category', 'Value'],
-      'rows': List.generate(keys.length, (i) => [keys[i], vals[i]]),
-    });
+    return _TableCard(
+      maxHeight: _heights[comp.heightLevel.clamp(0, 5)] - 50,
+      table: {
+        'columns': ['Category', 'Value'],
+        'rows': List.generate(keys.length, (i) => [keys[i], vals[i]]),
+      },
+    );
   }
 }
 
@@ -3635,6 +3733,18 @@ class _ComponentConfigSheetState extends State<_ComponentConfigSheet> {
           selected: ds.aggFn,
           onSelect: (v) => upd(() => ds.aggFn = v),
         ),
+        const SizedBox(height: 16),
+
+        // Data Source
+        _lbl(isAr ? 'مصدر البيانات' : 'Data Source'),
+        Wrap(spacing: 8, runSpacing: 6, children: [
+          for (final entry in const {'tickets':'Tickets','users':'Users','places':'Places','departments':'Departments'}.entries)
+            _filterChip(
+              label: entry.value,
+              selected: ds.tableSource == entry.key,
+              onTap: () => upd(() => ds.tableSource = entry.key),
+            ),
+        ]),
         const SizedBox(height: 16),
 
         // Group By (charts + tables)
@@ -3830,9 +3940,10 @@ class _ComponentConfigSheetState extends State<_ComponentConfigSheet> {
         const SizedBox(height: 16),
 
         // Layout
-        _lbl(isAr ? 'العرض (من 8 أعمدة)' : 'Width (of 8 cols)'),
-        Row(children: List.generate(8, (i) {
-          final cs = i + 1;
+        _lbl(isAr ? 'العرض (من 32 عمود)' : 'Width (of 32 cols)'),
+        Row(children: [4,8,12,16,20,24,28,32].asMap().entries.map((e) {
+          final cs = e.value;
+          const labels = ['⅛','¼','⅜','½','⅝','¾','⅞','■'];
           final sel = comp.colSpan == cs;
           return Expanded(child: GestureDetector(
             onTap: () => upd(() => comp.colSpan = cs),
@@ -3844,11 +3955,11 @@ class _ComponentConfigSheetState extends State<_ComponentConfigSheet> {
                 color: sel ? const Color(0xFFf16936) : Colors.grey.shade100,
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: Center(child: Text('$cs', style: TextStyle(fontSize: 12,
+              child: Center(child: Text(labels[e.key], style: TextStyle(fontSize: 12,
                   fontWeight: FontWeight.bold, color: sel ? Colors.white : Colors.grey[600]))),
             ),
           ));
-        })),
+        }).toList()),
         const SizedBox(height: 14),
 
         _lbl(isAr ? 'الارتفاع' : 'Height'),
