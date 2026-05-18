@@ -526,12 +526,14 @@ class AuthService {
     }
   }
 
-// REPLACE _notifyAdminForActivation in AuthService
   static Future<void> _notifyAdminForActivation(
       String userName, String userEmail, String? placeId) async {
     try {
-      final admins =
-          await supabase.from('users').select('id').inFilter('user_type', [
+      // Notify system admins and super admins via in-app notification
+      final admins = await supabase
+          .from('users')
+          .select('id')
+          .inFilter('user_type', [
         UserType.systemAdmin.value,
         UserType.superAdmin.value,
       ]).eq('is_active', true);
@@ -544,11 +546,54 @@ class AuthService {
               'User $userName ($userEmail) has registered and requires account activation.',
           'type': 'user_registration',
           'priority': 'medium',
-          // Don't include 'data' field since it doesn't exist in your schema
         });
       }
 
-      print('✅ Admins notified about new user registration');
+      // Notify super users of the chosen place via push + in-app notification
+      if (placeId != null) {
+        final superUsers = await supabase
+            .from('users')
+            .select('id, fcm_token, fcm_token_web')
+            .eq('user_type', UserType.superUser.value)
+            .eq('place_id', placeId)
+            .eq('is_active', true);
+
+        for (final su in superUsers) {
+          // In-app notification
+          await supabase.from('notifications').insert({
+            'user_id': su['id'],
+            'title': 'New User Registration',
+            'message':
+                'User $userName ($userEmail) registered for your place and requires activation.',
+            'type': 'user_registration',
+            'priority': 'high',
+          });
+
+          // Push notification via FCM edge function
+          final token = (su['fcm_token'] ?? su['fcm_token_web']) as String?;
+          if (token != null && token.isNotEmpty) {
+            try {
+              await supabase.functions.invoke(
+                'send-push-notification',
+                body: {
+                  'token': token,
+                  'title': 'New User Registration',
+                  'body': '$userName ($userEmail) registered and needs activation.',
+                  'data': {
+                    'type': 'user_registration',
+                    'place_id': placeId,
+                    'click_action': 'FLUTTER_NOTIFICATION_CLICK',
+                  },
+                },
+              );
+            } catch (pushError) {
+              print('❌ Push to super user failed: $pushError');
+            }
+          }
+        }
+      }
+
+      print('✅ Admins and super users notified about new user registration');
     } catch (e) {
       print('❌ Error notifying admin: $e');
     }

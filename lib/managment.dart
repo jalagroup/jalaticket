@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'package:jalasupport/activity.dart';
+import 'package:jalasupport/ai_dashboard_screen.dart';
 import 'package:jalasupport/ai_insights.dart';
 import 'package:jalasupport/branch_admin_management_screen.dart';
 import 'package:jalasupport/problem_reports_admin_screen.dart';
@@ -47,11 +48,13 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
   }
 
   void _setDefaultUserType() {
-    // Set available user types based on current user's permissions
     if (widget.currentUser.userType == UserType.systemAdmin) {
       _selectedUserType = UserType.superAdmin;
     } else if (widget.currentUser.userType == UserType.superAdmin) {
       _selectedUserType = UserType.admin;
+    } else if (widget.currentUser.userType == UserType.superUser) {
+      _selectedUserType = UserType.user;
+      _selectedPlaceId = widget.currentUser.placeId;
     }
   }
 
@@ -60,6 +63,8 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
       return [UserType.superAdmin, UserType.superUser, UserType.branchAdmin];
     } else if (widget.currentUser.userType == UserType.superAdmin) {
       return [UserType.admin];
+    } else if (widget.currentUser.userType == UserType.superUser) {
+      return [UserType.user];
     }
     return [];
   }
@@ -332,7 +337,8 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
                         onChanged: (v) => setState(() => _selectedDepartmentId = v),
                       ),
                     ],
-                    if (_selectedUserType == UserType.superUser) ...[
+                    if (_selectedUserType == UserType.superUser &&
+                        widget.currentUser.userType != UserType.superUser) ...[
                       const SizedBox(height: 10),
                       DropdownButtonFormField<String>(
                         value: _selectedPlaceId,
@@ -341,6 +347,38 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
                         decoration: _field('${l10n.place} *', Icons.location_on_outlined),
                         items: _places.map((p) => DropdownMenuItem(value: p.id, child: Text(p.localizedName(lang), style: const TextStyle(fontSize: 13)))).toList(),
                         onChanged: (v) => setState(() => _selectedPlaceId = v),
+                      ),
+                    ],
+                    if (_selectedUserType == UserType.user &&
+                        widget.currentUser.userType == UserType.superUser &&
+                        widget.currentUser.placeId != null) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          border: Border.all(color: Colors.grey.shade200),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(children: [
+                          Icon(Icons.location_on_outlined, color: Colors.grey[500], size: 18),
+                          const SizedBox(width: 8),
+                          Text(
+                            _places.firstWhere(
+                              (p) => p.id == widget.currentUser.placeId,
+                              orElse: () => PlaceModel(
+                                id: '', name: l10n.place, nameEn: l10n.place,
+                                nameAr: l10n.place, isActive: true,
+                                createdAt: DateTime.now(),
+                                updatedAt: DateTime.now(),
+                                allowedDepartmentIds: [], allowedTicketTypes: [],
+                              ),
+                            ).localizedName(lang),
+                            style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+                          ),
+                          const Spacer(),
+                          Icon(Icons.lock_outline, size: 14, color: Colors.grey[400]),
+                        ]),
                       ),
                     ],
                     if (_selectedUserType == UserType.admin) ...[
@@ -910,9 +948,9 @@ class _ManagementScreenState extends State<ManagementScreen>
   int _getTabCount() {
     switch (widget.currentUser.userType) {
       case UserType.systemAdmin:
-        return 13;
+        return 14;
       case UserType.superAdmin:
-        return 8;
+        return 9;
       case UserType.superUser:
         return 2;
       default:
@@ -945,6 +983,7 @@ class _ManagementScreenState extends State<ManagementScreen>
         Tab(icon: const Icon(Icons.settings, size: 20), text: l10n.preferences),
         Tab(icon: const Icon(Icons.auto_awesome, size: 20), text: l10n.aiInsights),
         Tab(icon: const Icon(Icons.bug_report_rounded, size: 20), text: l10n.problemReports),
+        Tab(icon: const Icon(Icons.tune, size: 20), text: l10n.systemSettings),
       ]);
     } else if (widget.currentUser.userType == UserType.superAdmin) {
       tabs.addAll([
@@ -956,6 +995,7 @@ class _ManagementScreenState extends State<ManagementScreen>
         Tab(icon: const Icon(Icons.autorenew, size: 20), text: l10n.autoAssign),
         Tab(icon: const Icon(Icons.settings, size: 20), text: l10n.preferences),
         Tab(icon: const Icon(Icons.auto_awesome, size: 20), text: l10n.aiInsights),
+        Tab(icon: const Icon(Icons.dashboard_customize, size: 20), text: l10n.aiDashboard),
       ]);
     } else if (widget.currentUser.userType == UserType.superUser) {
       tabs.addAll([
@@ -1020,6 +1060,9 @@ class _ManagementScreenState extends State<ManagementScreen>
         case 12:
           view = ProblemReportsAdminScreen(currentUser: widget.currentUser);
           break;
+        case 13:
+          view = SystemSettingsScreen(currentUser: widget.currentUser);
+          break;
         default:
           view =
               Center(child: Text(AppLocalizations.safeOf(context).invalidTab));
@@ -1049,6 +1092,9 @@ class _ManagementScreenState extends State<ManagementScreen>
           break;
         case 7:
           view = AiInsightsView(currentUser: widget.currentUser);
+          break;
+        case 8:
+          view = AiDashboardScreen(currentUser: widget.currentUser);
           break;
         default:
           view =
@@ -1928,8 +1974,7 @@ class _PlacesManagementState extends State<PlacesManagement>
     );
   }
 
-// Add this new method for delete confirmation
-  Future<void> _showDeleteDialog(PlaceModel place) async {
+  Future<void> _showDeactivateDialog(PlaceModel place) async {
     final l10n = AppLocalizations.safeOf(context);
     final lang = Localizations.localeOf(context).languageCode;
 
@@ -1937,8 +1982,7 @@ class _PlacesManagementState extends State<PlacesManagement>
       context: context,
       builder: (context) {
         return AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Row(
             children: [
               Container(
@@ -1947,18 +1991,13 @@ class _PlacesManagementState extends State<PlacesManagement>
                   color: Colors.red.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(
-                  Icons.delete_outline,
-                  color: Colors.red,
-                  size: 20,
-                ),
+                child: const Icon(Icons.block, color: Colors.red, size: 20),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   l10n.deletePlace,
-                  style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.bold),
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
                 ),
               ),
             ],
@@ -1996,28 +2035,34 @@ class _PlacesManagementState extends State<PlacesManagement>
     );
 
     if (confirmed == true) {
-      await _deletePlace(place);
+      await _deactivatePlace(place);
     }
   }
 
-// Add this new method to perform the delete
-  Future<void> _deletePlace(PlaceModel place) async {
+  Future<void> _deactivatePlace(PlaceModel place) async {
     final l10n = AppLocalizations.safeOf(context);
     try {
-      // Actually delete from database
-      final response =
-          await supabase.from('places').delete().eq('id', place.id).select();
-
-      // Check if deletion was successful
-      if (response.isEmpty) {
-        // Reload to refresh the list
-        await _loadPlaces();
-        _showSuccess(l10n.placeDeletedSuccessfully);
-      } else {
-        _showError(l10n.failedToDeletePlace);
-      }
+      await supabase.from('places').update({'is_active': false}).eq('id', place.id);
+      setState(() {
+        final index = _places.indexWhere((p) => p.id == place.id);
+        if (index != -1) {
+          _places[index] = PlaceModel(
+            id: place.id,
+            name: place.name,
+            nameEn: place.nameEn,
+            nameAr: place.nameAr,
+            description: place.description,
+            isActive: false,
+            createdAt: place.createdAt,
+            updatedAt: DateTime.now(),
+            allowedDepartmentIds: place.allowedDepartmentIds,
+            allowedTicketTypes: place.allowedTicketTypes,
+          );
+        }
+      });
+      _showSuccess(l10n.placeDeactivated);
     } catch (e) {
-      print('Error deleting place: $e');
+      print('Error deactivating place: $e');
       _showError('${l10n.failedToDeletePlace}: ${e.toString()}');
     }
   }
@@ -2238,53 +2283,57 @@ class _PlacesManagementState extends State<PlacesManagement>
                                       ),
                                     )
                                   : null,
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  // Edit button - always first
-                                  IconButton(
-                                    icon: const Icon(Icons.edit_outlined,
-                                        size: 20),
-                                    color: Colors.blue,
-                                    onPressed: () =>
-                                        _showCreateDialog(place: place),
-                                    tooltip: l10n.edit,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  // Status badge - always second
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 6,
+                              trailing: isMobile
+                                  ? PopupMenuButton<String>(
+                                      icon: const Icon(Icons.more_vert, size: 20),
+                                      onSelected: (v) {
+                                        if (v == 'edit') _showCreateDialog(place: place);
+                                        if (v == 'toggle') _toggleStatus(place);
+                                        if (v == 'delete') _showDeactivateDialog(place);
+                                      },
+                                      itemBuilder: (_) => [
+                                        PopupMenuItem(value: 'edit', child: Row(children: [const Icon(Icons.edit_outlined, size: 16, color: Colors.blue), const SizedBox(width: 8), Text(l10n.edit)])),
+                                        PopupMenuItem(value: 'toggle', child: Row(children: [Icon(place.isActive ? Icons.toggle_off : Icons.toggle_on, size: 16, color: Colors.orange), const SizedBox(width: 8), Text(place.isActive ? l10n.inactive : l10n.active)])),
+                                        PopupMenuItem(value: 'delete', child: Row(children: [const Icon(Icons.block, size: 16, color: Colors.red), const SizedBox(width: 8), Text(l10n.delete, style: const TextStyle(color: Colors.red))])),
+                                      ],
+                                    )
+                                  : Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          icon: const Icon(Icons.edit_outlined, size: 20),
+                                          color: Colors.blue,
+                                          onPressed: () => _showCreateDialog(place: place),
+                                          tooltip: l10n.edit,
+                                        ),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                          decoration: BoxDecoration(
+                                            color: place.isActive ? Colors.green.withOpacity(0.1) : Colors.grey.withOpacity(0.1),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Text(
+                                            place.isActive ? l10n.active : l10n.inactive,
+                                            style: TextStyle(
+                                              color: place.isActive ? Colors.green : Colors.grey,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ),
+                                        Switch(
+                                          value: place.isActive,
+                                          onChanged: (_) => _toggleStatus(place),
+                                          activeColor: Colors.green,
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.block, size: 20),
+                                          color: Colors.red,
+                                          onPressed: () => _showDeactivateDialog(place),
+                                          tooltip: l10n.delete,
+                                        ),
+                                      ],
                                     ),
-                                    decoration: BoxDecoration(
-                                      color: place.isActive
-                                          ? Colors.green.withOpacity(0.1)
-                                          : Colors.grey.withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(
-                                      place.isActive
-                                          ? l10n.active
-                                          : l10n.inactive,
-                                      style: TextStyle(
-                                        color: place.isActive
-                                            ? Colors.green
-                                            : Colors.grey,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  // Switch - always last
-                                  Switch(
-                                    value: place.isActive,
-                                    onChanged: (_) => _toggleStatus(place),
-                                    activeColor: Colors.green,
-                                  ),
-                                ],
-                              ),
                             ));
                       },
                     ),
@@ -2545,6 +2594,313 @@ class _PlaceEditDialogState extends State<_PlaceEditDialog> {
   }
 }
 
+// ============================================================================
+// SYSTEM SETTINGS SCREEN
+// ============================================================================
+class SystemSettingsScreen extends StatefulWidget {
+  final UserModel currentUser;
+
+  const SystemSettingsScreen({super.key, required this.currentUser});
+
+  @override
+  State<SystemSettingsScreen> createState() => _SystemSettingsScreenState();
+}
+
+class _SystemSettingsScreenState extends State<SystemSettingsScreen>
+    with AutomaticKeepAliveClientMixin {
+  static const _itKey = 'it_solution_target_department';
+  static const _vehicleKey = 'vehicle_maintenance_target_department';
+
+  List<DepartmentModel> _departments = [];
+  String? _itDeptId;
+  String? _vehicleDeptId;
+  bool _isLoading = true;
+  bool _isSaving = false;
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    setState(() => _isLoading = true);
+    try {
+      final deptRes = await supabase
+          .from('departments')
+          .select()
+          .eq('is_active', true)
+          .order('name');
+      final settingsRes = await supabase
+          .from('system_settings')
+          .select()
+          .inFilter('setting_key', [_itKey, _vehicleKey]);
+
+      String? itVal;
+      String? vehicleVal;
+      for (final row in settingsRes) {
+        if (row['setting_key'] == _itKey) itVal = row['value'] as String?;
+        if (row['setting_key'] == _vehicleKey) vehicleVal = row['value'] as String?;
+      }
+
+      if (mounted) {
+        setState(() {
+          _departments = deptRes
+              .map<DepartmentModel>((j) => DepartmentModel.fromJson(j))
+              .toList();
+          _itDeptId = itVal;
+          _vehicleDeptId = vehicleVal;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _save() async {
+    final l10n = AppLocalizations.safeOf(context);
+    setState(() => _isSaving = true);
+    try {
+      await supabase.from('system_settings').upsert(
+        {'setting_key': _itKey, 'value': _itDeptId, 'updated_at': DateTime.now().toIso8601String()},
+        onConflict: 'setting_key',
+      );
+      await supabase.from('system_settings').upsert(
+        {'setting_key': _vehicleKey, 'value': _vehicleDeptId, 'updated_at': DateTime.now().toIso8601String()},
+        onConflict: 'setting_key',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Row(children: [
+            const Icon(Icons.check_circle, color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            Text(l10n.systemSettingsSaved),
+          ]),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('${l10n.failedToSaveSettings}: $e'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    }
+    if (mounted) setState(() => _isSaving = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final l10n = AppLocalizations.safeOf(context);
+    final lang = Localizations.localeOf(context).languageCode;
+
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border(bottom: BorderSide(color: Colors.grey.shade100)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.tune, color: AppColors.primary, size: 18),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  l10n.systemSettings,
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _sectionCard(
+                        icon: Icons.alt_route,
+                        title: l10n.ticketRoutingSettings,
+                        children: [
+                          _deptDropdown(
+                            label: l10n.itSolutionTargetDept,
+                            hint: l10n.itSolutionDeptHint,
+                            icon: Icons.computer,
+                            iconColor: Colors.blue,
+                            value: _itDeptId,
+                            departments: _departments,
+                            lang: lang,
+                            onChanged: (v) => setState(() => _itDeptId = v),
+                          ),
+                          const SizedBox(height: 16),
+                          _deptDropdown(
+                            label: l10n.vehicleMaintenanceTargetDept,
+                            hint: l10n.vehicleMaintenanceDeptHint,
+                            icon: Icons.local_shipping,
+                            iconColor: Colors.brown,
+                            value: _vehicleDeptId,
+                            departments: _departments,
+                            lang: lang,
+                            onChanged: (v) => setState(() => _vehicleDeptId = v),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _isSaving ? null : _save,
+                          icon: _isSaving
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                      color: Colors.white, strokeWidth: 2),
+                                )
+                              : const Icon(Icons.save_rounded, size: 18),
+                          label: Text(
+                            l10n.save,
+                            style: const TextStyle(
+                                fontSize: 15, fontWeight: FontWeight.w600),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _sectionCard({
+    required IconData icon,
+    required String title,
+    required List<Widget> children,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2))
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(icon, size: 18, color: AppColors.primary),
+            const SizedBox(width: 8),
+            Text(title,
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: 14)),
+          ]),
+          const SizedBox(height: 16),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget _deptDropdown({
+    required String label,
+    required String hint,
+    required IconData icon,
+    required Color iconColor,
+    required String? value,
+    required List<DepartmentModel> departments,
+    required String lang,
+    required ValueChanged<String?> onChanged,
+  }) {
+    final l10n = AppLocalizations.safeOf(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          Icon(icon, size: 16, color: iconColor),
+          const SizedBox(width: 6),
+          Text(label,
+              style: const TextStyle(
+                  fontWeight: FontWeight.w600, fontSize: 13)),
+        ]),
+        const SizedBox(height: 4),
+        Text(hint,
+            style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<String>(
+          value: departments.any((d) => d.id == value) ? value : null,
+          isExpanded: true,
+          decoration: InputDecoration(
+            isDense: true,
+            filled: true,
+            fillColor: Colors.grey.shade50,
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: Colors.grey.shade300)),
+            enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: Colors.grey.shade200)),
+            focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide:
+                    const BorderSide(color: AppColors.primary, width: 1.5)),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          ),
+          hint: Text(l10n.selectDepartment,
+              style: TextStyle(color: Colors.grey[400], fontSize: 13)),
+          items: [
+            DropdownMenuItem<String>(
+              value: null,
+              child: Text(l10n.notConfigured,
+                  style: TextStyle(color: Colors.grey[400], fontSize: 13)),
+            ),
+            ...departments.map((d) => DropdownMenuItem<String>(
+                  value: d.id,
+                  child: Text(d.localizedName(lang),
+                      style: const TextStyle(fontSize: 13)),
+                )),
+          ],
+          onChanged: onChanged,
+        ),
+      ],
+    );
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 class UsersManagement extends StatefulWidget {
@@ -2770,7 +3126,8 @@ class _UsersManagementState extends State<UsersManagement>
 
   bool _canCreateUsers() {
     return widget.currentUser.userType == UserType.systemAdmin ||
-        widget.currentUser.userType == UserType.superAdmin;
+        widget.currentUser.userType == UserType.superAdmin ||
+        widget.currentUser.userType == UserType.superUser;
   }
 
   bool _canEditUser(UserModel user) {

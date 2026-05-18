@@ -180,6 +180,7 @@ class AppLocalizations {
   String get individualsMaintenanceTicket =>
       translate('individuals_maintenance_ticket');
   String get requestsTicket => translate('requests_ticket');
+  String get truckMaintenanceTicket => translate('truck_maintenance_ticket');
   String get create => translate('create');
   String get refresh => translate('refresh');
   String get connectionIssuesDetected =>
@@ -884,6 +885,45 @@ class AppLocalizations {
   String get selectDepartment => translate('select_department');
   String get savedSuccessfully => translate('saved_successfully');
 
+  // ── Ticket department reassignment ──
+  String get reassignDepartment => translate('reassign_department');
+  String get reassignDepartmentTitle => translate('reassign_department_title');
+  String get reassignDepartmentHint => translate('reassign_department_hint');
+  String get ticketReassigned => translate('ticket_reassigned');
+  String get ticketReassignedCreatorMsg => translate('ticket_reassigned_creator_msg');
+  String get failedToReassign => translate('failed_to_reassign');
+  String get selectNewDepartment => translate('select_new_department');
+  String get reassignConfirm => translate('reassign_confirm');
+
+  // ── AI Dashboard Builder ──
+  String get aiDashboard => translate('ai_dashboard');
+  String get aiDashboardBuilder => translate('ai_dashboard_builder');
+  String get aiDashboardPromptHint => translate('ai_dashboard_prompt_hint');
+  String get aiDashboardInstructions => translate('ai_dashboard_instructions');
+  String get generateDashboard => translate('generate_dashboard');
+  String get generatingDashboard => translate('generating_dashboard');
+  String get saveDashboard => translate('save_dashboard');
+  String get dashboardTitle => translate('dashboard_title');
+  String get dashboardPrivacy => translate('dashboard_privacy');
+  String get privacyPrivate => translate('privacy_private');
+  String get privacyPublic => translate('privacy_public');
+  String get savedDashboards => translate('saved_dashboards');
+  String get noSavedDashboards => translate('no_saved_dashboards');
+  String get dashboardSaved => translate('dashboard_saved');
+  String get failedToGenerateDashboard => translate('failed_to_generate_dashboard');
+  String get myDashboards => translate('my_dashboards');
+  String get sharedDashboards => translate('shared_dashboards');
+  String get deleteDashboard => translate('delete_dashboard');
+  String get confirmDeleteDashboard => translate('confirm_delete_dashboard');
+  String get kpis => translate('kpis');
+  String get charts => translate('charts');
+  String get tables => translate('tables');
+  String get promptTip1 => translate('prompt_tip_1');
+  String get promptTip2 => translate('prompt_tip_2');
+  String get promptTip3 => translate('prompt_tip_3');
+  String get promptTip4 => translate('prompt_tip_4');
+  String get promptTip5 => translate('prompt_tip_5');
+
   String get problemTitles => translate('problem_titles');
   String get createProblemTitle => translate('create_problem_title');
   String get problemTitleCreatedSuccessfully =>
@@ -1087,6 +1127,14 @@ class AppLocalizations {
   String get invalidTab => translate('invalid_tab');
   String get noManagementOptionsAvailable =>
       translate('no_management_options_available');
+  String get systemSettings => translate('system_settings');
+  String get itSolutionTargetDept => translate('it_solution_target_dept');
+  String get vehicleMaintenanceTargetDept => translate('vehicle_maintenance_target_dept');
+  String get systemSettingsSaved => translate('system_settings_saved');
+  String get notConfigured => translate('not_configured');
+  String get ticketRoutingSettings => translate('ticket_routing_settings');
+  String get itSolutionDeptHint => translate('it_solution_dept_hint');
+  String get vehicleMaintenanceDeptHint => translate('vehicle_maintenance_dept_hint');
 
   String get failedToLoadPreferences => translate('failed_to_load_preferences');
   String get savingPreferences => translate('saving_preferences');
@@ -1320,6 +1368,7 @@ const Map<String, String> _enValues = {
   'quality_complaint': 'Quality Complaint',
   'individuals_maintenance_ticket': 'Individuals Maintenance Ticket',
   'requests_ticket': 'Requests Ticket',
+  'truck_maintenance_ticket': 'Truck Maintenance Ticket',
   'create': 'Create',
   'refresh': 'Refresh',
   'connection_issues_detected':
@@ -1943,6 +1992,43 @@ const Map<String, String> _enValues = {
   'replacement_recommendations': 'Replacement Recommendations',
   'prevention_suggestions': 'Prevention Suggestions',
   'smart_title_suggestions': 'Smart Title Suggestions',
+  // Reassignment
+  'reassign_department': 'Reassign Department',
+  'reassign_department_title': 'Reassign to Another Department',
+  'reassign_department_hint': 'This ticket will be moved to the selected department',
+  'ticket_reassigned': 'Ticket reassigned successfully',
+  'ticket_reassigned_creator_msg': 'Your ticket was reassigned to the correct department. Please choose the right department next time.',
+  'failed_to_reassign': 'Failed to reassign ticket',
+  'select_new_department': 'Select new department',
+  'reassign_confirm': 'Reassign',
+  // AI Dashboard Builder
+  'ai_dashboard': 'AI Dashboard',
+  'ai_dashboard_builder': 'AI Dashboard Builder',
+  'ai_dashboard_prompt_hint': 'Describe the dashboard you need, e.g. "Show ticket trends by status for the last 30 days with a breakdown by place"',
+  'ai_dashboard_instructions': 'How to write an efficient prompt',
+  'generate_dashboard': 'Generate Dashboard',
+  'generating_dashboard': 'Generating dashboard...',
+  'save_dashboard': 'Save Dashboard',
+  'dashboard_title': 'Dashboard Title',
+  'dashboard_privacy': 'Privacy',
+  'privacy_private': 'Private (only me)',
+  'privacy_public': 'Public (all super admins)',
+  'saved_dashboards': 'Saved Dashboards',
+  'no_saved_dashboards': 'No saved dashboards yet',
+  'dashboard_saved': 'Dashboard saved successfully',
+  'failed_to_generate_dashboard': 'Failed to generate dashboard',
+  'my_dashboards': 'My Dashboards',
+  'shared_dashboards': 'Shared Dashboards',
+  'delete_dashboard': 'Delete Dashboard',
+  'confirm_delete_dashboard': 'Are you sure you want to delete this dashboard?',
+  'kpis': 'KPIs',
+  'charts': 'Charts',
+  'tables': 'Tables',
+  'prompt_tip_1': '✅ Be specific: mention time range, metric, and grouping',
+  'prompt_tip_2': '✅ Use keywords: trend, compare, breakdown, top 5, average',
+  'prompt_tip_3': '✅ Example: "Compare open vs closed tickets per place this month"',
+  'prompt_tip_4': '❌ Avoid vague: "show me everything" or "all data"',
+  'prompt_tip_5': '✅ Specify chart type if needed: bar chart, pie chart, table',
   'select_department': 'Select Department',
   'saved_successfully': 'Saved successfully',
 
@@ -2125,6 +2211,14 @@ const Map<String, String> _enValues = {
   'reports': 'Reports',
   'invalid_tab': 'Invalid tab',
   'no_management_options_available': 'No management options available',
+  'system_settings': 'System Settings',
+  'it_solution_target_dept': 'IT Solution Target Department',
+  'vehicle_maintenance_target_dept': 'Vehicle Maintenance Target Department',
+  'system_settings_saved': 'Settings saved successfully',
+  'not_configured': 'Not configured',
+  'ticket_routing_settings': 'Ticket Routing Settings',
+  'it_solution_dept_hint': 'Department that receives IT Solution tickets',
+  'vehicle_maintenance_dept_hint': 'Department that receives Vehicle Maintenance tickets',
   'saving_preferences': 'Saving preferences...',
   // Problem Titles
   'problem_title_updated_successfully': 'Problem title updated successfully',
@@ -2361,6 +2455,7 @@ const Map<String, String> _arValues = {
   'quality_complaint': 'شكوى جودة',
   'individuals_maintenance_ticket': 'تذكرة صيانة مشاكل فردية',
   'requests_ticket': 'تذكرة طلبات',
+  'truck_maintenance_ticket': 'تذكرة صيانة شاحنات',
   'create': 'إنشاء',
   'refresh': 'تحديث',
   'connection_issues_detected':
@@ -2977,6 +3072,43 @@ const Map<String, String> _arValues = {
   'replacement_recommendations': 'توصيات الاستبدال',
   'prevention_suggestions': 'اقتراحات الوقاية',
   'smart_title_suggestions': 'اقتراحات عناوين ذكية',
+  // إعادة التوجيه
+  'reassign_department': 'إعادة توجيه القسم',
+  'reassign_department_title': 'إعادة التوجيه إلى قسم آخر',
+  'reassign_department_hint': 'سيتم نقل هذه التذكرة إلى القسم المحدد',
+  'ticket_reassigned': 'تمت إعادة توجيه التذكرة بنجاح',
+  'ticket_reassigned_creator_msg': 'تمت إعادة توجيه تذكرتك إلى القسم الصحيح. يرجى اختيار القسم المناسب في المرة القادمة.',
+  'failed_to_reassign': 'فشلت إعادة توجيه التذكرة',
+  'select_new_department': 'اختر القسم الجديد',
+  'reassign_confirm': 'إعادة التوجيه',
+  // منشئ لوحات تحكم الذكاء الاصطناعي
+  'ai_dashboard': 'لوحة تحكم AI',
+  'ai_dashboard_builder': 'منشئ لوحات تحكم AI',
+  'ai_dashboard_prompt_hint': 'اصف لوحة التحكم التي تحتاجها، مثل: "أظهر اتجاهات التذاكر حسب الحالة لآخر 30 يوم مع تفصيل حسب الموقع"',
+  'ai_dashboard_instructions': 'كيف تكتب طلبًا فعّالًا',
+  'generate_dashboard': 'إنشاء لوحة التحكم',
+  'generating_dashboard': 'جاري الإنشاء...',
+  'save_dashboard': 'حفظ لوحة التحكم',
+  'dashboard_title': 'عنوان لوحة التحكم',
+  'dashboard_privacy': 'الخصوصية',
+  'privacy_private': 'خاص (أنا فقط)',
+  'privacy_public': 'عام (جميع المشرفين)',
+  'saved_dashboards': 'لوحات التحكم المحفوظة',
+  'no_saved_dashboards': 'لا توجد لوحات تحكم محفوظة بعد',
+  'dashboard_saved': 'تم حفظ لوحة التحكم بنجاح',
+  'failed_to_generate_dashboard': 'فشل إنشاء لوحة التحكم',
+  'my_dashboards': 'لوحاتي',
+  'shared_dashboards': 'اللوحات المشتركة',
+  'delete_dashboard': 'حذف لوحة التحكم',
+  'confirm_delete_dashboard': 'هل أنت متأكد من حذف هذه اللوحة؟',
+  'kpis': 'مؤشرات الأداء',
+  'charts': 'الرسوم البيانية',
+  'tables': 'الجداول',
+  'prompt_tip_1': '✅ كن محددًا: اذكر النطاق الزمني والمقياس والتجميع',
+  'prompt_tip_2': '✅ استخدم كلمات مفتاحية: اتجاه، مقارنة، تفصيل، أفضل 5، متوسط',
+  'prompt_tip_3': '✅ مثال: "قارن التذاكر المفتوحة والمغلقة لكل موقع هذا الشهر"',
+  'prompt_tip_4': '❌ تجنب الغموض: "اعرض كل شيء" أو "جميع البيانات"',
+  'prompt_tip_5': '✅ حدد نوع الرسم إذا أردت: رسم بار، رسم دائري، جدول',
   'select_department': 'اختر القسم',
   'saved_successfully': 'تم الحفظ بنجاح',
 
@@ -3151,6 +3283,14 @@ const Map<String, String> _arValues = {
   'reports': 'التقارير',
   'invalid_tab': 'علامة تبويب غير صالحة',
   'no_management_options_available': 'لا توجد خيارات إدارة متاحة',
+  'system_settings': 'إعدادات النظام',
+  'it_solution_target_dept': 'القسم المستهدف لتذاكر حلول تقنية',
+  'vehicle_maintenance_target_dept': 'القسم المستهدف لتذاكر صيانة المركبات',
+  'system_settings_saved': 'تم حفظ الإعدادات بنجاح',
+  'not_configured': 'غير مضبوط',
+  'ticket_routing_settings': 'إعدادات توجيه التذاكر',
+  'it_solution_dept_hint': 'القسم الذي يستقبل تذاكر حلول تقنية',
+  'vehicle_maintenance_dept_hint': 'القسم الذي يستقبل تذاكر صيانة المركبات',
   'saving_preferences': 'جاري حفظ التفضيلات...',
   // Problem Titles
   'problem_title_updated_successfully': 'تم تحديث عنوان المشكلة بنجاح',

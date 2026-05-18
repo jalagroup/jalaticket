@@ -3078,7 +3078,7 @@ class _TicketsScreenState extends State<TicketsScreen>
                       child: Row(children: [
                         Icon(Icons.local_shipping, size: 18, color: Colors.brown),
                         SizedBox(width: 8),
-                        Text('صيانة الشاحنات'),
+                        Text(l10n.truckMaintenanceTicket),
                       ]),
                     ),
                 ];
@@ -7319,7 +7319,178 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
       });
     }
 
+    // Super admin can reassign ticket to a different department
+    // (shows for any ticket in their department while it's still open)
+    if (widget.currentUser.departmentId == widget.ticket.targetDepartmentId &&
+        [TicketStatus.pending, TicketStatus.inprogress]
+            .contains(widget.ticket.status)) {
+      actions.add({
+        'label': l10n.reassignDepartment,
+        'icon': Icons.swap_horiz_rounded,
+        'color': Colors.indigo,
+        'onPressed': () => _showReassignDepartmentDialog()
+      });
+    }
+
     return actions;
+  }
+
+  Future<void> _showReassignDepartmentDialog() async {
+    final l10n = AppLocalizations.safeOf(context);
+    final lang = Localizations.localeOf(context).languageCode;
+
+    // Load all active departments except the current one
+    List<Map<String, dynamic>> departments = [];
+    try {
+      final res = await supabase
+          .from('departments')
+          .select('id, name, name_en, name_ar')
+          .eq('is_active', true)
+          .neq('id', widget.ticket.targetDepartmentId)
+          .order('name');
+      departments = List<Map<String, dynamic>>.from(res);
+    } catch (_) {}
+
+    if (!mounted) return;
+
+    String? selectedDeptId;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.indigo.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.swap_horiz_rounded, color: Colors.indigo, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(l10n.reassignDepartmentTitle,
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+            ),
+          ]),
+          content: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(l10n.reassignDepartmentHint,
+                    style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  value: selectedDeptId,
+                  isExpanded: true,
+                  decoration: InputDecoration(
+                    labelText: l10n.selectNewDepartment,
+                    isDense: true,
+                    filled: true,
+                    fillColor: Colors.grey.shade50,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: Colors.grey.shade200)),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: Colors.indigo, width: 1.5)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                  ),
+                  items: departments.map((d) {
+                    final name = (lang == 'ar'
+                            ? d['name_ar']
+                            : d['name_en'] ?? d['name']) as String? ??
+                        d['name'] as String;
+                    return DropdownMenuItem<String>(
+                        value: d['id'] as String, child: Text(name, style: const TextStyle(fontSize: 13)));
+                  }).toList(),
+                  onChanged: (v) => setSt(() => selectedDeptId = v),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(l10n.cancel),
+            ),
+            ElevatedButton.icon(
+              onPressed: selectedDeptId == null
+                  ? null
+                  : () {
+                      Navigator.pop(ctx);
+                      _reassignDepartment(selectedDeptId!);
+                    },
+              icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+              label: Text(l10n.reassignConfirm),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.indigo,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _reassignDepartment(String newDeptId) async {
+    final l10n = AppLocalizations.safeOf(context);
+    try {
+      // Update the ticket's target department and reset assignment
+      await supabase.from('tickets').update({
+        'target_department_id': newDeptId,
+        'assigned_to': null,
+        'status': TicketStatus.pending.value,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', widget.ticket.id);
+
+      // Log the activity
+      await supabase.from('activity_logs').insert({
+        'user_id': widget.currentUser.id,
+        'action': 'ticket_department_reassigned',
+        'details': 'Ticket #${widget.ticket.ticketNumber} reassigned to department $newDeptId',
+        'ticket_id': widget.ticket.id,
+      }).catchError((_) {});
+
+      // Notify ticket creator
+      await NotificationService.createAndSendNotification(
+        userId: widget.ticket.createdBy,
+        type: 'ticket_reassigned',
+        title: l10n.reassignDepartment,
+        message: l10n.ticketReassignedCreatorMsg,
+        ticketId: widget.ticket.id,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Row(children: [
+            const Icon(Icons.check_circle, color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            Text(l10n.ticketReassigned),
+          ]),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ));
+        widget.onRefresh();
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('${l10n.failedToReassign}: $e'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    }
   }
 
 // NEW: Super Admin starts working on the ticket themselves
@@ -12651,12 +12822,26 @@ class _ITSolutionTicketScreenState extends State<ITSolutionTicketScreen> {
   bool _isLoading = false;
   bool _isUploadingFiles = false;
 
-  String? _itDepartmentId = '6c9672fb-fce3-4118-a460-cee9e9c6e874';
+  String? _itDepartmentId;
 
   @override
   void initState() {
     super.initState();
     _phoneController.text = widget.currentUser.phone ?? '';
+    _loadItDepartment();
+  }
+
+  Future<void> _loadItDepartment() async {
+    try {
+      final rows = await supabase
+          .from('system_settings')
+          .select('value')
+          .eq('setting_key', 'it_solution_target_department')
+          .maybeSingle();
+      if (mounted && rows != null) {
+        setState(() => _itDepartmentId = rows['value'] as String?);
+      }
+    } catch (_) {}
   }
 
   @override

@@ -83,7 +83,26 @@ class _TrucksMaintenanceTicketScreenState
   bool _isLoading = false;
   bool _isUploadingFiles = false;
 
-  static const _trucksDeptId = '793e0417-d5a7-4c71-9027-bb537cf13e47';
+  String? _trucksDeptId;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTrucksDepartment();
+  }
+
+  Future<void> _loadTrucksDepartment() async {
+    try {
+      final row = await supabase
+          .from('system_settings')
+          .select('value')
+          .eq('setting_key', 'vehicle_maintenance_target_department')
+          .maybeSingle();
+      if (mounted && row != null) {
+        setState(() => _trucksDeptId = row['value'] as String?);
+      }
+    } catch (_) {}
+  }
 
   @override
   void dispose() {

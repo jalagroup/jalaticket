@@ -33,6 +33,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:jalasupport/main_mobile.dart' show myAppMobileKey;
 import 'package:jalasupport/sound_service.dart';
+import 'package:jalasupport/ai_dashboard_onboarding.dart';
 
 import 'dart:ui' as ui;
 
@@ -579,6 +580,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       if (_currentUser != null) {
         await _initializeLocale();
         _setupNavigationItems();
+
+        // Show AI Dashboard onboarding once per version for super/system admins
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            AiDashboardOnboarding.showIfNeeded(context, _currentUser!);
+          }
+        });
 
         await Future.wait([
           _setupConnectivityMonitoring(),
