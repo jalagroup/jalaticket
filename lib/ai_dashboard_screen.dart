@@ -22,10 +22,13 @@ class _DashItem {
   final String id;
   final _Kind kind;
   dynamic raw;
-  String chartType;  // 'bar' | 'pie' | 'line' | 'area' | 'horizontal_bar'
-  int heightLevel;   // 0-5 → XS/S/M/L/XL/XXL
-  int colorTheme;    // index into _themes
-  int colSpan;       // 1-32 (columns in a 32-column grid)
+  String chartType;   // 'bar' | 'pie' | 'line' | 'area' | 'horizontal_bar'
+  int heightLevel;    // 0-5 → XS/S/M/L/XL/XXL
+  int colorTheme;     // index into _themes
+  int colSpan;        // 1-32 (columns in a 32-column grid)
+  int kpiPerRow;      // desktop KPI cards per row: 1..maxPerRow (colSpan/4)
+  int kpiHeightMult;  // mobile KPI height index into _kpiMultHeights (0-5)
+  int styleVariant;   // 0=Default 1=Gradient 2=Outlined 3=Minimal 4=TopBar 5=Filled
   bool deleted;
 
   _DashItem({
@@ -36,11 +39,138 @@ class _DashItem {
     this.heightLevel = 1,
     this.colorTheme = 0,
     this.colSpan = 4,
+    this.kpiPerRow = 4,
+    this.kpiHeightMult = 1,
+    this.styleVariant = 0,
     this.deleted = false,
   });
 }
 
 const _heights = [100.0, 140.0, 180.0, 240.0, 320.0, 440.0]; // XS S M L XL XXL
+const _kMinHeight         = 2;     // Medium — minimum height level for charts
+const _kTableMinHeightLevel = 3;   // L     — minimum selectable level for tables
+const _kTableMinHeightPx    = 270.0; // 1.5 × medium (180px) — pixel floor for tables
+
+const _kStyleLabels   = ['Default', 'Gradient', 'Outlined', 'Minimal', 'Top Bar', 'Filled'];
+const _kStyleLabelsAr = ['افتراضي', 'تدرج', 'محدد', 'بسيط', 'شريط علوي', 'مملوء'];
+
+// Per-row heights for each KPI multiplier level (height of one row of KPI cards)
+const _kpiRowHeights = [80.0, 110.0, 140.0, 180.0, 220.0, 270.0];
+const _kpiMultLabels = ['0.5×', '1×', '1.5×', '2×', '2.5×', '3×'];
+
+/// KPI component total height = numRows × rowHeight + row gaps.
+/// Always overflow-safe: height adapts to both perRow and multiplier level.
+double _kpiAutoHeight(int kpiCount, int effectivePerRow, int multIdx) {
+  final numRows = kpiCount == 0
+      ? 1
+      : ((kpiCount + effectivePerRow - 1) ~/ effectivePerRow).clamp(1, 99);
+  final rowH = _kpiRowHeights[multIdx.clamp(0, 5)];
+  return numRows * rowH + (numRows - 1) * 8.0; // 8 px gap between rows
+}
+
+/// BoxDecoration for a chart/table card outer container, driven by styleVariant.
+BoxDecoration _variantDecoration(int variant, Color col) {
+  switch (variant) {
+    case 1: // Gradient
+      return BoxDecoration(
+        gradient: LinearGradient(
+          colors: [col.withValues(alpha: 0.10), Colors.white],
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 6, offset: const Offset(0, 2))],
+      );
+    case 2: // Outlined
+      return BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: col, width: 1.5),
+      );
+    case 3: // Minimal
+      return BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(14),
+      );
+    case 4: // Top Bar
+      return BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border(top: BorderSide(color: col, width: 4)),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 2))],
+      );
+    case 5: // Filled
+      return BoxDecoration(
+        color: col,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [BoxShadow(color: col.withValues(alpha: 0.4), blurRadius: 12, offset: const Offset(0, 4))],
+      );
+    default: // 0 — Default
+      return BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 2))],
+      );
+  }
+}
+
+/// BoxDecoration for an individual KPI card, driven by styleVariant.
+BoxDecoration _kpiCardVariantDecoration(int variant, Color col) {
+  switch (variant) {
+    case 1: // Gradient
+      return BoxDecoration(
+        gradient: LinearGradient(
+          colors: [col.withValues(alpha: 0.18), col.withValues(alpha: 0.04)],
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 4)],
+      );
+    case 2: // Outlined
+      return BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: col, width: 1.5),
+      );
+    case 3: // Minimal
+      return BoxDecoration(
+        color: col.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+      );
+    case 4: // Top Bar
+      return BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border(top: BorderSide(color: col, width: 4)),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 4)],
+      );
+    case 5: // Filled
+      return BoxDecoration(
+        color: col,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [BoxShadow(color: col.withValues(alpha: 0.4), blurRadius: 8, offset: const Offset(0, 2))],
+      );
+    default: // 0 — Left Border
+      return BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 6, offset: const Offset(0, 2))],
+        border: Border(left: BorderSide(color: col, width: 4)),
+      );
+  }
+}
+
+// ── translation helpers ────────────────────────────────────────────────────────
+/// Returns Arabic value for [key] if [isAr] and a non-empty '_ar' version exists.
+String _trStr(Map data, String key, bool isAr) {
+  if (isAr) { final v = data['${key}_ar']; if (v is String && v.isNotEmpty) return v; }
+  return data[key]?.toString() ?? '';
+}
+
+/// Returns Arabic list for [key] if [isAr] and a non-empty '_ar' list exists.
+List<String> _trList(Map data, String key, bool isAr) {
+  if (isAr) { final v = data['${key}_ar']; if (v is List && v.isNotEmpty) return v.cast<String>(); }
+  return (data[key] as List?)?.cast<String>() ?? [];
+}
 
 List<_DashItem> _parseItems(Map<String, dynamic> data) {
   final layoutList = (data['_layout'] as List?)?.cast<Map>() ?? [];
@@ -57,9 +187,12 @@ List<_DashItem> _parseItems(Map<String, dynamic> data) {
     final l = lOf('kpis');
     items.add(_DashItem(
       id: 'kpis', kind: _Kind.kpiGroup, raw: kpis,
-      colSpan:     (l['colSpan']     as int?) ?? 32,
-      heightLevel: (l['heightLevel'] as int?) ?? 1,
-      colorTheme:  (l['colorTheme']  as int?) ?? 0,
+      colSpan:      (l['colSpan']      as int?) ?? 32,
+      heightLevel:  ((l['heightLevel'] as int?) ?? _kMinHeight).clamp(_kMinHeight, 5),
+      colorTheme:   (l['colorTheme']   as int?) ?? 0,
+      kpiPerRow:    ((l['kpiPerRow']    as int?) ?? 4).clamp(1, 8),
+      kpiHeightMult: ((l['kpiHeightMult'] as int?) ?? 1).clamp(0, 5),
+      styleVariant: ((l['styleVariant'] as int?) ?? 0).clamp(0, 5),
     ));
   }
   final charts = (data['charts'] as List?)?.cast<Map>() ?? [];
@@ -69,10 +202,11 @@ List<_DashItem> _parseItems(Map<String, dynamic> data) {
     final chartType = (l['chartType'] as String?) ?? (charts[i]['type'] as String? ?? 'bar').toLowerCase();
     items.add(_DashItem(
       id: id, kind: _Kind.chart, raw: charts[i],
-      chartType:   chartType,
-      colSpan:     (l['colSpan']     as int?) ?? 16,
-      heightLevel: (l['heightLevel'] as int?) ?? (chartType == 'pie' ? 4 : 2),
-      colorTheme:  (l['colorTheme']  as int?) ?? 0,
+      chartType:    chartType,
+      colSpan:      (l['colSpan']      as int?) ?? 16,
+      heightLevel:  ((l['heightLevel'] as int?) ?? _kMinHeight).clamp(_kMinHeight, 5),
+      colorTheme:   (l['colorTheme']   as int?) ?? 0,
+      styleVariant: ((l['styleVariant'] as int?) ?? 0).clamp(0, 5),
     ));
   }
   final tables = (data['tables'] as List?)?.cast<Map>() ?? [];
@@ -81,9 +215,10 @@ List<_DashItem> _parseItems(Map<String, dynamic> data) {
     final l = lOf(id);
     items.add(_DashItem(
       id: id, kind: _Kind.table, raw: tables[i],
-      colSpan:     (l['colSpan']     as int?) ?? 32,
-      heightLevel: (l['heightLevel'] as int?) ?? 2,
-      colorTheme:  (l['colorTheme']  as int?) ?? 0,
+      colSpan:      (l['colSpan']      as int?) ?? 32,
+      heightLevel:  ((l['heightLevel'] as int?) ?? _kTableMinHeightLevel).clamp(_kTableMinHeightLevel, 5),
+      colorTheme:   (l['colorTheme']   as int?) ?? 0,
+      styleVariant: ((l['styleVariant'] as int?) ?? 0).clamp(0, 5),
     ));
   }
   return items;
@@ -122,7 +257,7 @@ class _AiDashboardScreenState extends State<AiDashboardScreen>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 3, vsync: this);
+    _tabCtrl = TabController(length: 4, vsync: this);
   }
 
   @override
@@ -480,6 +615,7 @@ class _AiDashboardScreenState extends State<AiDashboardScreen>
             Tab(icon: const Icon(Icons.auto_awesome, size: 18), text: l10n.aiDashboardBuilder),
             Tab(icon: const Icon(Icons.insights, size: 18), text: isAr ? 'تحليل ذكي' : 'Smart Insights'),
             Tab(icon: const Icon(Icons.bookmarks_rounded, size: 18), text: l10n.savedDashboards),
+            Tab(icon: const Icon(Icons.dashboard_customize_rounded, size: 18), text: isAr ? 'لوحات مخصصة' : 'Custom Dashboards'),
           ],
         ),
       ),
@@ -508,6 +644,7 @@ class _AiDashboardScreenState extends State<AiDashboardScreen>
             ),
             _LocalInsightsTab(currentUser: widget.currentUser),
             _SavedDashboardsTab(currentUser: widget.currentUser),
+            _CustomDashboardsTab(currentUser: widget.currentUser),
           ],
         ),
       ),
@@ -819,13 +956,15 @@ class _TipsCard extends StatelessWidget {
 class AiDashboardView extends StatelessWidget {
   final Map<String, dynamic> data;
   final bool showTitle;
-  const AiDashboardView({super.key, required this.data, this.showTitle = true});
+  final bool readOnly;
+  const AiDashboardView({super.key, required this.data, this.showTitle = true, this.readOnly = false});
 
   @override
   Widget build(BuildContext context) => _InteractiveDashboard(
         data: data,
         l10n: AppLocalizations.safeOf(context),
         showTitle: showTitle,
+        readOnly: readOnly,
       );
 }
 
@@ -971,7 +1110,8 @@ class _InteractiveDashboard extends StatefulWidget {
   final Map<String, dynamic> data;
   final AppLocalizations l10n;
   final bool showTitle;
-  const _InteractiveDashboard({super.key, required this.data, required this.l10n, this.showTitle = true});
+  final bool readOnly;
+  const _InteractiveDashboard({super.key, required this.data, required this.l10n, this.showTitle = true, this.readOnly = false});
 
   @override
   State<_InteractiveDashboard> createState() => _InteractiveDashboardState();
@@ -1001,6 +1141,9 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
         'heightLevel': i.heightLevel,
         'colorTheme': i.colorTheme,
         'chartType': i.chartType,
+        'kpiPerRow': i.kpiPerRow,
+        'kpiHeightMult': i.kpiHeightMult,
+        'styleVariant': i.styleVariant,
       }).toList(),
       'kpis': vis
           .where((i) => i.kind == _Kind.kpiGroup)
@@ -1018,16 +1161,13 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
     };
   }
 
-  List<List<_DashItem>> _groupIntoRows(List<_DashItem> vis) =>
-      _groupIntoRowsN(vis, 4, (cs) => cs.clamp(1, 4).toInt());
-
   List<List<_DashItem>> _groupIntoRowsN(
-      List<_DashItem> vis, int cols, int Function(int) eff) {
+      List<_DashItem> vis, int cols, int Function(_DashItem) eff) {
     final rows = <List<_DashItem>>[];
     var row = <_DashItem>[];
     var span = 0;
     for (final item in vis) {
-      final cs = eff(item.colSpan);
+      final cs = eff(item);
       if (span + cs > cols && row.isNotEmpty) {
         rows.add(row); row = []; span = 0;
       }
@@ -1041,10 +1181,18 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
     return rows;
   }
 
-  Widget _buildResizableCard(_DashItem item, List<_DashItem> vis, double totalWidth, int gridCols) {
+  Widget _buildResizableCard(_DashItem item, List<_DashItem> vis, double totalWidth, int gridCols, bool isMobile) {
     final isResizingW = _resizingIds.contains('w_${item.id}');
     final isResizingH = _resizingIds.contains('h_${item.id}');
     final isResizing  = isResizingW || isResizingH;
+    // min colSpan: desktop = 8 (¼); mobile KPI = 4 (½ of 8), mobile non-KPI = no resize
+    final minSpan = isMobile
+        ? (item.kind == _Kind.kpiGroup ? 4 : gridCols)
+        : 8;
+    final canResizeW = !isMobile || item.kind == _Kind.kpiGroup;
+    // KPI height is always auto-computed from rows — height drag handles always hidden
+    final isKpiGroup = item.kind == _Kind.kpiGroup;
+    const minHLvl = _kMinHeight;
 
     Widget handle({
       double? left, double? right, double? top, double? bottom,
@@ -1102,36 +1250,44 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
               : null,
           child: _buildDraggableCard(item, vis),
         ),
-        // Right width handle
-        handle(
+        // Right width handle (hidden when canResizeW is false)
+        if (canResizeW) handle(
           right: 0, top: 0, bottom: 0, width: 18,
           cursor: SystemMouseCursors.resizeLeftRight,
           onStart: wStart, onEnd: wEnd, active: isResizingW, vertical: false,
           onUpdate: (d) {
             _dragAccum[item.id] = (_dragAccum[item.id] ?? 0) + d.delta.dx;
             if (_dragAccum[item.id]! > unitPx && item.colSpan < gridCols) {
-              setState(() { item.colSpan = (item.colSpan + 1).clamp(1, gridCols); _dragAccum[item.id] = 0; });
-            } else if (_dragAccum[item.id]! < -unitPx && item.colSpan > 1) {
-              setState(() { item.colSpan = (item.colSpan - 1).clamp(1, gridCols); _dragAccum[item.id] = 0; });
+              setState(() { item.colSpan = (item.colSpan + 1).clamp(minSpan, gridCols); _dragAccum[item.id] = 0; });
+            } else if (_dragAccum[item.id]! < -unitPx && item.colSpan > minSpan) {
+              setState(() {
+                item.colSpan = (item.colSpan - 1).clamp(minSpan, gridCols);
+                _dragAccum[item.id] = 0;
+                if (isKpiGroup) item.kpiPerRow = item.kpiPerRow.clamp(1, (item.colSpan ~/ 4).clamp(1, 8));
+              });
             }
           },
         ),
         // Left width handle
-        handle(
+        if (canResizeW) handle(
           left: 0, top: 0, bottom: 0, width: 18,
           cursor: SystemMouseCursors.resizeLeftRight,
           onStart: wStart, onEnd: wEnd, active: isResizingW, vertical: false,
           onUpdate: (d) {
             _dragAccum[item.id] = (_dragAccum[item.id] ?? 0) - d.delta.dx;
             if (_dragAccum[item.id]! > unitPx && item.colSpan < gridCols) {
-              setState(() { item.colSpan = (item.colSpan + 1).clamp(1, gridCols); _dragAccum[item.id] = 0; });
-            } else if (_dragAccum[item.id]! < -unitPx && item.colSpan > 1) {
-              setState(() { item.colSpan = (item.colSpan - 1).clamp(1, gridCols); _dragAccum[item.id] = 0; });
+              setState(() { item.colSpan = (item.colSpan + 1).clamp(minSpan, gridCols); _dragAccum[item.id] = 0; });
+            } else if (_dragAccum[item.id]! < -unitPx && item.colSpan > minSpan) {
+              setState(() {
+                item.colSpan = (item.colSpan - 1).clamp(minSpan, gridCols);
+                _dragAccum[item.id] = 0;
+                if (isKpiGroup) item.kpiPerRow = item.kpiPerRow.clamp(1, (item.colSpan ~/ 4).clamp(1, 8));
+              });
             }
           },
         ),
-        // Bottom height handle
-        handle(
+        // Height handles — hidden for all KPI (height auto-computed from rows)
+        if (!isKpiGroup) handle(
           left: 0, right: 0, bottom: 0, height: 18,
           cursor: SystemMouseCursors.resizeUpDown,
           onStart: hStart, onEnd: hEnd, active: isResizingH, vertical: true,
@@ -1139,13 +1295,12 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
             _dragAccumH[item.id] = (_dragAccumH[item.id] ?? 0) + d.delta.dy;
             if (_dragAccumH[item.id]! > kHUnit && item.heightLevel < 5) {
               setState(() { item.heightLevel++; _dragAccumH[item.id] = 0; });
-            } else if (_dragAccumH[item.id]! < -kHUnit && item.heightLevel > 0) {
+            } else if (_dragAccumH[item.id]! < -kHUnit && item.heightLevel > minHLvl) {
               setState(() { item.heightLevel--; _dragAccumH[item.id] = 0; });
             }
           },
         ),
-        // Top height handle
-        handle(
+        if (!isKpiGroup) handle(
           left: 0, right: 0, top: 0, height: 18,
           cursor: SystemMouseCursors.resizeUpDown,
           onStart: hStart, onEnd: hEnd, active: isResizingH, vertical: true,
@@ -1153,7 +1308,7 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
             _dragAccumH[item.id] = (_dragAccumH[item.id] ?? 0) - d.delta.dy;
             if (_dragAccumH[item.id]! > kHUnit && item.heightLevel < 5) {
               setState(() { item.heightLevel++; _dragAccumH[item.id] = 0; });
-            } else if (_dragAccumH[item.id]! < -kHUnit && item.heightLevel > 0) {
+            } else if (_dragAccumH[item.id]! < -kHUnit && item.heightLevel > minHLvl) {
               setState(() { item.heightLevel--; _dragAccumH[item.id] = 0; });
             }
           },
@@ -1171,54 +1326,90 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
     return LayoutBuilder(builder: (ctx, constraints) {
       final isMobile = constraints.maxWidth < 600;
       final gridCols = isMobile ? 8 : 32;
-      int eff(int cs) => cs.clamp(1, gridCols).toInt();
 
-      final rows = _groupIntoRowsN(vis, gridCols, eff);
+      // min ¼ desktop (8/32); KPI min ½ mobile (4/8), non-KPI always full on mobile
+      int effSpan(_DashItem item) {
+        if (isMobile) {
+          if (item.kind == _Kind.kpiGroup) return item.colSpan.clamp(4, gridCols);
+          return gridCols;
+        }
+        return item.colSpan.clamp(8, gridCols);
+      }
+
+      final rows = _groupIntoRowsN(vis, gridCols, effSpan);
 
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         if (widget.showTitle) ...[
           Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         ],
-        Padding(
-          padding: EdgeInsets.only(top: widget.showTitle ? 4 : 0, bottom: 12),
-          child: Text(
-            isAr
-                ? 'اسحب المقبض للتحريك  •  اسحب الحافة اليمنى لتغيير العرض  •  ▲ ▼ للارتفاع  •  انقر للخصائص  •  ✕ للحذف'
-                : 'Drag handle to move  •  Drag right edge to resize  •  ▲ ▼ height  •  Tap card to edit  •  ✕ to remove',
-            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
-          ),
-        ),
+        if (!widget.readOnly)
+          Padding(
+            padding: EdgeInsets.only(top: widget.showTitle ? 4 : 0, bottom: 12),
+            child: Text(
+              isAr
+                  ? 'اسحب المقبض للتحريك  •  اسحب الحافة اليمنى لتغيير العرض  •  ▲ ▼ للارتفاع  •  انقر للخصائص  •  ✕ للحذف'
+                  : 'Drag handle to move  •  Drag right edge to resize  •  ▲ ▼ height  •  Tap card to edit  •  ✕ to remove',
+              style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+            ),
+          )
+        else
+          SizedBox(height: widget.showTitle ? 8 : 0),
         ...rows.map((rowItems) {
-          final usedSpan = rowItems.fold<int>(0, (s, i) => s + eff(i.colSpan));
+          final usedSpan = rowItems.fold<int>(0, (s, i) => s + effSpan(i));
           final remSpan  = gridCols - usedSpan;
           return Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                  ...rowItems.asMap().entries.map((e) {
-                    final item = e.value;
-                    return Expanded(
-                      flex: eff(item.colSpan),
-                      child: Padding(
-                        padding: EdgeInsets.only(left: e.key == 0 ? 0 : 8),
-                        child: _buildResizableCard(item, vis, constraints.maxWidth, gridCols),
-                      ),
-                    );
-                  }),
-                  if (remSpan > 0) Expanded(
-                    flex: remSpan,
+                ...rowItems.asMap().entries.map((e) {
+                  final item = e.value;
+                  return Expanded(
+                    flex: effSpan(item),
                     child: Padding(
-                      padding: const EdgeInsets.only(left: 8),
-                      child: _buildEmptySlot(insertAfterId: rowItems.last.id),
+                      padding: EdgeInsets.only(left: e.key == 0 ? 0 : 8),
+                      child: widget.readOnly
+                          ? _buildReadOnlyCard(item, isMobile)
+                          : _buildResizableCard(item, vis, constraints.maxWidth, gridCols, isMobile),
                     ),
+                  );
+                }),
+                if (!widget.readOnly && remSpan > 0) Expanded(
+                  flex: remSpan,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: _buildEmptySlot(insertAfterId: rowItems.last.id),
                   ),
-                ],
+                ),
+              ],
             ),
           );
         }),
       ]);
     });
+  }
+
+  Widget _buildReadOnlyCard(_DashItem item, bool isMobile) {
+    final isKpi = item.kind == _Kind.kpiGroup;
+    return Container(
+      decoration: isKpi
+          ? null
+          : _variantDecoration(item.styleVariant, _color(_themes[item.colorTheme])),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (item.kind != _Kind.kpiGroup)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+            child: Text(_label(item),
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13,
+                    color: item.styleVariant == 5 ? Colors.white : null),
+                overflow: TextOverflow.ellipsis),
+          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+          child: _content(item),
+        ),
+      ]),
+    );
   }
 
   Widget _buildDraggableCard(_DashItem item, List<_DashItem> vis) {
@@ -1266,17 +1457,20 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
       ),
     );
 
+    final isMobileCtx = MediaQuery.of(ctx).size.width < 600;
+    final filled = item.styleVariant == 5 && item.kind != _Kind.kpiGroup;
+    final headerTxtColor = filled ? Colors.white : null;
+    final dragIconColor  = filled ? Colors.white.withValues(alpha: 0.7) : Colors.grey.shade400;
+
     return Container(
-      decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(14),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 2))],
-      ),
+      decoration: item.kind == _Kind.kpiGroup
+          ? null
+          : _variantDecoration(item.styleVariant, _color(_themes[item.colorTheme])),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         // ── Header: drag handle + title + close ──────────────────────────────
         Padding(
           padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
           child: Row(children: [
-            // Explicit drag handle — only this area initiates a drag
             Draggable<String>(
               data: item.id,
               feedback: ghostPreview(),
@@ -1285,34 +1479,45 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
                 cursor: SystemMouseCursors.grab,
                 child: Padding(
                   padding: const EdgeInsets.all(4),
-                  child: Icon(Icons.drag_indicator_rounded, color: Colors.grey.shade400, size: 20),
+                  child: Icon(Icons.drag_indicator_rounded, color: dragIconColor, size: 20),
                 ),
               ),
             ),
             const SizedBox(width: 4),
             Expanded(
               child: Text(_label(item),
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: headerTxtColor),
                   overflow: TextOverflow.ellipsis),
             ),
             IconButton(
-              icon: const Icon(Icons.close_rounded, size: 18, color: Colors.red),
+              icon: Icon(Icons.close_rounded, size: 18,
+                  color: filled ? Colors.white.withValues(alpha: 0.8) : Colors.red),
               padding: const EdgeInsets.all(4), constraints: const BoxConstraints(),
               onPressed: () => setState(() => item.deleted = true),
             ),
           ]),
         ),
-        // ── Controls row (scrollable so it never overflows narrow cards) ───────
+        // ── Controls row ──────────────────────────────────────────────────────
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.fromLTRB(8, 2, 8, 4),
           child: Row(children: [
-            _ctrlBtn(Icons.chevron_left,  item.colSpan > 1 ? () => setState(() => item.colSpan--) : null),
+            _ctrlBtn(Icons.chevron_left,  item.colSpan > 1 ? () => setState(() {
+              item.colSpan--;
+              if (item.kind == _Kind.kpiGroup) {
+                final maxPR = (item.colSpan ~/ 4).clamp(1, 8);
+                item.kpiPerRow = item.kpiPerRow.clamp(1, maxPR);
+              }
+            }) : null),
             GestureDetector(
               onTap: () => setState(() {
                 final steps = [4,8,12,16,20,24,28,32];
                 final idx = steps.indexWhere((s) => s >= item.colSpan);
                 item.colSpan = idx >= 0 && idx < steps.length - 1 ? steps[idx + 1] : 4;
+                if (item.kind == _Kind.kpiGroup) {
+                  final maxPR = (item.colSpan ~/ 4).clamp(1, 8);
+                  item.kpiPerRow = item.kpiPerRow.clamp(1, maxPR);
+                }
               }),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
@@ -1321,16 +1526,71 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
                     style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.indigo)),
               ),
             ),
-            _ctrlBtn(Icons.chevron_right, item.colSpan < 32 ? () => setState(() => item.colSpan++) : null),
+            _ctrlBtn(Icons.chevron_right, item.colSpan < 32 ? () => setState(() {
+              item.colSpan++;
+            }) : null),
             const SizedBox(width: 4),
-            _ctrlBtn(Icons.expand_more, item.heightLevel > 0 ? () => setState(() => item.heightLevel--) : null),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-              decoration: BoxDecoration(color: Colors.indigo.shade50, borderRadius: BorderRadius.circular(5)),
-              child: Text(_heightLabel(item.heightLevel),
-                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.indigo)),
-            ),
-            _ctrlBtn(Icons.expand_less, item.heightLevel < 5 ? () => setState(() => item.heightLevel++) : null),
+            // Height: KPI (all sizes) → row-height multiplier; non-KPI → discrete levels
+            if (item.kind == _Kind.kpiGroup) ...[
+              _ctrlBtn(Icons.expand_more, () {
+                // Decrease row-height; when at minimum, increase perRow to compensate
+                if (item.kpiHeightMult > 0) {
+                  setState(() => item.kpiHeightMult--);
+                  return;
+                }
+                final maxPR = isMobileCtx ? 2 : (item.colSpan ~/ 4).clamp(1, 8);
+                if (item.kpiPerRow < maxPR) {
+                  setState(() => item.kpiPerRow++);
+                } else if (!isMobileCtx && item.colSpan < 32) {
+                  setState(() {
+                    item.colSpan = (item.colSpan + 4).clamp(4, 32);
+                    final newMax = (item.colSpan ~/ 4).clamp(1, 8);
+                    item.kpiPerRow = (item.kpiPerRow + 1).clamp(1, newMax);
+                  });
+                }
+              }),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(color: Colors.indigo.shade50, borderRadius: BorderRadius.circular(5)),
+                child: Text(_kpiMultLabels[item.kpiHeightMult.clamp(0, 5)],
+                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.indigo)),
+              ),
+              _ctrlBtn(Icons.expand_less,
+                  item.kpiHeightMult < _kpiRowHeights.length - 1 ? () => setState(() => item.kpiHeightMult++) : null),
+            ] else ...[
+              _ctrlBtn(Icons.expand_more,
+                  (item.kind == _Kind.table
+                      ? item.heightLevel > _kTableMinHeightLevel
+                      : item.heightLevel > _kMinHeight)
+                  ? () => setState(() => item.heightLevel--) : null),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(color: Colors.indigo.shade50, borderRadius: BorderRadius.circular(5)),
+                child: Text(_heightLabel(item.heightLevel),
+                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.indigo)),
+              ),
+              _ctrlBtn(Icons.expand_less, item.heightLevel < 5 ? () => setState(() => item.heightLevel++) : null),
+            ],
+            // KPI per-row: mobile shows 1-2, desktop shows 1..colSpan÷4
+            if (item.kind == _Kind.kpiGroup) ...[
+              const SizedBox(width: 4),
+              for (int n = 1; n <= (isMobileCtx ? 2 : (item.colSpan ~/ 4).clamp(1, 8)); n++)
+                GestureDetector(
+                  onTap: () => setState(() => item.kpiPerRow = n),
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 2),
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: item.kpiPerRow == n ? Colors.indigo.shade100 : Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(5),
+                      border: Border.all(color: item.kpiPerRow == n ? Colors.indigo : Colors.grey.shade300),
+                    ),
+                    child: Text('$n×',
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold,
+                            color: item.kpiPerRow == n ? Colors.indigo : Colors.grey[600])),
+                  ),
+                ),
+            ],
             const SizedBox(width: 4),
             GestureDetector(
               onTap: () => setState(() => item.colorTheme = (item.colorTheme + 1) % 5),
@@ -1456,18 +1716,54 @@ class _InteractiveDashboardState extends State<_InteractiveDashboard> {
 
   String _label(_DashItem item) {
     if (item.kind == _Kind.kpiGroup) return 'KPIs';
-    return (item.raw as Map)['title'] as String? ?? (item.kind == _Kind.chart ? 'Chart' : 'Table');
+    final m = item.raw as Map;
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
+    if (isAr) { final v = m['title_ar']; if (v is String && v.isNotEmpty) return v; }
+    return m['title'] as String? ?? (item.kind == _Kind.chart ? 'Chart' : 'Table');
   }
 
   Widget _content(_DashItem item) {
+    final isMobile = MediaQuery.of(context).size.width < 600;
+    final h = _heights[item.heightLevel.clamp(0, 5)];
     switch (item.kind) {
       case _Kind.kpiGroup:
-        return _KpiGrid(kpis: (item.raw as List).cast<Map>(), colorOffset: _themes[item.colorTheme], colSpan: item.colSpan);
+        final kpis = (item.raw as List).cast<Map>();
+        final effectivePerRow = isMobile ? item.kpiPerRow.clamp(1, 2) : item.kpiPerRow;
+        final kpiH = _kpiAutoHeight(kpis.length, effectivePerRow, item.kpiHeightMult);
+        return SizedBox(
+          height: kpiH,
+          child: _KpiGrid(
+            kpis: kpis,
+            colorOffset: _themes[item.colorTheme],
+            colSpan: item.colSpan,
+            fixedHeight: kpiH,
+            perRow: effectivePerRow,
+            styleVariant: item.styleVariant,
+          ),
+        );
       case _Kind.chart:
         final d = Map<String, dynamic>.from(item.raw as Map)..['type'] = item.chartType;
-        return _ChartCard(chart: d, height: _heights[item.heightLevel], colorOffset: _themes[item.colorTheme]);
+        final isPie = item.chartType == 'pie' || item.chartType == 'donut';
+        return SizedBox(
+          height: h,
+          child: ClipRect(
+            child: _ChartCard(
+              chart: d,
+              height: isPie ? h : h - 26,
+              colorOffset: _themes[item.colorTheme],
+            ),
+          ),
+        );
       case _Kind.table:
-        return _TableCard(table: item.raw as Map);
+        final tH = h.clamp(_kTableMinHeightPx, double.infinity);
+        return SizedBox(
+          height: tH,
+          child: _TableCard(
+            table: item.raw as Map,
+            colorTheme: item.colorTheme,
+            styleVariant: item.styleVariant,
+          ),
+        );
     }
   }
 }
@@ -1485,6 +1781,10 @@ class _PropertiesSheet extends StatefulWidget {
 
 class _PropertiesSheetState extends State<_PropertiesSheet> {
   late final TextEditingController _titleCtrl;
+  final Map<String, TextEditingController> _arCtrls = {};
+
+  TextEditingController _arCtrl(String key, String initial) =>
+      _arCtrls.putIfAbsent(key, () => TextEditingController(text: initial));
 
   @override
   void initState() {
@@ -1493,7 +1793,11 @@ class _PropertiesSheetState extends State<_PropertiesSheet> {
   }
 
   @override
-  void dispose() { _titleCtrl.dispose(); super.dispose(); }
+  void dispose() {
+    _titleCtrl.dispose();
+    for (final c in _arCtrls.values) c.dispose();
+    super.dispose();
+  }
 
   String _getTitle() {
     if (widget.item.kind == _Kind.kpiGroup) return 'KPIs';
@@ -1550,7 +1854,14 @@ class _PropertiesSheetState extends State<_PropertiesSheet> {
           final labels = ['⅛','¼','⅜','½','⅝','¾','⅞','■'];
           final sel = item.colSpan == cs;
           return Expanded(child: GestureDetector(
-            onTap: () => setState(() { item.colSpan = cs; widget.onChanged(); }),
+            onTap: () => setState(() {
+              item.colSpan = cs;
+              if (item.kind == _Kind.kpiGroup) {
+                final maxPR = (cs ~/ 4).clamp(1, 8);
+                item.kpiPerRow = item.kpiPerRow.clamp(1, maxPR);
+              }
+              widget.onChanged();
+            }),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 120),
               margin: const EdgeInsets.only(right: 4),
@@ -1567,27 +1878,90 @@ class _PropertiesSheetState extends State<_PropertiesSheet> {
         }).toList()),
         const SizedBox(height: 14),
 
+        // Height picker — KPI (all sizes) uses row-height multipliers; others use levels
         _sectionLabel(isAr ? 'الارتفاع' : 'Height'),
-        Row(children: List.generate(_heights.length, (i) {
-          const labels = ['XS','S','M','L','XL','XXL'];
-          final sel = item.heightLevel == i;
-          return Expanded(child: GestureDetector(
-            onTap: () => setState(() { item.heightLevel = i; widget.onChanged(); }),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
-              margin: const EdgeInsets.only(right: 4),
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              decoration: BoxDecoration(
-                color: sel ? col : Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(6),
+        if (item.kind == _Kind.kpiGroup) ...[
+          // KPI: 0.5× / 1× / 1.5× / 2× / 2.5× / 3× (per-row height)
+          Row(children: List.generate(_kpiRowHeights.length, (i) {
+            final sel = item.kpiHeightMult == i;
+            return Expanded(child: GestureDetector(
+              onTap: () => setState(() { item.kpiHeightMult = i; widget.onChanged(); }),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
+                margin: const EdgeInsets.only(right: 4),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: sel ? col : Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Center(child: Text(_kpiMultLabels[i],
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold,
+                        color: sel ? Colors.white : Colors.grey[600]))),
               ),
-              child: Center(child: Text(labels[i],
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold,
-                      color: sel ? Colors.white : Colors.grey[600]))),
-            ),
-          ));
-        })),
+            ));
+          })),
+        ] else ...[
+          // Desktop / non-KPI: XS / S / M / L / XL / XXL
+          Row(children: List.generate(_heights.length, (i) {
+            const labels = ['XS','S','M','L','XL','XXL'];
+            final minLvl = item.kind == _Kind.table ? _kTableMinHeightLevel : _kMinHeight;
+            final sel      = item.heightLevel == i;
+            final disabled = i < minLvl;
+            return Expanded(child: GestureDetector(
+              onTap: disabled ? null : () => setState(() { item.heightLevel = i; widget.onChanged(); }),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
+                margin: const EdgeInsets.only(right: 4),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: disabled
+                      ? Colors.grey.shade200
+                      : sel ? col : Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text(labels[i],
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold,
+                          color: disabled
+                              ? Colors.grey.shade400
+                              : sel ? Colors.white : Colors.grey[600])),
+                  if (i == minLvl)
+                    Text(isAr ? 'حد أدنى' : 'min',
+                        style: TextStyle(fontSize: 8, color: disabled ? Colors.grey.shade400 : col)),
+                ]),
+              ),
+            ));
+          })),
+        ],
         const SizedBox(height: 20),
+
+        // ── KPI per-row (both mobile/desktop; mobile max 2, desktop max colSpan÷4) ──
+        if (item.kind == _Kind.kpiGroup) ...[
+          _sectionLabel(isAr ? 'عدد KPI في كل صف' : 'KPIs per Row'),
+          Builder(builder: (context) {
+            final isMob = MediaQuery.of(context).size.width < 600;
+            final maxPR = isMob ? 2 : (item.colSpan ~/ 4).clamp(1, 8);
+            return Row(children: [
+              for (int n = 1; n <= maxPR; n++)
+                Expanded(child: GestureDetector(
+                  onTap: () => setState(() { item.kpiPerRow = n; widget.onChanged(); }),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 120),
+                    margin: const EdgeInsets.only(right: 4),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    decoration: BoxDecoration(
+                      color: item.kpiPerRow == n ? col : Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Center(child: Text('$n',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold,
+                            color: item.kpiPerRow == n ? Colors.white : Colors.grey[600]))),
+                  ),
+                )),
+            ]);
+          }),
+          const SizedBox(height: 20),
+        ],
 
         // ── Color theme ──────────────────────────────────────────────────────
         _sectionLabel(isAr ? 'اللون' : 'Color Theme'),
@@ -1610,6 +1984,16 @@ class _PropertiesSheetState extends State<_PropertiesSheet> {
             ),
           );
         })),
+        const SizedBox(height: 20),
+
+        // ── Style variant ────────────────────────────────────────────────────
+        _sectionLabel(isAr ? 'نمط التصميم' : 'Style'),
+        Wrap(spacing: 8, runSpacing: 8,
+          children: [
+            for (int i = 0; i < _kStyleLabels.length; i++)
+              _styleChip(i, item, isAr, col),
+          ],
+        ),
         const SizedBox(height: 20),
 
         // ── Chart type (charts only) ─────────────────────────────────────────
@@ -1663,6 +2047,185 @@ class _PropertiesSheetState extends State<_PropertiesSheet> {
           ),
           const SizedBox(height: 20),
         ],
+
+        // ── Arabic Translations ───────────────────────────────────────────────
+        const Divider(height: 24),
+        Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: const EdgeInsets.only(bottom: 8),
+            leading: Icon(Icons.translate_rounded, size: 16, color: col),
+            title: Text(isAr ? 'ترجمة عربية' : 'Arabic Translations',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey[800])),
+            subtitle: Text(
+              isAr ? 'يُعرض بدلاً من النص الإنجليزي في الوضع العربي'
+                   : 'Shown instead of English text in Arabic mode',
+              style: TextStyle(fontSize: 10, color: Colors.grey[500])),
+            children: [
+              // ── Title AR (chart / table) ──────────────────────────────────
+              if (item.kind != _Kind.kpiGroup) ...[
+                _sectionLabel(isAr ? 'العنوان (عربي)' : 'Title (Arabic)'),
+                TextField(
+                  controller: _arCtrl('title_ar',
+                      (item.raw as Map)['title_ar']?.toString() ?? ''),
+                  decoration: InputDecoration(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    isDense: true, hintText: 'بالعربية...',
+                  ),
+                  textDirection: TextDirection.rtl,
+                  onChanged: (v) {
+                    final m = Map<String, dynamic>.from(item.raw as Map);
+                    v.isEmpty ? m.remove('title_ar') : m['title_ar'] = v;
+                    item.raw = m; widget.onChanged();
+                  },
+                ),
+                const SizedBox(height: 12),
+              ],
+              // ── Series labels AR (chart) ──────────────────────────────────
+              if (item.kind == _Kind.chart) ...[
+                _sectionLabel(isAr ? 'تسميات السلاسل (عربي)' : 'Series Labels (Arabic)'),
+                ...((item.raw as Map)['series'] as List? ?? []).cast<Map>().asMap().entries.map((e) =>
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: TextField(
+                      controller: _arCtrl('sl_${e.key}', e.value['label_ar']?.toString() ?? ''),
+                      decoration: InputDecoration(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                        isDense: true,
+                        labelText: e.value['label']?.toString() ?? 'Series ${e.key + 1}',
+                        hintText: 'بالعربية...',
+                      ),
+                      textDirection: TextDirection.rtl,
+                      onChanged: (v) {
+                        v.isEmpty ? e.value.remove('label_ar') : e.value['label_ar'] = v;
+                        widget.onChanged();
+                      },
+                    ),
+                  ),
+                ),
+                // ── Axis labels AR (if ≤ 12) ─────────────────────────────
+                Builder(builder: (_) {
+                  final xl = ((item.raw as Map)['x_labels'] as List?)?.cast<String>() ?? [];
+                  if (xl.isEmpty || xl.length > 12) return const SizedBox.shrink();
+                  final xlAr = List<String>.from(
+                      ((item.raw as Map)['x_labels_ar'] as List?)?.cast<String>() ??
+                      List.filled(xl.length, ''));
+                  while (xlAr.length < xl.length) { xlAr.add(''); }
+                  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const SizedBox(height: 4),
+                    _sectionLabel(isAr ? 'تسميات المحور (عربي)' : 'Axis Labels (Arabic)'),
+                    ...xl.asMap().entries.map((e) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: TextField(
+                        controller: _arCtrl('xl_${e.key}', xlAr[e.key]),
+                        decoration: InputDecoration(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          isDense: true, labelText: e.value, hintText: 'بالعربية...',
+                        ),
+                        textDirection: TextDirection.rtl,
+                        onChanged: (v) {
+                          final m = Map<String, dynamic>.from(item.raw as Map);
+                          final cur = List<String>.from(
+                              (m['x_labels_ar'] as List?)?.cast<String>() ??
+                              List.filled(xl.length, ''));
+                          while (cur.length < xl.length) { cur.add(''); }
+                          cur[e.key] = v;
+                          m['x_labels_ar'] = cur;
+                          item.raw = m; widget.onChanged();
+                        },
+                      ),
+                    )),
+                  ]);
+                }),
+              ],
+              // ── KPI labels AR ─────────────────────────────────────────────
+              if (item.kind == _Kind.kpiGroup) ...[
+                _sectionLabel(isAr ? 'تسميات KPI (عربي)' : 'KPI Labels (Arabic)'),
+                ...((item.raw as List).cast<Map>().asMap().entries.map((e) {
+                  final kpi = e.value;
+                  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(kpi['label']?.toString() ?? 'KPI ${e.key + 1}',
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500)),
+                    ),
+                    Row(children: [
+                      Expanded(child: TextField(
+                        controller: _arCtrl('kl_${e.key}', kpi['label_ar']?.toString() ?? ''),
+                        decoration: InputDecoration(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          isDense: true,
+                          labelText: isAr ? 'التسمية' : 'Label',
+                          hintText: 'بالعربية...',
+                        ),
+                        textDirection: TextDirection.rtl,
+                        onChanged: (v) {
+                          v.isEmpty ? kpi.remove('label_ar') : kpi['label_ar'] = v;
+                          widget.onChanged();
+                        },
+                      )),
+                      const SizedBox(width: 8),
+                      Expanded(child: TextField(
+                        controller: _arCtrl('ks_${e.key}', kpi['subtitle_ar']?.toString() ?? ''),
+                        decoration: InputDecoration(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          isDense: true,
+                          labelText: isAr ? 'التفاصيل' : 'Subtitle',
+                          hintText: 'بالعربية...',
+                        ),
+                        textDirection: TextDirection.rtl,
+                        onChanged: (v) {
+                          v.isEmpty ? kpi.remove('subtitle_ar') : kpi['subtitle_ar'] = v;
+                          widget.onChanged();
+                        },
+                      )),
+                    ]),
+                    const SizedBox(height: 10),
+                  ]);
+                })),
+              ],
+              // ── Table column names AR ─────────────────────────────────────
+              if (item.kind == _Kind.table) ...[
+                _sectionLabel(isAr ? 'أسماء الأعمدة (عربي)' : 'Column Names (Arabic)'),
+                Builder(builder: (_) {
+                  final cols = ((item.raw as Map)['columns'] as List?)?.cast<String>() ?? [];
+                  final colsAr = List<String>.from(
+                      ((item.raw as Map)['columns_ar'] as List?)?.cast<String>() ??
+                      List.filled(cols.length, ''));
+                  while (colsAr.length < cols.length) { colsAr.add(''); }
+                  return Column(children: cols.asMap().entries.map((e) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: TextField(
+                      controller: _arCtrl('tc_${e.key}', colsAr[e.key]),
+                      decoration: InputDecoration(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                        isDense: true, labelText: e.value, hintText: 'بالعربية...',
+                      ),
+                      textDirection: TextDirection.rtl,
+                      onChanged: (v) {
+                        final m = Map<String, dynamic>.from(item.raw as Map);
+                        final cur = List<String>.from(
+                            (m['columns_ar'] as List?)?.cast<String>() ??
+                            List.filled(cols.length, ''));
+                        while (cur.length < cols.length) { cur.add(''); }
+                        cur[e.key] = v;
+                        m['columns_ar'] = cur;
+                        item.raw = m; widget.onChanged();
+                      },
+                    ),
+                  )).toList());
+                }),
+              ],
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -1705,77 +2268,177 @@ class _PropertiesSheetState extends State<_PropertiesSheet> {
       ),
     );
   }
+
+  Widget _styleChip(int variant, _DashItem item, bool isAr, Color col) {
+    final label = isAr ? _kStyleLabelsAr[variant] : _kStyleLabels[variant];
+    final icons = [
+      Icons.credit_card_outlined,    // Default
+      Icons.gradient,                // Gradient
+      Icons.check_box_outline_blank, // Outlined
+      Icons.minimize_rounded,        // Minimal
+      Icons.border_top_rounded,      // Top Bar
+      Icons.color_lens_rounded,      // Filled
+    ];
+    final sel = item.styleVariant == variant;
+    return GestureDetector(
+      onTap: () => setState(() { item.styleVariant = variant; widget.onChanged(); }),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: sel ? col : Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: sel ? col : Colors.grey.shade300),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icons[variant], size: 15, color: sel ? Colors.white : Colors.grey[700]),
+          const SizedBox(width: 5),
+          Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+              color: sel ? Colors.white : Colors.grey[700])),
+        ]),
+      ),
+    );
+  }
 }
 
 // ─── kpi grid ─────────────────────────────────────────────────────────────────
 class _KpiGrid extends StatelessWidget {
   final List<Map> kpis;
   final int colorOffset;
-  final int colSpan; // kpis per row = colSpan
-  const _KpiGrid({required this.kpis, this.colorOffset = 0, this.colSpan = 4});
+  final int colSpan;
+  final int perRow;        // desktop per-row count; mobile clamps to 1-2
+  final int styleVariant;  // 0-4 card style
+  /// When set, cards fill this exact height equally across rows.
+  final double? fixedHeight;
+  const _KpiGrid({
+    required this.kpis,
+    this.colorOffset = 0,
+    this.colSpan = 4,
+    this.fixedHeight,
+    this.perRow = 4,
+    this.styleVariant = 0,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final perRow = colSpan.clamp(1, 4);
-    final rows = <List<Map>>[];
-    for (int i = 0; i < kpis.length; i += perRow) {
-      rows.add(kpis.sublist(i, (i + perRow).clamp(i, kpis.length)));
-    }
-    return Column(
-      children: rows.asMap().entries.map((re) {
-        final row = re.value;
-        final rowIdx = re.key;
-        return Padding(
-          padding: EdgeInsets.only(bottom: rowIdx < rows.length - 1 ? 10 : 0),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: row.asMap().entries.map((ke) {
-              final kpi = ke.value;
-              final kpiIdx = rowIdx * perRow + ke.key;
-              final col = _color(kpiIdx + colorOffset);
-              final label    = kpi['label']?.toString() ?? '';
-              final value    = kpi['value']?.toString() ?? '—';
-              final subtitle = kpi['subtitle'] as String?;
-              final change   = kpi['change'] as String?;
-              return Expanded(
-                child: Padding(
-                  padding: EdgeInsets.only(left: ke.key > 0 ? 8 : 0),
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.white, borderRadius: BorderRadius.circular(12),
-                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 6, offset: const Offset(0, 2))],
-                      border: Border(left: BorderSide(color: col, width: 4)),
-                    ),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[600], fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 4),
-                      Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: col)),
-                      if (subtitle != null) ...[
-                        const SizedBox(height: 2),
-                        Text(subtitle, style: TextStyle(fontSize: 10, color: Colors.grey[500])),
-                      ],
-                      if (change != null && change.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: change.startsWith('+') ? Colors.green.shade50 : Colors.red.shade50,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(change, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold,
-                              color: change.startsWith('+') ? Colors.green : Colors.red)),
+    return LayoutBuilder(builder: (context, constraints) {
+      final isMobile    = constraints.maxWidth < 480;
+      final effectivePR = isMobile ? perRow.clamp(1, 2) : perRow;
+
+      final rows = <List<Map>>[];
+      for (int i = 0; i < kpis.length; i += effectivePR) {
+        rows.add(kpis.sublist(i, (i + effectivePR).clamp(i, kpis.length)));
+      }
+      if (rows.isEmpty) return const SizedBox.shrink();
+
+      const rowGap = 8.0;
+
+      // Build a single KPI card widget
+      final isAr = Localizations.localeOf(context).languageCode == 'ar';
+
+      Widget kpiCard(MapEntry<int, Map> ke, int rowIdx) {
+        final kpi      = ke.value;
+        final kpiIdx   = rowIdx * effectivePR + ke.key;
+        final col      = _color(kpiIdx + colorOffset);
+        final label    = (isAr ? kpi['label_ar']?.toString() : null) ?? kpi['label']?.toString() ?? '';
+        final value    = kpi['value']?.toString() ?? '—';
+        final subtitle = (isAr ? kpi['subtitle_ar']?.toString() : null) ?? kpi['subtitle'] as String?;
+        final change   = kpi['change'] as String?;
+        final filled   = styleVariant == 5;
+        final labelColor  = filled ? Colors.white.withValues(alpha: 0.8) : Colors.grey[600];
+        final valueColor  = filled ? Colors.white : col;
+        final subColor    = filled ? Colors.white.withValues(alpha: 0.65) : Colors.grey[500];
+        return Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(left: ke.key > 0 ? 8 : 0),
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: _kpiCardVariantDecoration(styleVariant, col),
+              child: ClipRect(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(label, style: TextStyle(fontSize: 10, color: labelColor, fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 3),
+                    Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: valueColor)),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(subtitle, style: TextStyle(fontSize: 9, color: subColor), overflow: TextOverflow.ellipsis),
+                    ],
+                    if (change != null && change.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: filled
+                              ? Colors.white.withValues(alpha: 0.25)
+                              : (change.startsWith('+') ? Colors.green.shade50 : Colors.red.shade50),
+                          borderRadius: BorderRadius.circular(6),
                         ),
-                      ],
-                    ]),
-                  ),
+                        child: Text(change, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold,
+                            color: filled
+                                ? Colors.white
+                                : (change.startsWith('+') ? Colors.green : Colors.red))),
+                      ),
+                    ],
+                  ],
                 ),
-              );
-            }).toList(),
+              ),
+            ),
           ),
         );
-      }).toList(),
-    );
+      }
+
+      // Filler for incomplete last row
+      List<Widget> fillers(int count) => List.generate(count,
+          (i) => const Expanded(child: Padding(padding: EdgeInsets.only(left: 8), child: SizedBox.shrink())));
+
+      if (fixedHeight != null) {
+        // Each row gets an equal slice of the total height
+        final totalGaps = rowGap * (rows.length - 1);
+        final rowH = (fixedHeight! - totalGaps) / rows.length;
+        return Column(
+          children: rows.asMap().entries.map((re) {
+            final rowIdx = re.key;
+            final row    = re.value;
+            return Container(
+              height: rowH.clamp(40.0, double.infinity),
+              margin: EdgeInsets.only(bottom: rowIdx < rows.length - 1 ? rowGap : 0),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ...row.asMap().entries.map((ke) => kpiCard(ke, rowIdx)),
+                  ...fillers(effectivePR - row.length),
+                ],
+              ),
+            );
+          }).toList(),
+        );
+      }
+
+      // No fixed height — use IntrinsicHeight so cards in each row share the tallest height
+      return Column(
+        children: rows.asMap().entries.map((re) {
+          final rowIdx = re.key;
+          final row    = re.value;
+          return Padding(
+            padding: EdgeInsets.only(bottom: rowIdx < rows.length - 1 ? rowGap : 0),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ...row.asMap().entries.map((ke) => kpiCard(ke, rowIdx)),
+                  ...fillers(effectivePR - row.length),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+      );
+    });
   }
 }
 
@@ -1791,22 +2454,24 @@ class _ChartCard extends StatelessWidget {
     final type   = (chart['type'] as String? ?? 'bar').toLowerCase();
     final series = (chart['series'] as List?)?.cast<Map>() ?? [];
     final isPie  = type == 'pie' || type == 'donut';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(
-          height: height,
-          child: switch (type) {
-            'pie' || 'donut'          => _PieChart(chart: chart, colorOffset: colorOffset),
-            'line'                    => _LineChart(chart: chart, colorOffset: colorOffset, filled: false),
-            'area'                    => _LineChart(chart: chart, colorOffset: colorOffset, filled: true),
-            'horizontal_bar'          => _BarChart(chart: chart, colorOffset: colorOffset, horizontal: true),
-            _                         => _BarChart(chart: chart, colorOffset: colorOffset),
-          },
-        ),
-        if (!isPie && series.isNotEmpty) _Legend(series: series, colorOffset: colorOffset),
-      ],
+    return ClipRect(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            height: height,
+            child: switch (type) {
+              'pie' || 'donut'          => _PieChart(chart: chart, colorOffset: colorOffset),
+              'line'                    => _LineChart(chart: chart, colorOffset: colorOffset, filled: false),
+              'area'                    => _LineChart(chart: chart, colorOffset: colorOffset, filled: true),
+              'horizontal_bar'          => _BarChart(chart: chart, colorOffset: colorOffset, horizontal: true),
+              _                         => _BarChart(chart: chart, colorOffset: colorOffset),
+            },
+          ),
+          if (!isPie && series.isNotEmpty) _Legend(series: series, colorOffset: colorOffset),
+        ],
+      ),
     );
   }
 }
@@ -1818,21 +2483,26 @@ class _Legend extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
     return Padding(
       padding: const EdgeInsets.only(top: 8),
       child: Wrap(
         spacing: 14,
         runSpacing: 5,
         children: series.asMap().entries.map((e) {
-          final label = e.value['label']?.toString() ?? 'Series ${e.key + 1}';
-          final col   = _color(e.key + colorOffset);
+          final label = (isAr
+              ? e.value['label_ar']?.toString()
+              : null) ?? e.value['label']?.toString() ?? 'Series ${e.key + 1}';
+          final col = _color(e.key + colorOffset);
           return Row(mainAxisSize: MainAxisSize.min, children: [
             Container(
               width: 10, height: 10,
               decoration: BoxDecoration(color: col, borderRadius: BorderRadius.circular(2)),
             ),
             const SizedBox(width: 5),
-            Text(label, style: TextStyle(fontSize: 10.5, color: Colors.grey[700])),
+            Flexible(child: Text(label,
+                style: TextStyle(fontSize: 10.5, color: Colors.grey[700]),
+                softWrap: true, maxLines: 2)),
           ]);
         }).toList(),
       ),
@@ -1849,7 +2519,8 @@ class _BarChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final labels = (chart['x_labels'] as List?)?.cast<String>() ?? [];
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
+    final labels = _trList(chart, 'x_labels', isAr);
     final series = (chart['series'] as List?)?.cast<Map>() ?? [];
     if (labels.isEmpty || series.isEmpty) return const Center(child: Text('No data'));
 
@@ -1876,11 +2547,16 @@ class _BarChart extends StatelessWidget {
     Widget labelWidget(double v, _) {
       final idx = v.toInt();
       if (idx < 0 || idx >= labels.length) return const SizedBox.shrink();
-      final lbl = labels[idx];
       return Padding(
         padding: const EdgeInsets.only(top: 4),
-        child: Text(lbl.length > 8 ? '${lbl.substring(0, 7)}…' : lbl,
-            style: const TextStyle(fontSize: 9)),
+        child: SizedBox(
+          width: 52,
+          child: Text(labels[idx],
+              style: const TextStyle(fontSize: 9),
+              textAlign: TextAlign.center,
+              softWrap: true, maxLines: 3,
+              overflow: TextOverflow.ellipsis),
+        ),
       );
     }
 
@@ -1890,21 +2566,27 @@ class _BarChart extends StatelessWidget {
       borderData: FlBorderData(show: false),
       titlesData: FlTitlesData(
         leftTitles: AxisTitles(sideTitles: SideTitles(
-          showTitles: true, reservedSize: horizontal ? 64 : 32,
+          showTitles: true, reservedSize: horizontal ? 90 : 32,
           getTitlesWidget: (v, meta) {
             if (!horizontal) return const SizedBox.shrink();
             final idx = v.toInt();
             if (idx < 0 || idx >= labels.length) return const SizedBox.shrink();
-            final lbl = labels[idx];
             return Padding(padding: const EdgeInsets.only(right: 4),
-                child: Text(lbl.length > 9 ? '${lbl.substring(0, 8)}…' : lbl,
-                    style: const TextStyle(fontSize: 9), textAlign: TextAlign.right));
+                child: SizedBox(
+                  width: 84,
+                  child: Text(labels[idx],
+                      style: const TextStyle(fontSize: 9),
+                      textAlign: TextAlign.right,
+                      softWrap: true, maxLines: 3,
+                      overflow: TextOverflow.ellipsis),
+                ));
           },
         )),
         topTitles:   const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         bottomTitles: AxisTitles(sideTitles: SideTitles(
-          showTitles: !horizontal, getTitlesWidget: labelWidget,
+          showTitles: !horizontal, reservedSize: 40,
+          getTitlesWidget: labelWidget,
         )),
       ),
     ));
@@ -1919,8 +2601,9 @@ class _PieChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
     // x_labels = slice names; series[0].data = values
-    var labels = (chart['x_labels'] as List?)?.cast<String>() ?? [];
+    var labels = _trList(chart, 'x_labels', isAr);
     final series  = (chart['series'] as List?)?.cast<Map>() ?? [];
     final rawData = series.isNotEmpty
         ? (series[0]['data'] as List?)?.cast<num>() ?? []
@@ -1935,10 +2618,10 @@ class _PieChart extends StatelessWidget {
       final available = constraints.maxWidth;
       // Decide layout: if very narrow, stack vertically
       final stackVertically = available < 300;
-      // Radius scales with available space
+      // Radius scales with available space — kept small to stay within card bounds
       final radius = stackVertically
-          ? (available / 2 * 0.88).clamp(40.0, 130.0)
-          : (available * 0.42).clamp(44.0, 130.0);
+          ? (available / 2 * 0.58).clamp(26.0, 68.0)
+          : (available * 0.24).clamp(26.0, 68.0);
       final centerR = (radius * 0.22).clamp(6.0, 20.0);
 
       final sections = rawData.asMap().entries.map((e) {
@@ -1963,21 +2646,25 @@ class _PieChart extends StatelessWidget {
             ? rawData[e.key].toDouble() / total * 100 : 0.0;
         return Padding(
           padding: const EdgeInsets.only(bottom: 4),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Container(width: 9, height: 9,
-                decoration: BoxDecoration(color: _color(e.key + colorOffset), shape: BoxShape.circle)),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Container(width: 9, height: 9,
+                  decoration: BoxDecoration(color: _color(e.key + colorOffset), shape: BoxShape.circle)),
+            ),
             const SizedBox(width: 4),
             Flexible(child: Text(
-              '${e.value.length > 12 ? '${e.value.substring(0, 11)}…' : e.value}'
-              '  ${pct.toStringAsFixed(1)}%',
-              style: const TextStyle(fontSize: 9.5))),
+              '${e.value}  ${pct.toStringAsFixed(1)}%',
+              style: const TextStyle(fontSize: 9.5),
+              softWrap: true, maxLines: 3,
+              overflow: TextOverflow.ellipsis)),
           ]),
         );
       }).toList();
 
       if (stackVertically) {
         return Column(mainAxisSize: MainAxisSize.min, children: [
-          SizedBox(height: radius * 2.2, child: pieWidget),
+          SizedBox(height: radius * 2.05, child: pieWidget),
           const SizedBox(height: 8),
           Wrap(spacing: 10, runSpacing: 4, children: legendItems),
         ]);
@@ -2008,7 +2695,8 @@ class _LineChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final labels = (chart['x_labels'] as List?)?.cast<String>() ?? [];
+    final isAr  = Localizations.localeOf(context).languageCode == 'ar';
+    final labels = _trList(chart, 'x_labels', isAr);
     final series = (chart['series'] as List?)?.cast<Map>() ?? [];
     if (labels.isEmpty || series.isEmpty) return const Center(child: Text('No data'));
 
@@ -2039,15 +2727,20 @@ class _LineChart extends StatelessWidget {
         topTitles:   const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         bottomTitles: AxisTitles(sideTitles: SideTitles(
-          showTitles: true,
+          showTitles: true, reservedSize: 40,
           interval: (labels.length / 5).ceilToDouble(),
           getTitlesWidget: (v, _) {
             final idx = v.toInt();
             if (idx >= labels.length || idx < 0) return const SizedBox.shrink();
-            final lbl = labels[idx];
             return Padding(padding: const EdgeInsets.only(top: 4),
-                child: Text(lbl.length > 6 ? lbl.substring(lbl.length - 5) : lbl,
-                    style: const TextStyle(fontSize: 9)));
+                child: SizedBox(
+                  width: 52,
+                  child: Text(labels[idx],
+                      style: const TextStyle(fontSize: 9),
+                      textAlign: TextAlign.center,
+                      softWrap: true, maxLines: 3,
+                      overflow: TextOverflow.ellipsis),
+                ));
           },
         )),
       ),
@@ -2058,18 +2751,29 @@ class _LineChart extends StatelessWidget {
 // ─── table card ───────────────────────────────────────────────────────────────
 class _TableCard extends StatefulWidget {
   final Map table;
-  final double? maxHeight;
-  const _TableCard({required this.table, this.maxHeight});
+  final int  colorTheme;
+  final int  styleVariant;
+  const _TableCard({
+    required this.table,
+    this.colorTheme  = 0,
+    this.styleVariant = 0,
+  });
   @override
   State<_TableCard> createState() => _TableCardState();
 }
 
 class _TableCardState extends State<_TableCard> {
   int?   _sortCol;
-  bool   _sortAsc      = true;
-  String _globalQ      = '';
-  final  _colFilters   = <int, String>{};
+  bool   _sortAsc       = true;
+  String _globalQ       = '';
+  final  _colFilters    = <int, String>{};
   bool   _showColFilters = false;
+  bool   _syncing       = false;
+  late final ScrollController _hHdr;
+  late final ScrollController _hBody;
+  late final ScrollController _hScroll; // bottom visible scrollbar
+
+  static const _kMinColW = 90.0;
 
   static const _valueColors = {
     'pending':     Color(0xFFFFF3E0), 'inprogress':  Color(0xFFE3F2FD),
@@ -2089,22 +2793,123 @@ class _TableCardState extends State<_TableCard> {
   };
 
   @override
+  void initState() {
+    super.initState();
+    _hHdr    = ScrollController();
+    _hBody   = ScrollController();
+    _hScroll = ScrollController();
+    _hHdr.addListener(_syncFromHdr);
+    _hBody.addListener(_syncFromBody);
+    _hScroll.addListener(_syncFromScroll);
+  }
+
+  void _syncAll(double offset, ScrollController skip) {
+    for (final c in [_hHdr, _hBody, _hScroll]) {
+      if (identical(c, skip)) continue;
+      if (c.hasClients && c.offset != offset) c.jumpTo(offset);
+    }
+  }
+
+  void _syncFromHdr()    { if (_syncing) return; _syncing = true; _syncAll(_hHdr.offset,    _hHdr);    _syncing = false; }
+  void _syncFromBody()   { if (_syncing) return; _syncing = true; _syncAll(_hBody.offset,   _hBody);   _syncing = false; }
+  void _syncFromScroll() { if (_syncing) return; _syncing = true; _syncAll(_hScroll.offset, _hScroll); _syncing = false; }
+
+  @override
+  void dispose() {
+    _hHdr
+      ..removeListener(_syncFromHdr)
+      ..dispose();
+    _hBody
+      ..removeListener(_syncFromBody)
+      ..dispose();
+    _hScroll
+      ..removeListener(_syncFromScroll)
+      ..dispose();
+    super.dispose();
+  }
+
+  // ── internal table style resolved from variant + colorTheme ──────────────
+  ({Color hdrBg, Color hdrText, Color evenBg, Color oddBg,
+    Color dividerColor, bool outerBorder}) _tStyle(Color col) {
+    switch (widget.styleVariant) {
+      case 1: // Gradient — theme-color header
+        return (
+          hdrBg: col.withValues(alpha: 0.12),
+          hdrText: col,
+          evenBg: Colors.white,
+          oddBg:  col.withValues(alpha: 0.04),
+          dividerColor: col.withValues(alpha: 0.15),
+          outerBorder: false,
+        );
+      case 2: // Outlined — bordered cells
+        return (
+          hdrBg: Colors.grey.shade100,
+          hdrText: Colors.grey.shade700,
+          evenBg: Colors.white,
+          oddBg:  Colors.white,
+          dividerColor: Colors.grey.shade300,
+          outerBorder: true,
+        );
+      case 3: // Minimal — no fills
+        return (
+          hdrBg: Colors.transparent,
+          hdrText: Colors.grey.shade600,
+          evenBg: Colors.transparent,
+          oddBg:  Colors.transparent,
+          dividerColor: Colors.grey.shade200,
+          outerBorder: false,
+        );
+      case 4: // Top Bar — semi-dark header, white text
+        return (
+          hdrBg: col.withValues(alpha: 0.65),
+          hdrText: Colors.white,
+          evenBg: Colors.white,
+          oddBg:  col.withValues(alpha: 0.05),
+          dividerColor: Colors.grey.shade100,
+          outerBorder: false,
+        );
+      case 5: // Filled — solid header, white text
+        return (
+          hdrBg: col,
+          hdrText: Colors.white,
+          evenBg: Colors.white,
+          oddBg:  col.withValues(alpha: 0.07),
+          dividerColor: Colors.grey.shade100,
+          outerBorder: false,
+        );
+      default: // 0 — Default (orange accent)
+        return (
+          hdrBg: const Color(0xFFf16936).withValues(alpha: 0.10),
+          hdrText: const Color(0xFF333333),
+          evenBg: Colors.white,
+          oddBg:  Colors.grey.shade50,
+          dividerColor: Colors.grey.shade100,
+          outerBorder: false,
+        );
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final isAr   = Localizations.localeOf(context).languageCode == 'ar';
-    final columns = (widget.table['columns'] as List?)?.cast<String>() ?? [];
-    var allRows   = (widget.table['rows'] as List?)
-            ?.map((r) => (r as List).cast<String>()).toList() ?? [];
+    final isAr      = Localizations.localeOf(context).languageCode == 'ar';
+    final rawColumns = (widget.table['columns'] as List?)?.cast<String>() ?? [];
+    final arColumns  = isAr ? (widget.table['columns_ar'] as List?)?.cast<String>() : null;
+    final columns    = (arColumns != null && arColumns.length == rawColumns.length)
+        ? arColumns : rawColumns;
+    var   allRows = (widget.table['rows'] as List?)
+        ?.map((r) => (r as List).cast<String>()).toList() ?? [];
     if (columns.isEmpty) return const SizedBox.shrink();
 
+    // ── Filter + sort ──────────────────────────────────────────────────────
     var rows = allRows;
     if (_globalQ.isNotEmpty) {
       final q = _globalQ.toLowerCase();
       rows = rows.where((r) => r.any((c) => c.toLowerCase().contains(q))).toList();
     }
-    _colFilters.forEach((col, fq) {
+    _colFilters.forEach((ci, fq) {
       if (fq.isEmpty) return;
       final q = fq.toLowerCase();
-      rows = rows.where((r) => col < r.length && r[col].toLowerCase().contains(q)).toList();
+      rows = rows.where((r) => ci < r.length && r[ci].toLowerCase().contains(q)).toList();
     });
     if (_sortCol != null && _sortCol! < columns.length) {
       rows = List.from(rows)..sort((a, b) {
@@ -2118,170 +2923,293 @@ class _TableCardState extends State<_TableCard> {
     }
 
     final activeFilters = _colFilters.values.where((v) => v.isNotEmpty).length;
+    final accentCol     = _color(_themes[widget.colorTheme]);
+    final style         = _tStyle(accentCol);
 
-    final tableWidget = ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.vertical,
-          child: Table(
-            defaultColumnWidth: const IntrinsicColumnWidth(),
-            border: TableBorder(
-              horizontalInside: BorderSide(color: Colors.grey.shade100, width: 1),
-              bottom: BorderSide(color: Colors.grey.shade200, width: 1),
-            ),
-            children: [
-              TableRow(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: [
-                    const Color(0xFFf16936).withValues(alpha: 0.12),
-                    const Color(0xFFf16936).withValues(alpha: 0.06),
-                  ]),
-                ),
-                children: columns.asMap().entries.map((e) {
-                  final isSorted = _sortCol == e.key;
-                  return InkWell(
-                    onTap: () => setState(() {
-                      if (_sortCol == e.key) {
-                        _sortAsc = !_sortAsc;
-                      } else {
-                        _sortCol = e.key;
-                        _sortAsc = true;
-                      }
-                    }),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Text(e.value, style: const TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 12.5, color: Color(0xFF333333))),
-                        const SizedBox(width: 3),
-                        if (isSorted)
-                          Icon(_sortAsc ? Icons.arrow_upward : Icons.arrow_downward,
-                              size: 11, color: const Color(0xFFf16936))
-                        else
-                          Icon(Icons.unfold_more, size: 11, color: Colors.grey[400]),
-                      ]),
-                    ),
-                  );
-                }).toList(),
-              ),
-              ...rows.asMap().entries.map((re) => TableRow(
-                decoration: BoxDecoration(
-                    color: re.key.isEven ? Colors.white : Colors.grey.shade50),
-                children: re.value.asMap().entries.map((ce) {
-                  final cell    = ce.value;
-                  final cellKey = cell.trim().toLowerCase();
-                  final bgColor = _valueColors[cellKey];
-                  final fgColor = _valueFgColors[cellKey];
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                    child: bgColor != null
-                        ? Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                            decoration: BoxDecoration(
-                                color: bgColor, borderRadius: BorderRadius.circular(5)),
-                            child: Text(cell, style: TextStyle(
-                                fontSize: 11.5, fontWeight: FontWeight.w600, color: fgColor)),
-                          )
-                        : Text(cell, style: TextStyle(fontSize: 12, color: Colors.grey[800])),
-                  );
-                }).toList(),
-              )),
-            ],
-          ),
-        ),
-      ),
-    );
+    return LayoutBuilder(builder: (ctx, constraints) {
+      final availW  = constraints.maxWidth;
+      // Each column at least _kMinColW; expand to fill if there's room
+      final colW    = (availW / columns.length).clamp(_kMinColW, double.infinity);
+      final tableW  = colW * columns.length;
 
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      // Toolbar
-      Row(children: [
-        Expanded(child: TextField(
-          decoration: InputDecoration(
-            isDense: true,
-            hintText: isAr ? 'بحث في الجدول...' : 'Search table...',
-            prefixIcon: const Icon(Icons.search, size: 16),
-            suffixIcon: _globalQ.isNotEmpty
-                ? IconButton(icon: const Icon(Icons.close, size: 16),
-                    onPressed: () => setState(() => _globalQ = ''))
-                : null,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-          ),
-          onChanged: (v) => setState(() => _globalQ = v),
-        )),
-        const SizedBox(width: 6),
-        Stack(clipBehavior: Clip.none, children: [
-          IconButton(
-            icon: const Icon(Icons.filter_list_rounded),
-            color: _showColFilters ? const Color(0xFFf16936) : Colors.grey,
-            tooltip: isAr ? 'فلتر حسب العمود' : 'Column filters',
-            onPressed: () => setState(() => _showColFilters = !_showColFilters),
-          ),
-          if (activeFilters > 0)
-            Positioned(right: 4, top: 4, child: Container(
-              width: 14, height: 14,
-              decoration: const BoxDecoration(color: Color(0xFFf16936), shape: BoxShape.circle),
-              child: Center(child: Text('$activeFilters',
-                  style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold))),
-            )),
-        ]),
-        if (_globalQ.isNotEmpty || activeFilters > 0)
-          TextButton(
-            onPressed: () => setState(() { _globalQ = ''; _colFilters.clear(); }),
-            child: Text(isAr ? 'مسح' : 'Clear', style: const TextStyle(fontSize: 11)),
-          ),
-      ]),
-      if (_showColFilters) Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(children: columns.asMap().entries.map((e) {
-            return SizedBox(
-              width: 110,
+      // ── Header row ───────────────────────────────────────────────────────
+      Widget headerRow() => Container(
+        color: style.hdrBg,
+        child: Row(children: columns.asMap().entries.map((e) {
+          final isSorted = _sortCol == e.key;
+          return GestureDetector(
+            onTap: () => setState(() {
+              _sortCol == e.key ? _sortAsc = !_sortAsc : (() { _sortCol = e.key; _sortAsc = true; })();
+            }),
+            child: SizedBox(
+              width: colW,
               child: Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: TextField(
-                  decoration: InputDecoration(
-                    isDense: true, hintText: e.value,
-                    hintStyle: const TextStyle(fontSize: 10),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-                    suffixIcon: (_colFilters[e.key]?.isNotEmpty ?? false)
-                        ? InkWell(onTap: () => setState(() => _colFilters.remove(e.key)),
-                            child: const Icon(Icons.close, size: 13))
-                        : null,
-                  ),
-                  style: const TextStyle(fontSize: 11),
-                  onChanged: (v) => setState(() {
-                    if (v.isEmpty) { _colFilters.remove(e.key); } else { _colFilters[e.key] = v; }
-                  }),
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Flexible(child: Text(e.value,
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12,
+                          color: style.hdrText),
+                      overflow: TextOverflow.ellipsis)),
+                  const SizedBox(width: 3),
+                  isSorted
+                      ? Icon(_sortAsc ? Icons.arrow_upward : Icons.arrow_downward,
+                            size: 10, color: style.hdrText.withValues(alpha: 0.9))
+                      : Icon(Icons.unfold_more, size: 10,
+                            color: style.hdrText.withValues(alpha: 0.35)),
+                ]),
               ),
-            );
-          }).toList()),
+            ),
+          );
+        }).toList()),
+      );
+
+      // ── Data row ─────────────────────────────────────────────────────────
+      Widget dataRow(int idx, List<String> row) => Container(
+        decoration: BoxDecoration(
+          color: idx.isEven ? style.evenBg : style.oddBg,
+          border: Border(bottom: BorderSide(color: style.dividerColor, width: 0.8)),
         ),
-      ),
-      if (_globalQ.isNotEmpty || activeFilters > 0)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: Text(
-            isAr ? '${rows.length} من ${allRows.length} صف' : '${rows.length} of ${allRows.length} rows',
-            style: TextStyle(fontSize: 11, color: Colors.grey[600], fontStyle: FontStyle.italic),
+        child: Row(children: List.generate(columns.length, (ci) {
+          final cell    = ci < row.length ? row[ci] : '';
+          final cellKey = cell.trim().toLowerCase();
+          final bgColor = _valueColors[cellKey];
+          final fgColor = _valueFgColors[cellKey];
+          return SizedBox(
+            width: colW,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              child: bgColor != null
+                  ? Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                          color: bgColor, borderRadius: BorderRadius.circular(5)),
+                      child: Text(cell,
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: fgColor),
+                          overflow: TextOverflow.ellipsis),
+                    )
+                  : Text(cell,
+                      style: TextStyle(fontSize: 11.5, color: Colors.grey[800]),
+                      overflow: TextOverflow.ellipsis),
+            ),
+          );
+        })),
+      );
+
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // ── Toolbar ─────────────────────────────────────────────────────────
+        Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+          Expanded(child: SizedBox(
+            height: 30,
+            child: TextField(
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: isAr ? 'بحث...' : 'Search...',
+                hintStyle: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                prefixIcon: Icon(Icons.search_rounded, size: 15, color: Colors.grey[400]),
+                prefixIconConstraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                suffixIcon: _globalQ.isNotEmpty
+                    ? GestureDetector(
+                        onTap: () => setState(() => _globalQ = ''),
+                        child: Icon(Icons.close_rounded, size: 13, color: Colors.grey[500]))
+                    : null,
+                suffixIconConstraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(7)),
+                enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(7),
+                    borderSide: BorderSide(color: Colors.grey.shade300)),
+                focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(7),
+                    borderSide: BorderSide(color: accentCol, width: 1.5)),
+              ),
+              style: const TextStyle(fontSize: 11),
+              onChanged: (v) => setState(() => _globalQ = v),
+            ),
+          )),
+          const SizedBox(width: 5),
+          // Filter toggle
+          SizedBox(width: 30, height: 30, child: Stack(clipBehavior: Clip.none, children: [
+            InkWell(
+              borderRadius: BorderRadius.circular(7),
+              onTap: () => setState(() => _showColFilters = !_showColFilters),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: _showColFilters ? accentCol.withValues(alpha: 0.1) : Colors.transparent,
+                  borderRadius: BorderRadius.circular(7),
+                  border: Border.all(
+                      color: _showColFilters ? accentCol : Colors.grey.shade300),
+                ),
+                child: Center(child: Icon(Icons.filter_list_rounded, size: 15,
+                    color: _showColFilters ? accentCol : Colors.grey[500])),
+              ),
+            ),
+            if (activeFilters > 0)
+              Positioned(right: -3, top: -3, child: Container(
+                width: 13, height: 13,
+                decoration: BoxDecoration(color: accentCol, shape: BoxShape.circle),
+                child: Center(child: Text('$activeFilters',
+                    style: const TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold))),
+              )),
+          ])),
+          if (_globalQ.isNotEmpty || activeFilters > 0) ...[
+            const SizedBox(width: 5),
+            GestureDetector(
+              onTap: () => setState(() { _globalQ = ''; _colFilters.clear(); }),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.red.shade200)),
+                child: Text(isAr ? 'مسح' : 'Clear',
+                    style: TextStyle(fontSize: 10, color: Colors.red.shade700,
+                        fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
+        ]),
+
+        // ── Column filters (collapsible, multi-row responsive grid) ────────────
+        if (_showColFilters) ...[
+          const SizedBox(height: 5),
+          Builder(builder: (_) {
+            final perRow = availW <= 400 ? 3 : availW <= 680 ? 4 : availW <= 960 ? 6 : 8;
+            final entries = columns.asMap().entries.toList();
+            final rowCount = (entries.length / perRow).ceil();
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: List.generate(rowCount, (ri) {
+                final start = ri * perRow;
+                final chunk = entries.sublist(
+                    start, (start + perRow).clamp(0, entries.length));
+                return Padding(
+                  padding: EdgeInsets.only(bottom: ri < rowCount - 1 ? 4 : 0),
+                  child: Row(children: chunk.asMap().entries.map((ce) {
+                    final ci = ce.key;
+                    final e  = ce.value;
+                    return Expanded(child: Padding(
+                      padding: EdgeInsets.only(right: ci < chunk.length - 1 ? 4 : 0),
+                      child: SizedBox(
+                        height: 30,
+                        child: TextField(
+                          decoration: InputDecoration(
+                            isDense: true,
+                            hintText: e.value,
+                            hintStyle: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                            prefixIcon: Icon(Icons.search_rounded, size: 15,
+                                color: Colors.grey[400]),
+                            prefixIconConstraints:
+                                const BoxConstraints(minWidth: 28, minHeight: 28),
+                            suffixIcon: (_colFilters[e.key]?.isNotEmpty ?? false)
+                                ? GestureDetector(
+                                    onTap: () =>
+                                        setState(() => _colFilters.remove(e.key)),
+                                    child: Icon(Icons.close_rounded,
+                                        size: 13, color: Colors.grey[500]))
+                                : null,
+                            suffixIconConstraints:
+                                const BoxConstraints(minWidth: 24, minHeight: 24),
+                            contentPadding:
+                                const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(7)),
+                            enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(7),
+                                borderSide:
+                                    BorderSide(color: Colors.grey.shade300)),
+                            focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(7),
+                                borderSide:
+                                    BorderSide(color: accentCol, width: 1.5)),
+                          ),
+                          style: const TextStyle(fontSize: 11),
+                          onChanged: (v) => setState(() => v.isEmpty
+                              ? _colFilters.remove(e.key)
+                              : _colFilters[e.key] = v),
+                        ),
+                      ),
+                    ));
+                  }).toList()),
+                );
+              }),
+            );
+          }),
+        ],
+
+        // ── Row count when filtering ─────────────────────────────────────────
+        if (_globalQ.isNotEmpty || activeFilters > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Text(
+              isAr ? '${rows.length} / ${allRows.length} صف' : '${rows.length} / ${allRows.length} rows',
+              style: TextStyle(fontSize: 10, color: Colors.grey[600], fontStyle: FontStyle.italic),
+            ),
+          ),
+
+        const SizedBox(height: 8),
+
+        // ── Table: sticky header + scrollable body ───────────────────────────
+        Expanded(child: ClipRRect(
+          borderRadius: BorderRadius.circular(9),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(9),
+              border: style.outerBorder
+                  ? Border.all(color: style.dividerColor)
+                  : Border.all(color: Colors.grey.shade200, width: 0.5),
+            ),
+            child: Column(children: [
+              // Sticky header (horizontal scroll synced with body)
+              SingleChildScrollView(
+                controller: _hHdr,
+                scrollDirection: Axis.horizontal,
+                physics: const ClampingScrollPhysics(),
+                child: SizedBox(width: tableW, child: headerRow()),
+              ),
+              Container(height: 1, color: style.dividerColor),
+
+              // Scrollable data area
+              if (rows.isEmpty)
+                Expanded(child: Center(
+                  child: Text(isAr ? 'لا توجد نتائج' : 'No matching rows',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+                ))
+              else
+                Expanded(child: SingleChildScrollView(
+                  scrollDirection: Axis.vertical,
+                  child: SingleChildScrollView(
+                    controller: _hBody,
+                    scrollDirection: Axis.horizontal,
+                    physics: const ClampingScrollPhysics(),
+                    child: SizedBox(
+                      width: tableW,
+                      child: Column(children: rows.asMap().entries
+                          .map((e) => dataRow(e.key, e.value))
+                          .toList()),
+                    ),
+                  ),
+                )),
+            ]),
+          ),
+        )),
+
+        // ── Bottom horizontal scrollbar (always visible on desktop) ──────────
+        SizedBox(
+          height: 14,
+          child: Scrollbar(
+            controller: _hScroll,
+            thumbVisibility: true,
+            trackVisibility: true,
+            interactive: true,
+            child: SingleChildScrollView(
+              controller: _hScroll,
+              scrollDirection: Axis.horizontal,
+              child: SizedBox(width: tableW, height: 1),
+            ),
           ),
         ),
-      if (rows.isEmpty)
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: Text(isAr ? 'لا توجد نتائج' : 'No matching rows',
-              style: TextStyle(fontSize: 12, color: Colors.grey[500])),
-        )
-      else
-        widget.maxHeight != null
-            ? SizedBox(height: widget.maxHeight, child: tableWidget)
-            : tableWidget,
-    ]);
+      ]);
+    });
   }
 }
 
@@ -2668,6 +3596,148 @@ class _SavedDashboardsTabState extends State<_SavedDashboardsTab> {
       ]);
 }
 
+// ─── custom dashboards tab ────────────────────────────────────────────────────
+class _CustomDashboardsTab extends StatefulWidget {
+  final UserModel currentUser;
+  const _CustomDashboardsTab({required this.currentUser});
+  @override
+  State<_CustomDashboardsTab> createState() => _CustomDashboardsTabState();
+}
+
+class _CustomDashboardsTabState extends State<_CustomDashboardsTab> {
+  List<Map<String, dynamic>> _dashboards = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final res = await supabase
+          .from('custom_dashboards')
+          .select('id,title,updated_at')
+          .eq('user_id', widget.currentUser.id)
+          .order('updated_at', ascending: false);
+      if (mounted) setState(() { _dashboards = List<Map<String, dynamic>>.from(res); _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _delete(String id) async {
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Text(isAr ? 'حذف اللوحة' : 'Delete Dashboard'),
+        content: Text(isAr ? 'هل أنت متأكد من الحذف؟' : 'Are you sure you want to delete this dashboard?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(isAr ? 'إلغاء' : 'Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white, elevation: 0),
+            child: Text(isAr ? 'حذف' : 'Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) { await supabase.from('custom_dashboards').delete().eq('id', id); _load(); }
+  }
+
+  void _openEditor({String? dashboardId}) async {
+    await Navigator.push(context, MaterialPageRoute(
+      builder: (_) => CustomDashboardScreen(
+        currentUser: widget.currentUser,
+        dashboardId: dashboardId,
+      ),
+    ));
+    _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(padding: const EdgeInsets.all(14), children: [
+        // ── Create new button ──────────────────────────────────────────────────
+        OutlinedButton.icon(
+          onPressed: () => _openEditor(),
+          icon: const Icon(Icons.add_rounded, size: 18),
+          label: Text(isAr ? 'إنشاء لوحة مخصصة جديدة' : 'Create New Custom Dashboard'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFFf16936),
+            side: const BorderSide(color: Color(0xFFf16936)),
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (_dashboards.isEmpty)
+          Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const SizedBox(height: 32),
+            Icon(Icons.dashboard_customize_outlined, size: 56, color: Colors.grey[300]),
+            const SizedBox(height: 16),
+            Text(
+              isAr ? 'لا توجد لوحات مخصصة بعد' : 'No custom dashboards yet',
+              style: TextStyle(color: Colors.grey[500], fontSize: 14),
+            ),
+          ]))
+        else
+          ..._dashboards.map((d) {
+            final id      = d['id']    as String;
+            final title   = d['title'] as String? ?? '';
+            final updated = DateTime.tryParse(d['updated_at'] as String? ?? '') ?? DateTime.now();
+            return Card(
+              margin: const EdgeInsets.only(bottom: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              elevation: 0, color: Colors.white,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => _openEditor(dashboardId: id),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Row(children: [
+                    Container(
+                      width: 40, height: 40,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFf16936).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.dashboard_customize_rounded, color: Color(0xFFf16936), size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14), overflow: TextOverflow.ellipsis),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${isAr ? "آخر تعديل" : "Last edited"}: ${updated.day}/${updated.month}/${updated.year}',
+                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                      ),
+                    ])),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline_rounded, size: 20, color: Colors.red),
+                      onPressed: () => _delete(id),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ]),
+                ),
+              ),
+            );
+          }),
+        const SizedBox(height: 80),
+      ]),
+    );
+  }
+}
+
 // ─── dashboard card ───────────────────────────────────────────────────────────
 class _DashboardCard extends StatelessWidget {
   final Map<String, dynamic> dashboard;
@@ -3016,11 +4086,16 @@ class _RowCondition {
 class _ColumnDef {
   String field;
   String label;
-  _ColumnDef({required this.field, required this.label});
-  Map<String, dynamic> toJson() => {'field': field, 'label': label};
+  String? labelAr;
+  _ColumnDef({required this.field, required this.label, this.labelAr});
+  Map<String, dynamic> toJson() => {
+    'field': field, 'label': label,
+    if (labelAr != null && labelAr!.isNotEmpty) 'labelAr': labelAr,
+  };
   factory _ColumnDef.fromJson(Map j) => _ColumnDef(
     field: j['field'] as String? ?? 'status',
     label: j['label'] as String? ?? (j['field'] as String? ?? 'status'),
+    labelAr: j['labelAr'] as String?,
   );
 }
 
@@ -3085,10 +4160,16 @@ class _CComponent {
   String id;
   String type; // 'kpi' | 'chart' | 'table'
   String title;
+  String? titleAr; // Arabic translation of title
   String chartType;
   int colSpan;
   int heightLevel;
   int colorTheme;
+  int styleVariant;   // 0-4 visual design variant
+  int? accentColor;   // override palette color (Color.value int)
+  int? fontColor;     // override font color
+  double valueFontSize;
+  double titleFontSize;
   _CDataSource datasource;
   dynamic _cachedData;
   bool _loading = false;
@@ -3097,17 +4178,29 @@ class _CComponent {
     required this.id,
     required this.type,
     required this.title,
+    this.titleAr,
     this.chartType = 'bar',
     this.colSpan = 16,
     this.heightLevel = 2,
     this.colorTheme = 0,
+    this.styleVariant = 0,
+    this.accentColor,
+    this.fontColor,
+    this.valueFontSize = 26.0,
+    this.titleFontSize = 11.0,
     _CDataSource? datasource,
   }) : datasource = datasource ?? _CDataSource();
 
   Map<String, dynamic> toJson() => {
     'id': id, 'type': type, 'title': title,
+    if (titleAr != null && titleAr!.isNotEmpty) 'titleAr': titleAr,
     'chartType': chartType, 'colSpan': colSpan,
     'heightLevel': heightLevel, 'colorTheme': colorTheme,
+    'styleVariant': styleVariant,
+    if (accentColor != null) 'accentColor': accentColor,
+    if (fontColor != null) 'fontColor': fontColor,
+    'valueFontSize': valueFontSize,
+    'titleFontSize': titleFontSize,
     'datasource': datasource.toJson(),
   };
 
@@ -3115,10 +4208,16 @@ class _CComponent {
     id: j['id'] as String? ?? UniqueKey().toString(),
     type: j['type'] as String? ?? 'kpi',
     title: j['title'] as String? ?? '',
+    titleAr: j['titleAr'] as String?,
     chartType: j['chartType'] as String? ?? 'bar',
     colSpan: (j['colSpan'] as int?) ?? 4,
-    heightLevel: (j['heightLevel'] as int?) ?? 2,
+    heightLevel: ((j['heightLevel'] as int?) ?? _kMinHeight).clamp(_kMinHeight, 5),
     colorTheme: (j['colorTheme'] as int?) ?? 0,
+    styleVariant: (j['styleVariant'] as int?) ?? 0,
+    accentColor: j['accentColor'] as int?,
+    fontColor: j['fontColor'] as int?,
+    valueFontSize: (j['valueFontSize'] as num?)?.toDouble() ?? 26.0,
+    titleFontSize: (j['titleFontSize'] as num?)?.toDouble() ?? 11.0,
     datasource: j['datasource'] != null
         ? _CDataSource.fromJson(Map<String, dynamic>.from(j['datasource'] as Map))
         : _CDataSource(),
@@ -3128,7 +4227,8 @@ class _CComponent {
 class CustomDashboardScreen extends StatefulWidget {
   final UserModel currentUser;
   final String? dashboardId;
-  const CustomDashboardScreen({super.key, required this.currentUser, this.dashboardId});
+  final bool readOnly;
+  const CustomDashboardScreen({super.key, required this.currentUser, this.dashboardId, this.readOnly = false});
 
   @override
   State<CustomDashboardScreen> createState() => _CustomDashboardScreenState();
@@ -3140,6 +4240,31 @@ class _CustomDashboardScreenState extends State<CustomDashboardScreen> {
   bool _loading = false;
   bool _saving  = false;
   String? _savedId;
+
+  // Resize state (mirrors _InteractiveDashboard)
+  final _dragAccum   = <String, double>{};
+  final _dragAccumH  = <String, double>{};
+  final _resizingIds = <String>{};
+
+  List<List<_CComponent>> _groupCompsIntoRows(
+      List<_CComponent> comps, int gridCols, int Function(_CComponent) eff) {
+    final rows = <List<_CComponent>>[];
+    var row = <_CComponent>[];
+    var span = 0;
+    for (final comp in comps) {
+      final cs = eff(comp);
+      if (span + cs > gridCols && row.isNotEmpty) {
+        rows.add(row); row = []; span = 0;
+      }
+      row.add(comp);
+      span += cs;
+      if (span >= gridCols) {
+        rows.add(row); row = []; span = 0;
+      }
+    }
+    if (row.isNotEmpty) rows.add(row);
+    return rows;
+  }
 
   @override
   void initState() {
@@ -3367,9 +4492,78 @@ class _CustomDashboardScreenState extends State<CustomDashboardScreen> {
     );
   }
 
+  Widget _buildBody(bool isAr) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_components.isEmpty && !widget.readOnly) {
+      return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Icon(Icons.dashboard_customize_outlined, size: 64, color: Colors.grey.shade300),
+        const SizedBox(height: 16),
+        Text(isAr ? 'ابدأ بإضافة مكوّن' : 'Add your first component',
+            style: TextStyle(fontSize: 16, color: Colors.grey.shade500)),
+        const SizedBox(height: 24),
+        ElevatedButton.icon(
+          onPressed: _addComponent,
+          icon: const Icon(Icons.add),
+          label: Text(isAr ? 'إضافة مكوّن' : 'Add Component'),
+          style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFf16936),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+        ),
+      ]));
+    }
+    return SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: LayoutBuilder(builder: (ctx, constraints) {
+                    final isMobile = constraints.maxWidth < 560;
+                    final gridCols = isMobile ? 8 : 32;
+
+                    int effSpan(_CComponent comp) {
+                      if (isMobile) {
+                        return comp.type == 'kpi'
+                            ? comp.colSpan.clamp(4, gridCols)
+                            : gridCols;
+                      }
+                      return comp.colSpan.clamp(8, gridCols);
+                    }
+
+                    final rows = _groupCompsIntoRows(_components, gridCols, effSpan);
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: rows.map((rowComps) {
+                        final usedSpan = rowComps.fold<int>(0, (s, c) => s + effSpan(c));
+                        final remSpan  = gridCols - usedSpan;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              ...rowComps.asMap().entries.map((e) {
+                                final comp = e.value;
+                                return Expanded(
+                                  flex: effSpan(comp),
+                                  child: Padding(
+                                    padding: EdgeInsets.only(left: e.key == 0 ? 0 : 8),
+                                    child: _buildResizableCompCard(
+                                        comp, constraints.maxWidth, gridCols, isMobile),
+                                  ),
+                                );
+                              }),
+                              if (remSpan > 0) Expanded(flex: remSpan, child: const SizedBox()),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    );
+                  }),
+                );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isAr = Localizations.localeOf(context).languageCode == 'ar';
+    if (widget.readOnly) return _buildBody(isAr);
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6FA),
       appBar: AppBar(
@@ -3394,41 +4588,7 @@ class _CustomDashboardScreenState extends State<CustomDashboardScreen> {
             ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _components.isEmpty
-              ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  Icon(Icons.dashboard_customize_outlined, size: 64, color: Colors.grey.shade300),
-                  const SizedBox(height: 16),
-                  Text(isAr ? 'ابدأ بإضافة مكوّن' : 'Add your first component',
-                      style: TextStyle(fontSize: 16, color: Colors.grey.shade500)),
-                  const SizedBox(height: 24),
-                  ElevatedButton.icon(
-                    onPressed: _addComponent,
-                    icon: const Icon(Icons.add),
-                    label: Text(isAr ? 'إضافة مكوّن' : 'Add Component'),
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFf16936),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                  ),
-                ]))
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: LayoutBuilder(builder: (ctx, constraints) {
-                    final gridCols = constraints.maxWidth < 560 ? 8 : 32;
-                    return Wrap(spacing: 10, runSpacing: 10,
-                      children: _components.map((comp) {
-                        final w = (constraints.maxWidth + 10) * comp.colSpan / gridCols - 10;
-                        final minW = constraints.maxWidth / 4 - 10;
-                        return SizedBox(
-                          width: w.clamp(minW, constraints.maxWidth),
-                          child: _buildCompCard(comp),
-                        );
-                      }).toList(),
-                    );
-                  }),
-                ),
+      body: _buildBody(isAr),
       floatingActionButton: _components.isEmpty
           ? null
           : FloatingActionButton.extended(
@@ -3441,26 +4601,191 @@ class _CustomDashboardScreenState extends State<CustomDashboardScreen> {
     );
   }
 
+  // ── Resizable card with 4-sided handles + drag-to-reorder ──────────────────
+  Widget _buildResizableCompCard(
+      _CComponent comp, double totalWidth, int gridCols, bool isMobile) {
+    final isResizingW = _resizingIds.contains('w_${comp.id}');
+    final isResizingH = _resizingIds.contains('h_${comp.id}');
+    final isResizing  = isResizingW || isResizingH;
+    final minSpan  = isMobile ? (comp.type == 'kpi' ? 4 : gridCols) : 8;
+    final canResizeW = !isMobile || comp.type == 'kpi';
+    // Mobile KPI height is fixed by row count — height handles hidden
+    final isMobileKpiComp = isMobile && comp.type == 'kpi';
+    const minHLvl = _kMinHeight;
+    final unitPx = totalWidth / gridCols;
+    const kHUnit = 40.0;
+
+    void wStart() => setState(() => _resizingIds.add('w_${comp.id}'));
+    void wEnd()   => setState(() { _resizingIds.remove('w_${comp.id}'); _dragAccum[comp.id]  = 0; });
+    void hStart() => setState(() => _resizingIds.add('h_${comp.id}'));
+    void hEnd()   => setState(() { _resizingIds.remove('h_${comp.id}'); _dragAccumH[comp.id] = 0; });
+
+    Widget handle({
+      double? left, double? right, double? top, double? bottom,
+      double? width, double? height,
+      required MouseCursor cursor,
+      required void Function() onStart,
+      required void Function(DragUpdateDetails) onUpdate,
+      required void Function() onEnd,
+      required bool active,
+      bool vertical = false,
+    }) {
+      return Positioned(
+        left: left, right: right, top: top, bottom: bottom,
+        width: width, height: height,
+        child: MouseRegion(
+          cursor: cursor,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onPanStart: (_) => onStart(),
+            onPanUpdate: onUpdate,
+            onPanEnd: (_) => onEnd(),
+            child: Center(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
+                width:  vertical ? (active ? 40 : 28) : (active ? 5 : 4),
+                height: vertical ? (active ? 5 : 4)   : (active ? 40 : 28),
+                decoration: BoxDecoration(
+                  color: active
+                      ? const Color(0xFFf16936)
+                      : Colors.grey.shade400.withValues(alpha: 0.7),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (widget.readOnly) return _buildCompCard(comp);
+
+    return Stack(
+      children: [
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          decoration: isResizing
+              ? BoxDecoration(
+                  border: Border.all(color: const Color(0xFFf16936), width: 2),
+                  borderRadius: BorderRadius.circular(16))
+              : null,
+          child: _buildCompCard(comp),
+        ),
+        if (canResizeW) handle(
+          right: 0, top: 0, bottom: 0, width: 18,
+          cursor: SystemMouseCursors.resizeLeftRight,
+          onStart: wStart, onEnd: wEnd, active: isResizingW,
+          onUpdate: (d) {
+            _dragAccum[comp.id] = (_dragAccum[comp.id] ?? 0) + d.delta.dx;
+            if (_dragAccum[comp.id]! > unitPx && comp.colSpan < gridCols) {
+              setState(() { comp.colSpan = (comp.colSpan + 1).clamp(minSpan, gridCols); _dragAccum[comp.id] = 0; });
+            } else if (_dragAccum[comp.id]! < -unitPx && comp.colSpan > minSpan) {
+              setState(() { comp.colSpan = (comp.colSpan - 1).clamp(minSpan, gridCols); _dragAccum[comp.id] = 0; });
+            }
+          },
+        ),
+        if (canResizeW) handle(
+          left: 0, top: 0, bottom: 0, width: 18,
+          cursor: SystemMouseCursors.resizeLeftRight,
+          onStart: wStart, onEnd: wEnd, active: isResizingW,
+          onUpdate: (d) {
+            _dragAccum[comp.id] = (_dragAccum[comp.id] ?? 0) - d.delta.dx;
+            if (_dragAccum[comp.id]! > unitPx && comp.colSpan < gridCols) {
+              setState(() { comp.colSpan = (comp.colSpan + 1).clamp(minSpan, gridCols); _dragAccum[comp.id] = 0; });
+            } else if (_dragAccum[comp.id]! < -unitPx && comp.colSpan > minSpan) {
+              setState(() { comp.colSpan = (comp.colSpan - 1).clamp(minSpan, gridCols); _dragAccum[comp.id] = 0; });
+            }
+          },
+        ),
+        // Height handles — hidden on mobile KPI (height is fixed by row count)
+        if (!isMobileKpiComp) handle(
+          left: 0, right: 0, bottom: 0, height: 18,
+          cursor: SystemMouseCursors.resizeUpDown,
+          onStart: hStart, onEnd: hEnd, active: isResizingH, vertical: true,
+          onUpdate: (d) {
+            _dragAccumH[comp.id] = (_dragAccumH[comp.id] ?? 0) + d.delta.dy;
+            if (_dragAccumH[comp.id]! > kHUnit && comp.heightLevel < 5) {
+              setState(() { comp.heightLevel++; _dragAccumH[comp.id] = 0; });
+            } else if (_dragAccumH[comp.id]! < -kHUnit && comp.heightLevel > minHLvl) {
+              setState(() { comp.heightLevel--; _dragAccumH[comp.id] = 0; });
+            }
+          },
+        ),
+        if (!isMobileKpiComp) handle(
+          left: 0, right: 0, top: 0, height: 18,
+          cursor: SystemMouseCursors.resizeUpDown,
+          onStart: hStart, onEnd: hEnd, active: isResizingH, vertical: true,
+          onUpdate: (d) {
+            _dragAccumH[comp.id] = (_dragAccumH[comp.id] ?? 0) - d.delta.dy;
+            if (_dragAccumH[comp.id]! > kHUnit && comp.heightLevel < 5) {
+              setState(() { comp.heightLevel++; _dragAccumH[comp.id] = 0; });
+            } else if (_dragAccumH[comp.id]! < -kHUnit && comp.heightLevel > minHLvl) {
+              setState(() { comp.heightLevel--; _dragAccumH[comp.id] = 0; });
+            }
+          },
+        ),
+      ],
+    );
+  }
+
   Widget _buildCompCard(_CComponent comp) {
     const kHdrH = 52.0;
-    final cardH = kHdrH + _heights[comp.heightLevel.clamp(0, 5)];
-    return SizedBox(
+    final isMobile = MediaQuery.of(context).size.width < 560;
+    final contentH = (isMobile && comp.type == 'kpi')
+        ? _kpiRowHeights[1]
+        : _heights[comp.heightLevel.clamp(0, 5)];
+    final cardH = kHdrH + contentH;
+
+    Widget cardContent(bool over) => AnimatedContainer(
+      duration: const Duration(milliseconds: 120),
       height: cardH,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.circular(14),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 2))],
-        ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 8, 0),
-            child: Row(children: [
-              Icon(_compIcon(comp.type), size: 16, color: _color(_themes[comp.colorTheme])),
-              const SizedBox(width: 8),
-              Expanded(child: Text(comp.title,
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                  overflow: TextOverflow.ellipsis)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: over ? Border.all(color: const Color(0xFFf16936), width: 2) : null,
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+          child: Row(children: [
+            if (!widget.readOnly) ...[
+              Draggable<String>(
+                data: comp.id,
+                feedback: Material(
+                  elevation: 6, borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    width: 200, height: 52, padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)),
+                    child: Row(children: [
+                      const Icon(Icons.drag_indicator_rounded, color: Colors.grey, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(comp.title,
+                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+                          overflow: TextOverflow.ellipsis)),
+                    ]),
+                  ),
+                ),
+                childWhenDragging: const Icon(Icons.drag_indicator_rounded,
+                    color: Color(0xFFf16936), size: 20),
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.grab,
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Icon(Icons.drag_indicator_rounded,
+                        color: Colors.grey.shade400, size: 20),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+            ],
+            Icon(_compIcon(comp.type), size: 15,
+                color: _color(_themes[comp.colorTheme])),
+            const SizedBox(width: 6),
+            Expanded(child: Text(comp.title,
+                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                overflow: TextOverflow.ellipsis)),
+            if (!widget.readOnly) ...[
               IconButton(
                 icon: const Icon(Icons.tune_rounded, size: 18),
                 padding: const EdgeInsets.all(4), constraints: const BoxConstraints(),
@@ -3471,17 +4796,33 @@ class _CustomDashboardScreenState extends State<CustomDashboardScreen> {
                 padding: const EdgeInsets.all(4), constraints: const BoxConstraints(),
                 onPressed: () => setState(() => _components.remove(comp)),
               ),
-            ]),
+            ],
+          ]),
+        ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+            child: _buildCompContent(comp),
           ),
-          // Content fills remaining height
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
-              child: _buildCompContent(comp),
-            ),
-          ),
-        ]),
-      ),
+        ),
+      ]),
+    );
+
+    if (widget.readOnly) return cardContent(false);
+
+    return DragTarget<String>(
+      key: ValueKey('tgt_${comp.id}'),
+      onWillAcceptWithDetails: (d) => d.data != comp.id,
+      onAcceptWithDetails: (d) {
+        setState(() {
+          final from = _components.indexWhere((c) => c.id == d.data);
+          final to   = _components.indexOf(comp);
+          if (from < 0 || to < 0 || from == to) return;
+          final moved = _components.removeAt(from);
+          _components.insert(to, moved);
+        });
+      },
+      builder: (ctx, candidates, _) => cardContent(candidates.isNotEmpty),
     );
   }
 
@@ -3494,6 +4835,8 @@ class _CustomDashboardScreenState extends State<CustomDashboardScreen> {
   }
 
   Widget _buildCompContent(_CComponent comp) {
+    final isAr       = Localizations.localeOf(context).languageCode == 'ar';
+    final compTitle  = (isAr && (comp.titleAr?.isNotEmpty ?? false)) ? comp.titleAr! : comp.title;
     if (comp._loading) {
       return const Padding(
         padding: EdgeInsets.all(20),
@@ -3513,34 +4856,110 @@ class _CustomDashboardScreenState extends State<CustomDashboardScreen> {
 
     if (comp.type == 'kpi') {
       final val = comp._cachedData.toString();
-      final col = _color(_themes[comp.colorTheme]);
-      return Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
-          border: Border(left: BorderSide(color: col, width: 4)),
-        ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(comp.title, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
-          const SizedBox(height: 6),
-          Text(val, style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: col)),
-          Text('Last ${comp.datasource.daysBack}d',
-              style: TextStyle(fontSize: 10, color: Colors.grey[400])),
-        ]),
-      );
+      final col = comp.accentColor != null
+          ? Color(comp.accentColor!)
+          : _color(_themes[comp.colorTheme]);
+      final fgCol = comp.fontColor != null ? Color(comp.fontColor!) : null;
+      final vSize = comp.valueFontSize;
+      final tSize = comp.titleFontSize;
+      final sub = 'Last ${comp.datasource.daysBack}d';
+      switch (comp.styleVariant) {
+        case 1: // Gradient card
+          return Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              gradient: LinearGradient(
+                colors: [col, col.withValues(alpha: 0.65)],
+                begin: Alignment.topLeft, end: Alignment.bottomRight,
+              ),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(compTitle, style: TextStyle(fontSize: tSize, color: Colors.white.withValues(alpha: 0.85))),
+              const SizedBox(height: 6),
+              Text(val, style: TextStyle(fontSize: vSize, fontWeight: FontWeight.bold, color: Colors.white)),
+              Text(sub, style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.65))),
+            ]),
+          );
+        case 2: // Outlined/framed
+          return Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: col, width: 2),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(compTitle, style: TextStyle(fontSize: tSize, color: Colors.grey[600])),
+              const SizedBox(height: 6),
+              Text(val, style: TextStyle(fontSize: vSize, fontWeight: FontWeight.bold, color: fgCol ?? col)),
+              Text(sub, style: TextStyle(fontSize: 10, color: Colors.grey[400])),
+            ]),
+          );
+        case 3: // Minimal centered
+          return Column(mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center, children: [
+            Text(val, style: TextStyle(fontSize: vSize + 4, fontWeight: FontWeight.bold, color: fgCol ?? col)),
+            const SizedBox(height: 4),
+            Text(compTitle, style: TextStyle(fontSize: tSize, color: Colors.grey[500])),
+          ]);
+        case 4: // Bold top-bar filled
+          return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: col, borderRadius: const BorderRadius.vertical(top: Radius.circular(8))),
+              child: Text(compTitle, style: TextStyle(fontSize: tSize, color: Colors.white, fontWeight: FontWeight.w600)),
+            ),
+            Expanded(child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: col.withValues(alpha: 0.08),
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(8)),
+              ),
+              child: Column(mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(val, style: TextStyle(fontSize: vSize, fontWeight: FontWeight.bold, color: fgCol ?? col)),
+                Text(sub, style: TextStyle(fontSize: 10, color: Colors.grey[500])),
+              ]),
+            )),
+          ]);
+        default: // 0 — flat left-border
+          return Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border(left: BorderSide(color: col, width: 4)),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(compTitle, style: TextStyle(fontSize: tSize, color: Colors.grey[600])),
+              const SizedBox(height: 6),
+              Text(val, style: TextStyle(fontSize: vSize, fontWeight: FontWeight.bold, color: fgCol ?? col)),
+              Text(sub, style: TextStyle(fontSize: 10, color: Colors.grey[400])),
+            ]),
+          );
+      }
     }
+
+    final h = _heights[comp.heightLevel.clamp(_kMinHeight, 5)];
 
     // Table with explicit column defs (raw rows from fetchData)
     if (comp.type == 'table' && comp._cachedData is List) {
       final tableRows = comp._cachedData as List;
       final cols = comp.datasource.tableColumns
           .map((c) => c.label.isNotEmpty ? c.label : c.field).toList();
-      return _TableCard(
-        maxHeight: _heights[comp.heightLevel.clamp(0, 5)] - 50,
-        table: {
-          'columns': cols.isNotEmpty ? cols : ['Column'],
-          'rows': tableRows.map((r) => (r as List).map((v) => v.toString()).toList()).toList(),
-        },
+      final colsAr = comp.datasource.tableColumns
+          .map((c) => (c.labelAr?.isNotEmpty ?? false) ? c.labelAr! : (c.label.isNotEmpty ? c.label : c.field)).toList();
+      return SizedBox(
+        height: h,
+        child: _TableCard(
+          table: {
+            'columns': cols.isNotEmpty ? cols : ['Column'],
+            'columns_ar': colsAr,
+            'rows': tableRows.map((r) => (r as List).map((v) => v.toString()).toList()).toList(),
+          },
+          colorTheme: comp.colorTheme,
+          styleVariant: comp.styleVariant,
+        ),
       );
     }
 
@@ -3556,19 +4975,32 @@ class _CustomDashboardScreenState extends State<CustomDashboardScreen> {
         'x_labels': data.keys.take(12).toList(),
         'series': [{'label': comp.title, 'data': data.values.take(12).map((v) => (v as num).toDouble()).toList()}],
       };
-      return _ChartCard(chart: chartData, height: _heights[comp.heightLevel.clamp(0, 5)],
-          colorOffset: _themes[comp.colorTheme]);
+      final isPie = comp.chartType == 'pie' || comp.chartType == 'donut';
+      return SizedBox(
+        height: h,
+        child: ClipRect(
+          child: _ChartCard(
+            chart: chartData,
+            height: isPie ? h : h - 26,
+            colorOffset: _themes[comp.colorTheme],
+          ),
+        ),
+      );
     }
 
     // Table (grouped)
     final keys = data.keys.toList();
     final vals = data.values.map((v) => v.toString()).toList();
-    return _TableCard(
-      maxHeight: _heights[comp.heightLevel.clamp(0, 5)] - 50,
-      table: {
-        'columns': ['Category', 'Value'],
-        'rows': List.generate(keys.length, (i) => [keys[i], vals[i]]),
-      },
+    return SizedBox(
+      height: h,
+      child: _TableCard(
+        table: {
+          'columns': ['Category', 'Value'],
+          'rows': List.generate(keys.length, (i) => [keys[i], vals[i]]),
+        },
+        colorTheme: comp.colorTheme,
+        styleVariant: comp.styleVariant,
+      ),
     );
   }
 }
@@ -3664,27 +5096,33 @@ class _ComponentConfigSheet extends StatefulWidget {
 
 class _ComponentConfigSheetState extends State<_ComponentConfigSheet> {
   late final TextEditingController _titleCtrl;
+  late final TextEditingController _titleArCtrl;
   final Map<_RowCondition, TextEditingController> _condValCtrl = {};
   final Map<_ColumnDef, TextEditingController> _colLabelCtrl = {};
+  final Map<_ColumnDef, TextEditingController> _colLabelArCtrl = {};
 
   @override
   void initState() {
     super.initState();
-    _titleCtrl = TextEditingController(text: widget.comp.title);
+    _titleCtrl   = TextEditingController(text: widget.comp.title);
+    _titleArCtrl = TextEditingController(text: widget.comp.titleAr ?? '');
     final ds = widget.comp.datasource;
     for (final c in ds.conditions) {
       _condValCtrl[c] = TextEditingController(text: c.value);
     }
     for (final c in ds.tableColumns) {
-      _colLabelCtrl[c] = TextEditingController(text: c.label);
+      _colLabelCtrl[c]   = TextEditingController(text: c.label);
+      _colLabelArCtrl[c] = TextEditingController(text: c.labelAr ?? '');
     }
   }
 
   @override
   void dispose() {
     _titleCtrl.dispose();
-    for (final c in _condValCtrl.values) c.dispose();
-    for (final c in _colLabelCtrl.values) c.dispose();
+    _titleArCtrl.dispose();
+    for (final c in _condValCtrl.values) { c.dispose(); }
+    for (final c in _colLabelCtrl.values) { c.dispose(); }
+    for (final c in _colLabelArCtrl.values) { c.dispose(); }
     super.dispose();
   }
 
@@ -3712,6 +5150,19 @@ class _ComponentConfigSheetState extends State<_ComponentConfigSheet> {
           decoration: InputDecoration(isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
           onChanged: (v) => upd(() => comp.title = v),
+        ),
+        const SizedBox(height: 8),
+        _lbl(isAr ? 'العنوان (عربي)' : 'Title (Arabic)'),
+        TextField(
+          controller: _titleArCtrl,
+          decoration: InputDecoration(
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+            hintText: 'بالعربية...',
+          ),
+          textDirection: TextDirection.rtl,
+          onChanged: (v) => upd(() => comp.titleAr = v.isEmpty ? null : v),
         ),
         const SizedBox(height: 16),
 
@@ -3846,12 +5297,27 @@ class _ComponentConfigSheetState extends State<_ComponentConfigSheet> {
                   onChanged: (v) => setState(() =>
                       col.label = v.isEmpty ? (_kTableFields[col.field] ?? col.field) : v),
                 )),
+                const SizedBox(width: 6),
+                Expanded(child: TextField(
+                  controller: _colLabelArCtrl.putIfAbsent(
+                      col, () => TextEditingController(text: col.labelAr ?? '')),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                    hintText: 'بالعربية...',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  style: const TextStyle(fontSize: 12),
+                  textDirection: TextDirection.rtl,
+                  onChanged: (v) => setState(() => col.labelAr = v.isEmpty ? null : v),
+                )),
                 IconButton(
                   icon: const Icon(Icons.close, size: 16, color: Colors.grey),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
                   onPressed: () {
                     _colLabelCtrl.remove(col)?.dispose();
+                    _colLabelArCtrl.remove(col)?.dispose();
                     setState(() => ds.tableColumns.remove(col));
                   },
                 ),
@@ -3962,25 +5428,232 @@ class _ComponentConfigSheetState extends State<_ComponentConfigSheet> {
         }).toList()),
         const SizedBox(height: 14),
 
-        _lbl(isAr ? 'الارتفاع' : 'Height'),
-        Row(children: List.generate(_heights.length, (i) {
-          const labels = ['XS','S','M','L','XL','XXL'];
-          final sel = comp.heightLevel == i;
-          return Expanded(child: GestureDetector(
-            onTap: () => upd(() => comp.heightLevel = i),
+        // Height picker — hidden on mobile KPI (height is fixed by row count)
+        if (!(MediaQuery.of(context).size.width < 560 && comp.type == 'kpi')) ...[
+          _lbl(isAr ? 'الارتفاع' : 'Height'),
+          Row(children: List.generate(_heights.length, (i) {
+            const labels = ['XS','S','M','L','XL','XXL'];
+            const minLvl = _kMinHeight;
+            final sel      = comp.heightLevel == i;
+            final disabled = i < minLvl;
+            return Expanded(child: GestureDetector(
+              onTap: disabled ? null : () => upd(() => comp.heightLevel = i),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
+                margin: const EdgeInsets.only(right: 4),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: disabled
+                      ? Colors.grey.shade200
+                      : sel ? const Color(0xFFf16936) : Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text(labels[i], style: TextStyle(fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: disabled
+                          ? Colors.grey.shade400
+                          : sel ? Colors.white : Colors.grey[600])),
+                  if (i == minLvl)
+                    Text(isAr ? 'حد أدنى' : 'min',
+                        style: const TextStyle(fontSize: 8, color: Color(0xFFf16936))),
+                ]),
+              ),
+            ));
+          })),
+          const SizedBox(height: 20),
+        ],
+        const Divider(),
+        const SizedBox(height: 12),
+
+        // ── Visual Style ──────────────────────────────────────────────────────
+        Text(isAr ? 'النمط البصري' : 'Visual Style',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        const SizedBox(height: 12),
+
+        // Style variant (KPI has 5 named designs; others just color)
+        if (comp.type == 'kpi') ...[
+          _lbl(isAr ? 'تصميم البطاقة' : 'Card Design'),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final entry in const {
+              0: 'Left Border',
+              1: 'Gradient',
+              2: 'Outlined',
+              3: 'Minimal',
+              4: 'Bold Bar',
+            }.entries)
+              GestureDetector(
+                onTap: () => upd(() => comp.styleVariant = entry.key),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: comp.styleVariant == entry.key
+                        ? const Color(0xFFf16936)
+                        : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: comp.styleVariant == entry.key
+                          ? const Color(0xFFf16936)
+                          : Colors.grey.shade300,
+                    ),
+                  ),
+                  child: Text(entry.value, style: TextStyle(fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: comp.styleVariant == entry.key ? Colors.white : Colors.grey[700])),
+                ),
+              ),
+          ]),
+          const SizedBox(height: 16),
+        ],
+
+        // Accent color picker
+        _lbl(isAr ? 'لون التمييز' : 'Accent Color'),
+        Row(children: [
+          // "Auto" chip (uses colorTheme)
+          GestureDetector(
+            onTap: () => upd(() => comp.accentColor = null),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 120),
-              margin: const EdgeInsets.only(right: 4),
-              padding: const EdgeInsets.symmetric(vertical: 8),
+              margin: const EdgeInsets.only(right: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: sel ? const Color(0xFFf16936) : Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(6),
+                color: comp.accentColor == null ? const Color(0xFFf16936) : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                    color: comp.accentColor == null ? const Color(0xFFf16936) : Colors.grey.shade300),
               ),
-              child: Center(child: Text(labels[i], style: TextStyle(fontSize: 11,
-                  fontWeight: FontWeight.bold, color: sel ? Colors.white : Colors.grey[600]))),
+              child: Text(isAr ? 'تلقائي' : 'Auto',
+                  style: TextStyle(fontSize: 11,
+                      color: comp.accentColor == null ? Colors.white : Colors.grey[700])),
             ),
-          ));
-        })),
+          ),
+          // Color swatches
+          ...List.generate(_palette.length, (i) {
+            final col = _palette[i];
+            final sel = comp.accentColor == col.toARGB32();
+            return GestureDetector(
+              onTap: () => upd(() => comp.accentColor = col.toARGB32()),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
+                margin: const EdgeInsets.only(right: 5),
+                width: 24, height: 24,
+                decoration: BoxDecoration(
+                  color: col, shape: BoxShape.circle,
+                  border: sel
+                      ? Border.all(color: Colors.black54, width: 2.5)
+                      : Border.all(color: Colors.white, width: 2),
+                  boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 2)],
+                ),
+              ),
+            );
+          }),
+        ]),
+        const SizedBox(height: 16),
+
+        // Font color
+        _lbl(isAr ? 'لون الخط' : 'Font Color'),
+        Row(children: [
+          GestureDetector(
+            onTap: () => upd(() => comp.fontColor = null),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              margin: const EdgeInsets.only(right: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: comp.fontColor == null ? const Color(0xFFf16936) : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                    color: comp.fontColor == null ? const Color(0xFFf16936) : Colors.grey.shade300),
+              ),
+              child: Text(isAr ? 'تلقائي' : 'Auto',
+                  style: TextStyle(fontSize: 11,
+                      color: comp.fontColor == null ? Colors.white : Colors.grey[700])),
+            ),
+          ),
+          ...([Colors.black87, Colors.white, Colors.grey.shade700,
+               Colors.blueGrey.shade700, Colors.indigo.shade800]).asMap().entries.map((e) {
+            final col = e.value;
+            final sel = comp.fontColor == col.toARGB32();
+            return GestureDetector(
+              onTap: () => upd(() => comp.fontColor = col.toARGB32()),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
+                margin: const EdgeInsets.only(right: 5),
+                width: 24, height: 24,
+                decoration: BoxDecoration(
+                  color: col, shape: BoxShape.circle,
+                  border: sel
+                      ? Border.all(color: const Color(0xFFf16936), width: 2.5)
+                      : Border.all(color: Colors.grey.shade300, width: 1),
+                  boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 2)],
+                ),
+              ),
+            );
+          }),
+        ]),
+        const SizedBox(height: 16),
+
+        // Font sizes
+        _lbl(isAr ? 'حجم القيمة' : 'Value Font Size'),
+        Row(children: [
+          IconButton(
+            onPressed: comp.valueFontSize > 14
+                ? () => upd(() => comp.valueFontSize -= 2)
+                : null,
+            icon: const Icon(Icons.remove_circle_outline, size: 20),
+            color: const Color(0xFFf16936),
+            padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+          ),
+          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
+            child: Text('${comp.valueFontSize.toInt()}',
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+          ),
+          const SizedBox(width: 10),
+          IconButton(
+            onPressed: comp.valueFontSize < 48
+                ? () => upd(() => comp.valueFontSize += 2)
+                : null,
+            icon: const Icon(Icons.add_circle_outline, size: 20),
+            color: const Color(0xFFf16936),
+            padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+          ),
+        ]),
+        const SizedBox(height: 12),
+
+        _lbl(isAr ? 'حجم العنوان' : 'Title Font Size'),
+        Row(children: [
+          IconButton(
+            onPressed: comp.titleFontSize > 8
+                ? () => upd(() => comp.titleFontSize -= 1)
+                : null,
+            icon: const Icon(Icons.remove_circle_outline, size: 20),
+            color: const Color(0xFFf16936),
+            padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+          ),
+          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
+            child: Text('${comp.titleFontSize.toInt()}',
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+          ),
+          const SizedBox(width: 10),
+          IconButton(
+            onPressed: comp.titleFontSize < 20
+                ? () => upd(() => comp.titleFontSize += 1)
+                : null,
+            icon: const Icon(Icons.add_circle_outline, size: 20),
+            color: const Color(0xFFf16936),
+            padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+          ),
+        ]),
+
         const SizedBox(height: 24),
 
         ElevatedButton(

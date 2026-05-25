@@ -1587,17 +1587,16 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     if (_mainDashMode == 'saved' && _mainDashSavedData != null) {
       dash = SingleChildScrollView(
         padding: const EdgeInsets.all(16),
-        child: AiDashboardView(data: _mainDashSavedData!, showTitle: true),
+        child: AiDashboardView(data: _mainDashSavedData!, showTitle: true, readOnly: true),
       );
     } else if (_mainDashMode == 'custom' && _mainDashCustomId != null) {
       dash = CustomDashboardScreen(
         currentUser: _currentUser!,
         dashboardId: _mainDashCustomId,
+        readOnly: true,
       );
     } else {
-      dash = isMobile
-          ? DashboardMobile(currentUser: _currentUser!, onNavigateToTickets: onNavigate)
-          : DashboardWeb(currentUser: _currentUser!, onNavigateToTickets: onNavigate);
+      dash = DashboardWeb(currentUser: _currentUser!, onNavigateToTickets: onNavigate);
     }
 
     return Stack(
