@@ -353,6 +353,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   Map<String, dynamic>? _mainDashSavedData;
   String? _mainDashCustomId;
   bool _loadingDashPref = true;
+  int _dashRefreshKey = 0;
 
   List<Map<String, dynamic>> _notifications = [];
   int _unreadCount = 0;
@@ -722,7 +723,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               onTap: () async {
                 Navigator.pop(ctx);
                 await _saveMainDashPreference('default', null);
-                if (mounted) setState(() { _mainDashMode = 'default'; _mainDashSavedData = null; _mainDashCustomId = null; });
+                if (mounted) setState(() { _mainDashMode = 'default'; _mainDashSavedData = null; _mainDashCustomId = null; _dashRefreshKey++; });
               },
             ),
             const SizedBox(height: 12),
@@ -749,18 +750,45 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               Text(isAr ? 'لوحاتي المخصصة:' : 'My Custom Dashboards:',
                   style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w600)),
               const SizedBox(height: 6),
-              ...custom.map((d) => _dashOptionTile(
-                icon: Icons.dashboard_customize_rounded,
-                title: d['title'] as String? ?? '',
-                subtitle: isAr ? 'انقر للاستخدام كلوحة رئيسية' : 'Tap to use as main dashboard',
-                selected: _mainDashMode == 'custom' && _mainDashCustomId == d['id'],
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  final cid = d['id'] as String;
-                  await _saveMainDashPreference('custom', null, customId: cid);
-                  if (mounted) setState(() { _mainDashMode = 'custom'; _mainDashCustomId = cid; _mainDashSavedData = null; });
-                },
-              )),
+              ...custom.map((d) {
+                final cid = d['id'] as String;
+                final isSelected = _mainDashMode == 'custom' && _mainDashCustomId == cid;
+                return _dashOptionTile(
+                  icon: Icons.dashboard_customize_rounded,
+                  title: d['title'] as String? ?? '',
+                  subtitle: isAr ? 'انقر للاستخدام كلوحة رئيسية' : 'Tap to use as main dashboard',
+                  selected: isSelected,
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    await _saveMainDashPreference('custom', null, customId: cid);
+                    if (mounted) setState(() { _mainDashMode = 'custom'; _mainDashCustomId = cid; _mainDashSavedData = null; _dashRefreshKey++; });
+                  },
+                  extraTrailing: IconButton(
+                    icon: const Icon(Icons.edit_rounded, size: 16),
+                    color: Colors.grey[600],
+                    padding: const EdgeInsets.all(4),
+                    constraints: const BoxConstraints(),
+                    tooltip: isAr ? 'تعديل' : 'Edit',
+                    onPressed: () async {
+                      Navigator.pop(ctx);
+                      final result = await Navigator.push<String>(
+                        context,
+                        MaterialPageRoute(builder: (_) => CustomDashboardScreen(currentUser: _currentUser!, dashboardId: cid)),
+                      );
+                      if (!mounted) return;
+                      setState(() {
+                        if (result != null) {
+                          _mainDashMode = 'custom';
+                          _mainDashCustomId = result;
+                          _mainDashSavedData = null;
+                        }
+                        _dashRefreshKey++;
+                      });
+                      if (result != null) await _saveMainDashPreference('custom', null, customId: result);
+                    },
+                  ),
+                );
+              }),
             ],
             // Saved AI dashboards
             if (saved.isNotEmpty) ...[
@@ -784,6 +812,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                       _mainDashSavedId = d['id'] as String;
                       _mainDashSavedData = Map<String, dynamic>.from(dash['result'] as Map);
                       _mainDashCustomId = null;
+                      _dashRefreshKey++;
                     });
                   }
                 },
@@ -795,14 +824,18 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _dashOptionTile({required IconData icon, required String title, String? subtitle, required bool selected, required VoidCallback onTap}) {
+  Widget _dashOptionTile({required IconData icon, required String title, String? subtitle, required bool selected, required VoidCallback onTap, Widget? extraTrailing}) {
+    final trailingWidgets = <Widget>[
+      if (extraTrailing != null) extraTrailing,
+      if (selected) const Icon(Icons.check_circle_rounded, color: Color(0xFFf16936), size: 20),
+    ];
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
       leading: Icon(icon, color: selected ? const Color(0xFFf16936) : Colors.grey),
       title: Text(title, style: TextStyle(fontSize: 13, fontWeight: selected ? FontWeight.bold : FontWeight.normal,
           color: selected ? const Color(0xFFf16936) : Colors.black87)),
       subtitle: subtitle != null ? Text(subtitle, style: TextStyle(fontSize: 11, color: Colors.grey[500])) : null,
-      trailing: selected ? const Icon(Icons.check_circle_rounded, color: Color(0xFFf16936), size: 20) : null,
+      trailing: trailingWidgets.isEmpty ? null : Row(mainAxisSize: MainAxisSize.min, children: trailingWidgets),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       tileColor: selected ? const Color(0xFFf16936).withValues(alpha: 0.07) : null,
       onTap: onTap,
@@ -1586,11 +1619,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     Widget dash;
     if (_mainDashMode == 'saved' && _mainDashSavedData != null) {
       dash = SingleChildScrollView(
+        key: ValueKey('saved_${_mainDashSavedId}_$_dashRefreshKey'),
         padding: const EdgeInsets.all(16),
         child: AiDashboardView(data: _mainDashSavedData!, showTitle: true, readOnly: true),
       );
     } else if (_mainDashMode == 'custom' && _mainDashCustomId != null) {
       dash = CustomDashboardScreen(
+        key: ValueKey('custom_${_mainDashCustomId}_$_dashRefreshKey'),
         currentUser: _currentUser!,
         dashboardId: _mainDashCustomId,
         readOnly: true,
