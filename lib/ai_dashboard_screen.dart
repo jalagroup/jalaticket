@@ -2663,11 +2663,14 @@ class _PieChart extends StatelessWidget {
       }).toList();
 
       if (stackVertically) {
-        return Column(mainAxisSize: MainAxisSize.min, children: [
-          SizedBox(height: radius * 2.05, child: pieWidget),
-          const SizedBox(height: 8),
-          Wrap(spacing: 10, runSpacing: 4, children: legendItems),
-        ]);
+        return Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(height: radius * 2.05, child: pieWidget),
+            const SizedBox(height: 8),
+            Wrap(spacing: 10, runSpacing: 4, children: legendItems),
+          ],
+        );
       }
       return Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
         Expanded(flex: 3, child: pieWidget),
