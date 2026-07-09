@@ -1,10 +1,12 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'dart:async';
 import 'package:jalasupport/activity.dart';
 import 'package:jalasupport/ai_dashboard_screen.dart';
 import 'package:jalasupport/ai_insights.dart';
 import 'package:jalasupport/branch_admin_management_screen.dart';
+import 'package:jalasupport/bulk_import_users_dialog.dart';
 import 'package:jalasupport/problem_reports_admin_screen.dart';
 import 'package:jalasupport/l10n/app_localizations.dart';
 import 'package:jalasupport/main.dart';
@@ -35,6 +37,7 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
   String? _selectedDepartmentId;
   String? _selectedPlaceId;
   List<String> _natureOfWork = [];
+  bool _usePhoneAccount = false;   // toggle: email vs phone
 
   List<DepartmentModel> _departments = [];
   List<PlaceModel> _places = [];
@@ -87,21 +90,32 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
     }
   }
 
-// Replace the _createUser() method in CreateUserDialog with this version:
-
-// REPLACE the entire _createUser method in _CreateUserDialogState class
-
-// REPLACE the entire _createUser method in _CreateUserDialogState class
   Future<void> _createUser() async {
     final l10n = AppLocalizations.safeOf(context);
 
-    if (_fullNameController.text.isEmpty ||
-        _emailController.text.isEmpty ||
-        _passwordController.text.isEmpty) {
+    // Validate required fields
+    if (_fullNameController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(l10n.pleaseFillAllRequired)),
       );
       return;
+    }
+
+    if (_usePhoneAccount) {
+      final phone = _phoneController.text.trim();
+      if (phone.isEmpty || !phone.startsWith('+')) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.invalidPhoneNumber)),
+        );
+        return;
+      }
+    } else {
+      if (_emailController.text.trim().isEmpty || _passwordController.text.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.pleaseFillAllRequired)),
+        );
+        return;
+      }
     }
 
     if ((_selectedUserType == UserType.superAdmin ||
@@ -123,12 +137,9 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
     setState(() => _isLoading = true);
 
     try {
-      // ✅ Prepare user data
       final userData = {
         'full_name': _fullNameController.text.trim(),
-        'phone': _phoneController.text.trim().isEmpty
-            ? null
-            : _phoneController.text.trim(),
+        'phone': _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
         'user_type': _selectedUserType.value,
         'department_id': _selectedDepartmentId,
         'place_id': _selectedPlaceId,
@@ -137,61 +148,134 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
         'language': 'en',
       };
 
-      print('📞 Calling Edge Function to create user...');
+      final body = _usePhoneAccount
+          ? {
+              'phone': _phoneController.text.trim(),
+              'userData': userData,
+            }
+          : {
+              'email': _emailController.text.trim(),
+              'password': _passwordController.text,
+              'userData': userData,
+            };
 
-      // ✅ Call Edge Function with proper authorization
       final response = await supabase.functions.invoke(
         'create-user-admin',
-        body: {
-          'email': _emailController.text.trim(),
-          'password': _passwordController.text,
-          'userData': userData,
-        },
-        headers: {
-          'Authorization':
-              'Bearer ${supabase.auth.currentSession?.accessToken}',
-        },
+        body: body,
+        headers: {'Authorization': 'Bearer ${supabase.auth.currentSession?.accessToken}'},
       );
 
-      print('📥 Edge Function response: ${response.data}');
-
       if (response.data != null && response.data['success'] == true) {
-        setState(() => _isLoading = false);
-
         if (mounted) {
+          setState(() => _isLoading = false);
+          final data = response.data as Map<String, dynamic>;
+          final generatedPassword = data['generated_password'] as String?;
+
           Navigator.pop(context);
           widget.onUserCreated();
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
+
+          // For phone accounts, show the auto-generated password
+          if (_usePhoneAccount && generatedPassword != null && mounted) {
+            final ctx = context;
+            showDialog(
+              context: ctx,
+              builder: (dlgCtx) => AlertDialog(
+                title: const Row(
+                  children: [
+                    Icon(Icons.check_circle, color: Colors.green),
+                    SizedBox(width: 8),
+                    Text('User Created'),
+                  ],
+                ),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(l10n.userCreatedSuccessfully),
+                    const SizedBox(height: 16),
+                    Text(l10n.newDefaultPassword),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              generatedPassword,
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                fontFamily: 'monospace',
+                                letterSpacing: 1.5,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.copy_rounded),
+                            tooltip: l10n.copyPassword,
+                            onPressed: () {
+                              Clipboard.setData(ClipboardData(text: generatedPassword));
+                              if (mounted) {
+                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                  SnackBar(
+                                    content: Text(l10n.passwordCopied),
+                                    behavior: SnackBarBehavior.floating,
+                                    duration: const Duration(seconds: 2),
+                                  ),
+                                );
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'User logs in with phone number + this password.',
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                    ),
+                  ],
+                ),
+                actions: [
+                  ElevatedButton(
+                    onPressed: () => Navigator.pop(dlgCtx),
+                    child: Text(l10n.close),
+                  ),
+                ],
+              ),
+            );
+          } else if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Row(children: [
                   const Icon(Icons.check_circle, color: Colors.white),
                   const SizedBox(width: 8),
                   Text(l10n.userCreatedSuccessfully),
-                ],
+                ]),
+                backgroundColor: Colors.green,
+                behavior: SnackBarBehavior.floating,
               ),
-              backgroundColor: Colors.green,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
+            );
+          }
         }
       } else {
         throw Exception(response.data?['message'] ?? 'Failed to create user');
       }
     } catch (e) {
-      setState(() => _isLoading = false);
-      print('❌ Error creating user: $e');
-
       if (mounted) {
+        setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.error, color: Colors.white),
-                const SizedBox(width: 8),
-                Expanded(child: Text('${l10n.failedToCreateUser}: $e')),
-              ],
-            ),
+            content: Row(children: [
+              const Icon(Icons.error, color: Colors.white),
+              const SizedBox(width: 8),
+              Expanded(child: Text('${l10n.failedToCreateUser}: $e')),
+            ]),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
           ),
@@ -246,7 +330,7 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 24, offset: const Offset(0, 8))],
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 24, offset: const Offset(0, 8))],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -258,7 +342,7 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
                 children: [
                   Container(
                     padding: const EdgeInsets.all(7),
-                    decoration: BoxDecoration(color: primaryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                    decoration: BoxDecoration(color: primaryColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
                     child: const Icon(Icons.person_add_outlined, color: primaryColor, size: 17),
                   ),
                   const SizedBox(width: 10),
@@ -283,32 +367,90 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // ── Account type toggle ──────────────────────────────
+                    Container(
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: Row(
+                        children: [
+                          _AccountTypeTab(
+                            label: l10n.emailAccountType,
+                            icon: Icons.email_outlined,
+                            selected: !_usePhoneAccount,
+                            onTap: () => setState(() {
+                              _usePhoneAccount = false;
+                              _phoneController.clear();
+                            }),
+                          ),
+                          _AccountTypeTab(
+                            label: l10n.phoneAccountType,
+                            icon: Icons.phone_android_rounded,
+                            selected: _usePhoneAccount,
+                            onTap: () => setState(() {
+                              _usePhoneAccount = true;
+                              _emailController.clear();
+                              _passwordController.clear();
+                            }),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
                     TextField(
                       controller: _fullNameController,
                       decoration: _field('${l10n.fullName} *', Icons.person_outline),
                       style: const TextStyle(fontSize: 14),
                     ),
                     const SizedBox(height: 10),
-                    TextField(
-                      controller: _emailController,
-                      decoration: _field('${l10n.email} *', Icons.email_outlined),
-                      keyboardType: TextInputType.emailAddress,
-                      style: const TextStyle(fontSize: 14),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: _phoneController,
-                      decoration: _field(l10n.phone, Icons.phone_outlined),
-                      keyboardType: TextInputType.phone,
-                      style: const TextStyle(fontSize: 14),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: _passwordController,
-                      decoration: _field('${l10n.password} *', Icons.lock_outline),
-                      obscureText: true,
-                      style: const TextStyle(fontSize: 14),
-                    ),
+
+                    // ── Email mode fields ────────────────────────────────
+                    if (!_usePhoneAccount) ...[
+                      TextField(
+                        controller: _emailController,
+                        decoration: _field('${l10n.email} *', Icons.email_outlined),
+                        keyboardType: TextInputType.emailAddress,
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _passwordController,
+                        decoration: _field('${l10n.password} *', Icons.lock_outline),
+                        obscureText: true,
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _phoneController,
+                        decoration: _field(l10n.phone, Icons.phone_outlined),
+                        keyboardType: TextInputType.phone,
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    ],
+
+                    // ── Phone mode fields ────────────────────────────────
+                    if (_usePhoneAccount) ...[
+                      TextField(
+                        controller: _phoneController,
+                        decoration: _field(
+                          '${l10n.phoneNumber} * (+9665XXXXXXXX)',
+                          Icons.phone_android_rounded,
+                        ),
+                        keyboardType: TextInputType.phone,
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                      const SizedBox(height: 6),
+                      Padding(
+                        padding: const EdgeInsets.only(left: 4),
+                        child: Text(
+                          l10n.enterPhoneWithCode,
+                          style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 10),
                     DropdownButtonFormField<UserType>(
                       value: _selectedUserType,
@@ -475,9 +617,56 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
   }
 }
 
-// Replace the existing UsersManagement class with this updated version:
+// ── Account type tab used inside CreateUserDialog ─────────────────────────────
+class _AccountTypeTab extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
 
-// Add this EditUserDialog class after the CreateUserDialog
+  const _AccountTypeTab({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const primary = Color(0xFFf16936);
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          margin: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            color: selected ? primary : Colors.transparent,
+            borderRadius: BorderRadius.circular(7),
+            boxShadow: selected
+                ? [BoxShadow(color: primary.withValues(alpha: 0.25), blurRadius: 4, offset: const Offset(0, 2))]
+                : [],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 14, color: selected ? Colors.white : Colors.grey.shade500),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: selected ? Colors.white : Colors.grey.shade500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class EditUserDialog extends StatefulWidget {
   final UserModel currentUser;
@@ -755,7 +944,7 @@ class _EditUserDialogState extends State<EditUserDialog> {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 24, offset: const Offset(0, 8))],
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 24, offset: const Offset(0, 8))],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -767,7 +956,7 @@ class _EditUserDialogState extends State<EditUserDialog> {
                 children: [
                   Container(
                     padding: const EdgeInsets.all(7),
-                    decoration: BoxDecoration(color: primaryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                    decoration: BoxDecoration(color: primaryColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
                     child: const Icon(Icons.edit_outlined, color: primaryColor, size: 17),
                   ),
                   const SizedBox(width: 10),
@@ -914,8 +1103,62 @@ class _EditUserDialogState extends State<EditUserDialog> {
 // ============================================================================
 class ManagementScreen extends StatefulWidget {
   final UserModel currentUser;
+  /// Optional tab to select on first render.
+  /// Accepts a lowercase tab name (e.g. 'users', 'departments') or a numeric
+  /// index as a string (e.g. '2').  Used when the app is refreshed at a URL
+  /// like /management/users so the correct tab is restored.
+  final String? initialTab;
 
-  const ManagementScreen({super.key, required this.currentUser});
+  const ManagementScreen({super.key, required this.currentUser, this.initialTab});
+
+  /// Map a URL tab name / numeric string to a tab index for the given user type.
+  /// Returns null if the name is unrecognised.
+  static int? tabNameToIndex(UserType userType, String name) {
+    // Try numeric index first.
+    final asInt = int.tryParse(name);
+    if (asInt != null) return asInt;
+
+    final n = name.toLowerCase().replaceAll('-', '').replaceAll('_', '');
+
+    switch (userType) {
+      case UserType.systemAdmin:
+        const map = {
+          'departments': 0,
+          'places': 1,
+          'users': 2,
+          'branchadmins': 3,
+          'problemtitles': 4,
+          'parts': 5,
+          'complaintitems': 6,
+          'permissions': 7,
+          'autoapproval': 8,
+          'logs': 9,
+          'preferences': 10,
+          'aiinsights': 11,
+          'problemreports': 12,
+          'systemsettings': 13,
+        };
+        return map[n];
+      case UserType.superAdmin:
+        const map = {
+          'natureofwork': 0,
+          'problemtitles': 1,
+          'parts': 2,
+          'users': 3,
+          'reports': 4,
+          'autoassign': 5,
+          'preferences': 6,
+          'aiinsights': 7,
+          'aidashboard': 8,
+        };
+        return map[n];
+      case UserType.superUser:
+        const map = {'users': 0, 'preferences': 1};
+        return map[n];
+      default:
+        return 0; // only one tab (preferences)
+    }
+  }
 
   @override
   State<ManagementScreen> createState() => _ManagementScreenState();
@@ -936,10 +1179,32 @@ class _ManagementScreenState extends State<ManagementScreen>
       length: _getTabCount(),
       vsync: this,
     );
+
+    // Update the URL whenever the user switches management tabs so the active
+    // tab survives a page refresh (e.g. /management/2).
+    _tabController.addListener(_onTabChanged);
+
+    // Restore the tab from a deep-link URL (e.g. /management/users on refresh).
+    if (widget.initialTab != null) {
+      final idx = ManagementScreen.tabNameToIndex(
+          widget.currentUser.userType, widget.initialTab!);
+      if (idx != null && idx >= 0 && idx < _getTabCount()) {
+        // Jump after first frame so TabBar is rendered.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _tabController.animateTo(idx);
+        });
+      }
+    }
+  }
+
+  void _onTabChanged() {
+    // URL stays at /management — tab state is local. Deep-linking on initial
+    // load is handled via DeepLinkState.managementTab in initState.
   }
 
   @override
   void dispose() {
+    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _cachedTabs.clear();
     super.dispose();
@@ -1151,7 +1416,7 @@ class _ManagementScreenState extends State<ManagementScreen>
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.grey.withOpacity(0.1),
+                  color: Colors.grey.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
@@ -1175,33 +1440,39 @@ class _ManagementScreenState extends State<ManagementScreen>
     }
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.white,
         foregroundColor: AppColors.onBackground,
         elevation: 0,
+        shadowColor: Colors.black.withValues(alpha: 0.08),
         title: Text(
           l10n.management,
           style: const TextStyle(
             fontWeight: FontWeight.bold,
+            fontSize: 18,
           ),
         ),
         automaticallyImplyLeading: false,
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(50),
+          preferredSize: const Size.fromHeight(52),
           child: Column(
             children: [
               TabBar(
                 controller: _tabController,
                 tabs: _getTabs(),
                 isScrollable: true,
+                tabAlignment: TabAlignment.start,
                 labelColor: AppColors.primary,
-                unselectedLabelColor: Colors.grey[600],
+                unselectedLabelColor: Colors.grey[500],
                 indicatorColor: AppColors.primary,
-                indicatorWeight: 3,
+                indicatorWeight: 2.5,
+                dividerColor: Colors.transparent,
+                splashFactory: NoSplash.splashFactory,
+                overlayColor: WidgetStateProperty.all(Colors.transparent),
                 labelStyle: const TextStyle(
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w600,
                   fontSize: 13,
                 ),
                 unselectedLabelStyle: const TextStyle(
@@ -1212,7 +1483,7 @@ class _ManagementScreenState extends State<ManagementScreen>
               ),
               Container(
                 height: 1,
-                color: Colors.grey.withOpacity(0.1),
+                color: Colors.grey.withValues(alpha: 0.15),
               ),
             ],
           ),
@@ -1337,7 +1608,7 @@ class _DepartmentsManagementState extends State<DepartmentsManagement>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.1),
+                  color: AppColors.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(
@@ -1513,7 +1784,7 @@ class _DepartmentsManagementState extends State<DepartmentsManagement>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
+                  color: Colors.red.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Icon(
@@ -1668,7 +1939,7 @@ class _DepartmentsManagementState extends State<DepartmentsManagement>
             children: [
               Container(
                 padding: const EdgeInsets.all(7),
-                decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
                 child: const Icon(Icons.business, color: AppColors.primary, size: 18),
               ),
               const SizedBox(width: 10),
@@ -1716,7 +1987,7 @@ class _DepartmentsManagementState extends State<DepartmentsManagement>
                             Container(
                               padding: const EdgeInsets.all(24),
                               decoration: BoxDecoration(
-                                color: Colors.grey.withOpacity(0.1),
+                                color: Colors.grey.withValues(alpha: 0.1),
                                 shape: BoxShape.circle,
                               ),
                               child: const Icon(
@@ -1762,12 +2033,12 @@ class _DepartmentsManagementState extends State<DepartmentsManagement>
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
-                                color: Colors.grey.withOpacity(0.15),
+                                color: Colors.grey.withValues(alpha: 0.15),
                                 width: 1,
                               ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.03),
+                                  color: Colors.black.withValues(alpha: 0.03),
                                   blurRadius: 8,
                                   offset: const Offset(0, 0),
                                 ),
@@ -1780,8 +2051,8 @@ class _DepartmentsManagementState extends State<DepartmentsManagement>
                                 height: 36,
                                 decoration: BoxDecoration(
                                   color: dept.isActive
-                                      ? AppColors.primary.withOpacity(0.1)
-                                      : Colors.grey.withOpacity(0.1),
+                                      ? AppColors.primary.withValues(alpha: 0.1)
+                                      : Colors.grey.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Icon(
@@ -1842,8 +2113,8 @@ class _DepartmentsManagementState extends State<DepartmentsManagement>
                                     ),
                                     decoration: BoxDecoration(
                                       color: dept.isActive
-                                          ? Colors.green.withOpacity(0.1)
-                                          : Colors.grey.withOpacity(0.1),
+                                          ? Colors.green.withValues(alpha: 0.1)
+                                          : Colors.grey.withValues(alpha: 0.1),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Text(
@@ -1988,7 +2259,7 @@ class _PlacesManagementState extends State<PlacesManagement>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
+                  color: Colors.red.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Icon(Icons.block, color: Colors.red, size: 20),
@@ -2132,7 +2403,7 @@ class _PlacesManagementState extends State<PlacesManagement>
               Container(
                 padding: const EdgeInsets.all(7),
                 decoration: BoxDecoration(
-                  color: AppColors.secondary.withOpacity(0.1),
+                  color: AppColors.secondary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Icon(
@@ -2186,7 +2457,7 @@ class _PlacesManagementState extends State<PlacesManagement>
                             Container(
                               padding: const EdgeInsets.all(24),
                               decoration: BoxDecoration(
-                                color: Colors.grey.withOpacity(0.1),
+                                color: Colors.grey.withValues(alpha: 0.1),
                                 shape: BoxShape.circle,
                               ),
                               child: const Icon(
@@ -2232,12 +2503,12 @@ class _PlacesManagementState extends State<PlacesManagement>
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
-                                color: Colors.grey.withOpacity(0.15),
+                                color: Colors.grey.withValues(alpha: 0.15),
                                 width: 1,
                               ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.03),
+                                  color: Colors.black.withValues(alpha: 0.03),
                                   blurRadius: 8,
                                   offset: const Offset(0, 0),
                                 ),
@@ -2250,8 +2521,8 @@ class _PlacesManagementState extends State<PlacesManagement>
                                 height: 36,
                                 decoration: BoxDecoration(
                                   color: place.isActive
-                                      ? AppColors.secondary.withOpacity(0.1)
-                                      : Colors.grey.withOpacity(0.1),
+                                      ? AppColors.secondary.withValues(alpha: 0.1)
+                                      : Colors.grey.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Icon(
@@ -2309,7 +2580,7 @@ class _PlacesManagementState extends State<PlacesManagement>
                                         Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                           decoration: BoxDecoration(
-                                            color: place.isActive ? Colors.green.withOpacity(0.1) : Colors.grey.withOpacity(0.1),
+                                            color: place.isActive ? Colors.green.withValues(alpha: 0.1) : Colors.grey.withValues(alpha: 0.1),
                                             borderRadius: BorderRadius.circular(8),
                                           ),
                                           child: Text(
@@ -2472,7 +2743,7 @@ class _PlaceEditDialogState extends State<_PlaceEditDialog> {
       title: Row(children: [
         Container(
           padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(color: AppColors.secondary.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+          decoration: BoxDecoration(color: AppColors.secondary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
           child: Icon(isEditing ? Icons.edit : Icons.location_on, color: AppColors.secondary, size: 20),
         ),
         const SizedBox(width: 12),
@@ -2920,6 +3191,17 @@ class _UsersManagementState extends State<UsersManagement>
   String _searchQuery = '';
   String _filterType = 'active';
 
+  // ── Extra filters ──────────────────────────────────────────────────────────
+  List<Map<String, String>> _availablePlaces = [];
+  List<Map<String, String>> _availableDepts = [];
+  Set<String> _filterPlaceIds = {};
+  Set<String> _filterDeptIds = {};
+  String _filterLoginType = 'all'; // 'all' | 'phone' | 'email'
+
+  // ── Multi-select delete ───────────────────────────────────────────────────
+  bool _selectMode = false;
+  final Set<String> _selectedIds = {};
+
   @override
   bool get wantKeepAlive => true;
 
@@ -2927,10 +3209,36 @@ class _UsersManagementState extends State<UsersManagement>
   void initState() {
     super.initState();
     _loadUsers();
+    _loadFilterOptions();
+  }
+
+  Future<void> _loadFilterOptions() async {
+    try {
+      final results = await Future.wait([
+        supabase.from('places').select('id, name, name_en').order('name'),
+        supabase.from('departments').select('id, name, name_en').order('name'),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _availablePlaces = (results[0] as List)
+            .map<Map<String, String>>((r) => {
+                  'id': r['id'] as String,
+                  'name': (r['name_en'] as String? ?? r['name'] as String? ?? ''),
+                })
+            .toList();
+        _availableDepts = (results[1] as List)
+            .map<Map<String, String>>((r) => {
+                  'id': r['id'] as String,
+                  'name': (r['name_en'] as String? ?? r['name'] as String? ?? ''),
+                })
+            .toList();
+      });
+    } catch (_) {}
   }
 
   Future<void> _loadUsers() async {
     if (_isLoading) return;
+    if (!mounted) return;
 
     setState(() => _isLoading = true);
     try {
@@ -2986,7 +3294,18 @@ class _UsersManagementState extends State<UsersManagement>
           (_filterType == 'inactive' && !user.isActive) ||
           user.userType.value == _filterType;
 
-      return matchesSearch && matchesType;
+      final matchesPlace = _filterPlaceIds.isEmpty ||
+          (_filterPlaceIds.contains(user.placeId));
+
+      final matchesDept = _filterDeptIds.isEmpty ||
+          (_filterDeptIds.contains(user.departmentId));
+
+      final isPhoneUser = user.email.endsWith('@phone.user');
+      final matchesLoginType = _filterLoginType == 'all' ||
+          (_filterLoginType == 'phone' && isPhoneUser) ||
+          (_filterLoginType == 'email' && !isPhoneUser);
+
+      return matchesSearch && matchesType && matchesPlace && matchesDept && matchesLoginType;
     }).toList();
   }
 
@@ -3049,18 +3368,47 @@ class _UsersManagementState extends State<UsersManagement>
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.1),
+                color: Colors.red.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Icon(Icons.person_off_outlined, color: Colors.red, size: 20),
+              child: const Icon(Icons.delete_forever_outlined, color: Colors.red, size: 20),
             ),
             const SizedBox(width: 12),
-            Text(l10n.removeUser, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+            Text(l10n.removeUser,
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
           ],
         ),
-        content: Text(
-          '${l10n.confirmRemoveUser} "${user.fullName}"?\n\nThe account will remain in the database.',
-          style: const TextStyle(fontSize: 14),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${l10n.confirmRemoveUser} "${user.fullName}"?',
+              style: const TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline, color: Colors.orange, size: 16),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'If this user has tickets or records, they will be deactivated and hidden. Otherwise they will be permanently deleted.',
+                      style: TextStyle(fontSize: 12, color: Colors.orange),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
         actions: [
           OutlinedButton(
@@ -3086,17 +3434,201 @@ class _UsersManagementState extends State<UsersManagement>
         ],
       ),
     );
-    if (confirmed == true) {
-      try {
-        await supabase.from('users').update({
-          'is_deleted': true,
-          'is_active': false,
-        }).eq('id', user.id);
-        _loadUsers();
-        _showSuccess(l10n.userRemoved);
-      } catch (e) {
+
+    if (confirmed != true) return;
+
+    // Show loading indicator
+    if (mounted) setState(() => _isLoading = true);
+
+    try {
+      final response = await supabase.functions.invoke(
+        'delete-user-admin',
+        body: {'userId': user.id},
+        headers: {
+          'Authorization': 'Bearer ${supabase.auth.currentSession?.accessToken}',
+        },
+      );
+
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+
+      final data = response.data as Map<String, dynamic>?;
+      if (data == null || data['success'] != true) {
+        _showError(data?['message'] ?? l10n.failedToUpdateUserStatus);
+        return;
+      }
+
+      _loadUsers();
+
+      final action = data['action'];
+      if (action == 'deleted') {
+        _showSuccess('User "${user.fullName}" permanently deleted');
+      } else {
+        _showSuccess('User "${user.fullName}" deactivated and hidden');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
         _showError(l10n.failedToUpdateUserStatus);
       }
+    }
+  }
+
+  Future<void> _deleteSelectedBulk() async {
+    if (_selectedIds.isEmpty) return;
+    final count = _selectedIds.length;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.delete_forever, color: Colors.red, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Text('${AppLocalizations.safeOf(context).delete} $count ${AppLocalizations.safeOf(context).users}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('You are about to delete $count selected user${count > 1 ? 's' : ''}.'),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline, color: Colors.orange, size: 16),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Users with tickets or records will be deactivated and hidden. Users with no records will be permanently deleted.',
+                      style: TextStyle(fontSize: 12, color: Colors.orange),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          OutlinedButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.grey[700],
+              side: BorderSide(color: Colors.grey.shade300),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            ),
+            child: Text(AppLocalizations.safeOf(context).cancel),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.delete_forever, size: 16),
+            label: Text('${AppLocalizations.safeOf(context).delete} $count'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    // Progress dialog
+    int done = 0;
+    int deleted = 0;
+    int deactivated = 0;
+    int failed = 0;
+    final ids = List<String>.from(_selectedIds);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => PopScope(
+          canPop: false,
+          child: AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Text('Deleting users…', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            content: StatefulBuilder(
+              builder: (_, ss) => Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(
+                      value: ids.isEmpty ? 0 : done / ids.length,
+                      minHeight: 8,
+                      backgroundColor: Colors.grey[200],
+                      color: Colors.red,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text('$done / ${ids.length}', style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    for (final id in ids) {
+      try {
+        final res = await supabase.functions.invoke(
+          'delete-user-admin',
+          body: {'userId': id},
+          headers: {'Authorization': 'Bearer ${supabase.auth.currentSession?.accessToken}'},
+        );
+        final data = res.data as Map<String, dynamic>?;
+        if (data?['success'] == true) {
+          if (data?['action'] == 'deleted') deleted++; else deactivated++;
+        } else {
+          failed++;
+        }
+      } catch (_) {
+        failed++;
+      }
+      done++;
+    }
+
+    if (mounted) Navigator.of(context, rootNavigator: true).pop(); // close progress
+
+    setState(() {
+      _selectMode = false;
+      _selectedIds.clear();
+    });
+    await _loadUsers();
+
+    if (mounted) {
+      final parts = <String>[];
+      if (deleted > 0) parts.add('$deleted permanently deleted');
+      if (deactivated > 0) parts.add('$deactivated deactivated');
+      if (failed > 0) parts.add('$failed failed');
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(parts.join(' · ')),
+        backgroundColor: failed > 0 ? Colors.orange : Colors.green,
+        behavior: SnackBarBehavior.floating,
+      ));
     }
   }
 
@@ -3111,6 +3643,133 @@ class _UsersManagementState extends State<UsersManagement>
       _showSuccess(l10n.userRestored);
     } catch (e) {
       _showError(l10n.failedToUpdateUserStatus);
+    }
+  }
+
+  void _resetUserPassword(UserModel user) async {
+    final l10n = AppLocalizations.safeOf(context);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l10n.resetToDefaultPassword),
+        content: Text(
+          'Reset password for "${user.fullName}" to firstname + 6 random digits?\nThe new password will be shown so you can share it with the user.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(l10n.cancel),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.deepPurple,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(l10n.resetToDefaultPassword),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final response = await supabase.functions.invoke(
+        'reset-user-password',
+        body: {'userId': user.id},
+      );
+
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+
+      final data = response.data as Map<String, dynamic>?;
+      if (data == null || data['success'] != true) {
+        _showError(data?['message'] ?? 'Failed to reset password');
+        return;
+      }
+
+      final generatedPassword = data['generated_password'] as String;
+
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.green),
+              const SizedBox(width: 8),
+              Text(l10n.passwordResetSuccess),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(l10n.newDefaultPassword),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        generatedPassword,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'monospace',
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.copy_rounded),
+                      tooltip: l10n.copyPassword,
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: generatedPassword));
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(l10n.passwordCopied),
+                              behavior: SnackBarBehavior.floating,
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Share this password with ${user.fullName}.',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(l10n.close),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        _showError('Failed to reset password: $e');
+      }
     }
   }
 
@@ -3191,7 +3850,7 @@ class _UsersManagementState extends State<UsersManagement>
           padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
           decoration: BoxDecoration(
             color: Colors.white,
-            border: Border(bottom: BorderSide(color: Colors.grey.withOpacity(0.12))),
+            border: Border(bottom: BorderSide(color: Colors.grey.withValues(alpha: 0.12))),
           ),
           child: Column(
             children: [
@@ -3200,7 +3859,7 @@ class _UsersManagementState extends State<UsersManagement>
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: AppColors.primary.withOpacity(0.1),
+                      color: AppColors.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: const Icon(Icons.people, color: AppColors.primary, size: 20),
@@ -3221,7 +3880,80 @@ class _UsersManagementState extends State<UsersManagement>
                       ],
                     ),
                   ),
-                  if (_canCreateUsers())
+                  if (_selectMode) ...[
+                    OutlinedButton(
+                      onPressed: () => setState(() { _selectMode = false; _selectedIds.clear(); }),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.grey[700],
+                        side: BorderSide(color: Colors.grey.shade300),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      ),
+                      child: Text(l10n.cancel, style: const TextStyle(fontSize: 13)),
+                    ),
+                    const SizedBox(width: 8),
+                    Builder(builder: (_) {
+                      final selectable = _filteredUsers
+                          .where((u) => _canEditUser(u) && !u.isDeleted)
+                          .map((u) => u.id)
+                          .toSet();
+                      final allSelected = selectable.isNotEmpty && selectable.every(_selectedIds.contains);
+                      return TextButton(
+                        onPressed: selectable.isEmpty ? null : () => setState(() {
+                          if (allSelected) {
+                            _selectedIds.removeAll(selectable);
+                          } else {
+                            _selectedIds.addAll(selectable);
+                          }
+                        }),
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppColors.primary,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                        ),
+                        child: Text(
+                          allSelected ? l10n.deselectAll : l10n.selectAll,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      );
+                    }),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      onPressed: _selectedIds.isEmpty ? null : _deleteSelectedBulk,
+                      icon: const Icon(Icons.delete_forever, size: 16),
+                      label: Text(
+                        _selectedIds.isEmpty ? l10n.delete : '${l10n.delete} ${_selectedIds.length}',
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: Colors.red.withValues(alpha: 0.4),
+                        disabledForegroundColor: Colors.white70,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      ),
+                    ),
+                  ] else if (_canCreateUsers()) ...[
+                    ElevatedButton.icon(
+                      onPressed: () => showDialog(
+                        context: context,
+                        builder: (_) => BulkImportUsersDialog(
+                          currentUser: widget.currentUser,
+                          onUsersImported: _loadUsers,
+                        ),
+                      ),
+                      icon: const Icon(Icons.upload_file_rounded, size: 16),
+                      label: Text(l10n.importUsers, style: const TextStyle(fontSize: 13)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.secondary,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     ElevatedButton.icon(
                       onPressed: _showCreateUserDialog,
                       icon: const Icon(Icons.add, size: 16),
@@ -3234,6 +3966,19 @@ class _UsersManagementState extends State<UsersManagement>
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: () => setState(() { _selectMode = true; _selectedIds.clear(); }),
+                      icon: const Icon(Icons.checklist_rounded, size: 16),
+                      label: Text(l10n.selectUsers, style: const TextStyle(fontSize: 13)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.primary,
+                        side: const BorderSide(color: AppColors.primary),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      ),
+                    ),
+                  ],
                 ],
               ),
               const SizedBox(height: 10),
@@ -3253,11 +3998,11 @@ class _UsersManagementState extends State<UsersManagement>
                         isDense: true,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
-                          borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                          borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.3)),
                         ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
-                          borderSide: BorderSide(color: Colors.grey.withOpacity(0.25)),
+                          borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.25)),
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
@@ -3276,11 +4021,11 @@ class _UsersManagementState extends State<UsersManagement>
                         isDense: true,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
-                          borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                          borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.3)),
                         ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
-                          borderSide: BorderSide(color: Colors.grey.withOpacity(0.25)),
+                          borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.25)),
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
@@ -3299,6 +4044,64 @@ class _UsersManagementState extends State<UsersManagement>
                       onChanged: (value) {
                         if (value != null) setState(() { _filterType = value; _applyFilters(); });
                       },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              // ── Second filter row ─────────────────────────────────────────
+              Row(
+                children: [
+                  // Place multi-select
+                  Expanded(
+                    child: _MultiSelectFilterButton(
+                      label: l10n.allPlaces,
+                      icon: Icons.location_on_outlined,
+                      options: _availablePlaces,
+                      selectedIds: _filterPlaceIds,
+                      onChanged: (ids) => setState(() { _filterPlaceIds = ids; _applyFilters(); }),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Department multi-select
+                  Expanded(
+                    child: _MultiSelectFilterButton(
+                      label: l10n.allDepartments,
+                      icon: Icons.business_outlined,
+                      options: _availableDepts,
+                      selectedIds: _filterDeptIds,
+                      onChanged: (ids) => setState(() { _filterDeptIds = ids; _applyFilters(); }),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Login type dropdown
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      value: _filterLoginType,
+                      isDense: true,
+                      decoration: InputDecoration(
+                        isDense: true,
+                        prefixIcon: const Icon(Icons.login_outlined, size: 16),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.3)),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.25)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(color: AppColors.primary),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      ),
+                      items: [
+                        DropdownMenuItem(value: 'all', child: Text(l10n.loginType, style: const TextStyle(fontSize: 13))),
+                        DropdownMenuItem(value: 'email', child: Text(l10n.emailLogin, style: const TextStyle(fontSize: 13))),
+                        DropdownMenuItem(value: 'phone', child: Text(l10n.phoneLogin, style: const TextStyle(fontSize: 13))),
+                      ],
+                      onChanged: (v) => setState(() { _filterLoginType = v ?? 'all'; _applyFilters(); }),
                     ),
                   ),
                 ],
@@ -3338,34 +4141,59 @@ class _UsersManagementState extends State<UsersManagement>
                         final user = _filteredUsers[index];
                         final typeColor = _getUserTypeColor(user.userType);
                         final isInactive = !user.isActive;
+                        final isSelectable = _selectMode && _canEditUser(user) && !user.isDeleted;
+                        final isSelected = _selectedIds.contains(user.id);
 
-                        return Container(
+                        return GestureDetector(
+                          onTap: isSelectable ? () => setState(() {
+                            if (isSelected) _selectedIds.remove(user.id);
+                            else _selectedIds.add(user.id);
+                          }) : null,
+                          child: Container(
                           margin: const EdgeInsets.only(bottom: 8),
                           decoration: BoxDecoration(
-                            color: isInactive ? Colors.grey.shade50 : Colors.white,
+                            color: isSelected
+                                ? AppColors.primary.withValues(alpha: 0.06)
+                                : isInactive ? Colors.grey.shade50 : Colors.white,
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
-                              color: isInactive
-                                  ? Colors.grey.withOpacity(0.15)
-                                  : Colors.grey.withOpacity(0.12),
+                              color: isSelected
+                                  ? AppColors.primary.withValues(alpha: 0.4)
+                                  : isInactive
+                                      ? Colors.grey.withValues(alpha: 0.15)
+                                      : Colors.grey.withValues(alpha: 0.12),
                             ),
-                            boxShadow: isInactive
+                            boxShadow: isInactive || isSelected
                                 ? null
-                                : [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 6, offset: const Offset(0, 2))],
+                                : [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 6, offset: const Offset(0, 2))],
                           ),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                             child: Row(
                               children: [
+                                if (_selectMode) ...[
+                                  Checkbox(
+                                    value: isSelected,
+                                    onChanged: isSelectable ? (v) => setState(() {
+                                      if (v == true) _selectedIds.add(user.id);
+                                      else _selectedIds.remove(user.id);
+                                    }) : null,
+                                    activeColor: AppColors.primary,
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                  const SizedBox(width: 4),
+                                ],
                                 // Avatar
                                 Container(
                                   width: 42,
                                   height: 42,
                                   decoration: BoxDecoration(
-                                    color: isInactive ? Colors.grey.withOpacity(0.1) : typeColor.withOpacity(0.1),
+                                    color: isInactive ? Colors.grey.withValues(alpha: 0.1) : typeColor.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(10),
                                     border: Border.all(
-                                      color: isInactive ? Colors.grey.withOpacity(0.2) : typeColor.withOpacity(0.25),
+                                      color: isInactive ? Colors.grey.withValues(alpha: 0.2) : typeColor.withValues(alpha: 0.25),
                                       width: 1.5,
                                     ),
                                   ),
@@ -3417,7 +4245,7 @@ class _UsersManagementState extends State<UsersManagement>
                                           Container(
                                             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                                             decoration: BoxDecoration(
-                                              color: isInactive ? Colors.grey.withOpacity(0.08) : typeColor.withOpacity(0.1),
+                                              color: isInactive ? Colors.grey.withValues(alpha: 0.08) : typeColor.withValues(alpha: 0.1),
                                               borderRadius: BorderRadius.circular(5),
                                             ),
                                             child: Text(
@@ -3434,7 +4262,7 @@ class _UsersManagementState extends State<UsersManagement>
                                           Container(
                                             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                                             decoration: BoxDecoration(
-                                              color: user.isActive ? Colors.green.withOpacity(0.08) : Colors.red.withOpacity(0.08),
+                                              color: user.isActive ? Colors.green.withValues(alpha: 0.08) : Colors.red.withValues(alpha: 0.08),
                                               borderRadius: BorderRadius.circular(5),
                                             ),
                                             child: Text(
@@ -3453,7 +4281,7 @@ class _UsersManagementState extends State<UsersManagement>
                                 ),
                                 const SizedBox(width: 6),
                                 // Actions
-                                Row(
+                                if (!_selectMode) Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     if (_canEditUser(user))
@@ -3464,6 +4292,13 @@ class _UsersManagementState extends State<UsersManagement>
                                         onTap: () => _showEditUserDialog(user),
                                       ),
                                     if (_canEditUser(user) && !user.isDeleted) ...[
+                                      const SizedBox(width: 4),
+                                      _ActionIconButton(
+                                        icon: Icons.lock_reset_outlined,
+                                        color: Colors.deepPurple,
+                                        tooltip: l10n.resetToDefaultPassword,
+                                        onTap: () => _resetUserPassword(user),
+                                      ),
                                       const SizedBox(width: 4),
                                       _ActionIconButton(
                                         icon: user.isActive
@@ -3498,6 +4333,7 @@ class _UsersManagementState extends State<UsersManagement>
                               ],
                             ),
                           ),
+                        ),
                         );
                       },
                     ),
@@ -3530,10 +4366,133 @@ class _ActionIconButton extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(7),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.08),
+            color: color.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(icon, color: color, size: 18),
+        ),
+      ),
+    );
+  }
+}
+
+class _MultiSelectFilterButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final List<Map<String, String>> options;
+  final Set<String> selectedIds;
+  final ValueChanged<Set<String>> onChanged;
+
+  const _MultiSelectFilterButton({
+    required this.label,
+    required this.icon,
+    required this.options,
+    required this.selectedIds,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasSelection = selectedIds.isNotEmpty;
+    return GestureDetector(
+      onTap: () => _showPicker(context),
+      child: Container(
+        height: 42,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: hasSelection ? AppColors.primary.withValues(alpha: 0.06) : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: hasSelection
+                ? AppColors.primary.withValues(alpha: 0.5)
+                : Colors.grey.withValues(alpha: 0.25),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: hasSelection ? AppColors.primary : Colors.grey[500]),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                hasSelection ? '$label (${selectedIds.length})' : label,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: hasSelection ? AppColors.primary : Colors.grey[600],
+                  overflow: TextOverflow.ellipsis,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (hasSelection)
+              GestureDetector(
+                onTap: () => onChanged({}),
+                child: Icon(Icons.close, size: 14, color: AppColors.primary),
+              )
+            else
+              Icon(Icons.arrow_drop_down, size: 18, color: Colors.grey[500]),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showPicker(BuildContext context) {
+    if (options.isEmpty) return;
+    final temp = Set<String>.from(selectedIds);
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          contentPadding: const EdgeInsets.fromLTRB(0, 16, 0, 0),
+          title: Row(
+            children: [
+              Icon(icon, size: 18, color: AppColors.primary),
+              const SizedBox(width: 8),
+              Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const Spacer(),
+              if (temp.isNotEmpty)
+                TextButton(
+                  onPressed: () => setS(() => temp.clear()),
+                  child: Text(AppLocalizations.safeOf(ctx).clearAll, style: const TextStyle(fontSize: 12)),
+                ),
+            ],
+          ),
+          content: SizedBox(
+            width: 280,
+            child: ListView(
+              shrinkWrap: true,
+              children: options.map((opt) {
+                final id = opt['id']!;
+                final name = opt['name']!;
+                return CheckboxListTile(
+                  value: temp.contains(id),
+                  onChanged: (v) => setS(() {
+                    if (v == true) temp.add(id); else temp.remove(id);
+                  }),
+                  title: Text(name, style: const TextStyle(fontSize: 13)),
+                  dense: true,
+                  activeColor: AppColors.primary,
+                  controlAffinity: ListTileControlAffinity.leading,
+                );
+              }).toList(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(AppLocalizations.safeOf(ctx).cancel),
+            ),
+            ElevatedButton(
+              onPressed: () { onChanged(Set.from(temp)); Navigator.pop(ctx); },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: Text(AppLocalizations.safeOf(ctx).save),
+            ),
+          ],
         ),
       ),
     );
@@ -3585,7 +4544,7 @@ class _ProblemTitlesManagementState extends State<ProblemTitlesManagement>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.1),
+                  color: Colors.blue.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Icon(Icons.edit, color: Colors.blue, size: 20),
@@ -3696,7 +4655,7 @@ class _ProblemTitlesManagementState extends State<ProblemTitlesManagement>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
+                  color: Colors.red.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Icon(Icons.delete, color: Colors.red, size: 20),
@@ -3721,7 +4680,7 @@ class _ProblemTitlesManagementState extends State<ProblemTitlesManagement>
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.grey.withOpacity(0.1),
+                  color: Colors.grey.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
@@ -3888,7 +4847,7 @@ class _ProblemTitlesManagementState extends State<ProblemTitlesManagement>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.1),
+                  color: Colors.blue.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Icon(Icons.title, color: Colors.blue, size: 20),
@@ -4024,7 +4983,7 @@ class _ProblemTitlesManagementState extends State<ProblemTitlesManagement>
                   Container(
                     padding: const EdgeInsets.all(7),
                     decoration: BoxDecoration(
-                      color: Colors.blue.withOpacity(0.1),
+                      color: Colors.blue.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Icon(
@@ -4068,11 +5027,11 @@ class _ProblemTitlesManagementState extends State<ProblemTitlesManagement>
                   prefixIcon: const Icon(Icons.search, size: 20),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                    borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.3)),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                    borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.3)),
                   ),
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 16,
@@ -4103,7 +5062,7 @@ class _ProblemTitlesManagementState extends State<ProblemTitlesManagement>
                             Container(
                               padding: const EdgeInsets.all(24),
                               decoration: BoxDecoration(
-                                color: Colors.grey.withOpacity(0.1),
+                                color: Colors.grey.withValues(alpha: 0.1),
                                 shape: BoxShape.circle,
                               ),
                               child: const Icon(
@@ -4156,12 +5115,12 @@ class _ProblemTitlesManagementState extends State<ProblemTitlesManagement>
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
-                                color: Colors.grey.withOpacity(0.15),
+                                color: Colors.grey.withValues(alpha: 0.15),
                                 width: 1,
                               ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.03),
+                                  color: Colors.black.withValues(alpha: 0.03),
                                   blurRadius: 8,
                                   offset: const Offset(0, 0),
                                 ),
@@ -4173,7 +5132,7 @@ class _ProblemTitlesManagementState extends State<ProblemTitlesManagement>
                                 width: 36,
                                 height: 36,
                                 decoration: BoxDecoration(
-                                  color: Colors.blue.withOpacity(0.1),
+                                  color: Colors.blue.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: const Icon(
@@ -4212,7 +5171,7 @@ class _ProblemTitlesManagementState extends State<ProblemTitlesManagement>
                                     ),
                                     decoration: BoxDecoration(
                                       color:
-                                          AppColors.secondary.withOpacity(0.1),
+                                          AppColors.secondary.withValues(alpha: 0.1),
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Text(
@@ -4297,7 +5256,7 @@ class _PartsManagementState extends State<PartsManagement>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.1),
+                  color: Colors.orange.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Icon(Icons.edit, color: Colors.orange, size: 20),
@@ -4424,7 +5383,7 @@ class _PartsManagementState extends State<PartsManagement>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
+                  color: Colors.red.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Icon(Icons.delete, color: Colors.red, size: 20),
@@ -4449,7 +5408,7 @@ class _PartsManagementState extends State<PartsManagement>
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.grey.withOpacity(0.1),
+                  color: Colors.grey.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Column(
@@ -4629,7 +5588,7 @@ class _PartsManagementState extends State<PartsManagement>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.1),
+                  color: Colors.orange.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Icon(Icons.build, color: Colors.orange, size: 20),
@@ -4783,7 +5742,7 @@ class _PartsManagementState extends State<PartsManagement>
                   Container(
                     padding: const EdgeInsets.all(7),
                     decoration: BoxDecoration(
-                      color: Colors.orange.withOpacity(0.1),
+                      color: Colors.orange.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Icon(
@@ -4827,11 +5786,11 @@ class _PartsManagementState extends State<PartsManagement>
                   prefixIcon: const Icon(Icons.search, size: 20),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                    borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.3)),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                    borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.3)),
                   ),
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 16,
@@ -4862,7 +5821,7 @@ class _PartsManagementState extends State<PartsManagement>
                             Container(
                               padding: const EdgeInsets.all(24),
                               decoration: BoxDecoration(
-                                color: Colors.grey.withOpacity(0.1),
+                                color: Colors.grey.withValues(alpha: 0.1),
                                 shape: BoxShape.circle,
                               ),
                               child: const Icon(
@@ -4915,12 +5874,12 @@ class _PartsManagementState extends State<PartsManagement>
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
-                                color: Colors.grey.withOpacity(0.15),
+                                color: Colors.grey.withValues(alpha: 0.15),
                                 width: 1,
                               ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.03),
+                                  color: Colors.black.withValues(alpha: 0.03),
                                   blurRadius: 8,
                                   offset: const Offset(0, 0),
                                 ),
@@ -4932,7 +5891,7 @@ class _PartsManagementState extends State<PartsManagement>
                                 width: 36,
                                 height: 36,
                                 decoration: BoxDecoration(
-                                  color: Colors.orange.withOpacity(0.1),
+                                  color: Colors.orange.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: const Icon(
@@ -4987,7 +5946,7 @@ class _PartsManagementState extends State<PartsManagement>
                                     ),
                                     decoration: BoxDecoration(
                                       color:
-                                          AppColors.secondary.withOpacity(0.1),
+                                          AppColors.secondary.withValues(alpha: 0.1),
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Text(
@@ -5072,7 +6031,7 @@ class _NatureOfWorkManagementState extends State<NatureOfWorkManagement>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.teal.withOpacity(0.1),
+                  color: Colors.teal.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Icon(Icons.edit, color: Colors.teal, size: 20),
@@ -5207,7 +6166,7 @@ class _NatureOfWorkManagementState extends State<NatureOfWorkManagement>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
+                  color: Colors.red.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Icon(Icons.delete, color: Colors.red, size: 20),
@@ -5232,7 +6191,7 @@ class _NatureOfWorkManagementState extends State<NatureOfWorkManagement>
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.grey.withOpacity(0.1),
+                  color: Colors.grey.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
@@ -5401,7 +6360,7 @@ class _NatureOfWorkManagementState extends State<NatureOfWorkManagement>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.teal.withOpacity(0.1),
+                  color: Colors.teal.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Icon(Icons.work, color: Colors.teal, size: 20),
@@ -5592,7 +6551,7 @@ class _NatureOfWorkManagementState extends State<NatureOfWorkManagement>
                   Container(
                     padding: const EdgeInsets.all(7),
                     decoration: BoxDecoration(
-                      color: Colors.teal.withOpacity(0.1),
+                      color: Colors.teal.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Icon(
@@ -5635,11 +6594,11 @@ class _NatureOfWorkManagementState extends State<NatureOfWorkManagement>
                   prefixIcon: const Icon(Icons.search, size: 20),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                    borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.3)),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                    borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.3)),
                   ),
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 16,
@@ -5661,7 +6620,7 @@ class _NatureOfWorkManagementState extends State<NatureOfWorkManagement>
                           Container(
                             padding: const EdgeInsets.all(24),
                             decoration: BoxDecoration(
-                              color: Colors.grey.withOpacity(0.1),
+                              color: Colors.grey.withValues(alpha: 0.1),
                               shape: BoxShape.circle,
                             ),
                             child: const Icon(
@@ -5706,12 +6665,12 @@ class _NatureOfWorkManagementState extends State<NatureOfWorkManagement>
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
-                                color: Colors.grey.withOpacity(0.15),
+                                color: Colors.grey.withValues(alpha: 0.15),
                                 width: 1,
                               ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.03),
+                                  color: Colors.black.withValues(alpha: 0.03),
                                   blurRadius: 8,
                                   offset: const Offset(0, 0),
                                 ),
@@ -5724,8 +6683,8 @@ class _NatureOfWorkManagementState extends State<NatureOfWorkManagement>
                                 height: 36,
                                 decoration: BoxDecoration(
                                   color: item.isActive
-                                      ? Colors.teal.withOpacity(0.1)
-                                      : Colors.grey.withOpacity(0.1),
+                                      ? Colors.teal.withValues(alpha: 0.1)
+                                      : Colors.grey.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Icon(
@@ -5767,8 +6726,8 @@ class _NatureOfWorkManagementState extends State<NatureOfWorkManagement>
                                     ),
                                     decoration: BoxDecoration(
                                       color: item.isActive
-                                          ? Colors.green.withOpacity(0.1)
-                                          : Colors.grey.withOpacity(0.1),
+                                          ? Colors.green.withValues(alpha: 0.1)
+                                          : Colors.grey.withValues(alpha: 0.1),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Text(
@@ -5861,7 +6820,7 @@ class _ComplaintItemsManagementState extends State<ComplaintItemsManagement>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.purple.withOpacity(0.1),
+                  color: Colors.purple.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Icon(Icons.edit, color: Colors.purple, size: 20),
@@ -5962,7 +6921,7 @@ class _ComplaintItemsManagementState extends State<ComplaintItemsManagement>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
+                  color: Colors.red.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Icon(Icons.delete, color: Colors.red, size: 20),
@@ -5987,7 +6946,7 @@ class _ComplaintItemsManagementState extends State<ComplaintItemsManagement>
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.grey.withOpacity(0.1),
+                  color: Colors.grey.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
@@ -6141,7 +7100,7 @@ class _ComplaintItemsManagementState extends State<ComplaintItemsManagement>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.purple.withOpacity(0.1),
+                  color: Colors.purple.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child:
@@ -6292,7 +7251,7 @@ class _ComplaintItemsManagementState extends State<ComplaintItemsManagement>
                   Container(
                     padding: const EdgeInsets.all(7),
                     decoration: BoxDecoration(
-                      color: Colors.purple.withOpacity(0.1),
+                      color: Colors.purple.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Icon(
@@ -6335,11 +7294,11 @@ class _ComplaintItemsManagementState extends State<ComplaintItemsManagement>
                   prefixIcon: const Icon(Icons.search, size: 20),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                    borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.3)),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                    borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.3)),
                   ),
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 16,
@@ -6361,7 +7320,7 @@ class _ComplaintItemsManagementState extends State<ComplaintItemsManagement>
                           Container(
                             padding: const EdgeInsets.all(24),
                             decoration: BoxDecoration(
-                              color: Colors.grey.withOpacity(0.1),
+                              color: Colors.grey.withValues(alpha: 0.1),
                               shape: BoxShape.circle,
                             ),
                             child: const Icon(
@@ -6407,12 +7366,12 @@ class _ComplaintItemsManagementState extends State<ComplaintItemsManagement>
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
-                                color: Colors.grey.withOpacity(0.15),
+                                color: Colors.grey.withValues(alpha: 0.15),
                                 width: 1,
                               ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.03),
+                                  color: Colors.black.withValues(alpha: 0.03),
                                   blurRadius: 8,
                                   offset: const Offset(0, 0),
                                 ),
@@ -6425,8 +7384,8 @@ class _ComplaintItemsManagementState extends State<ComplaintItemsManagement>
                                 height: 36,
                                 decoration: BoxDecoration(
                                   color: isActive
-                                      ? Colors.purple.withOpacity(0.1)
-                                      : Colors.grey.withOpacity(0.1),
+                                      ? Colors.purple.withValues(alpha: 0.1)
+                                      : Colors.grey.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Icon(
@@ -6467,8 +7426,8 @@ class _ComplaintItemsManagementState extends State<ComplaintItemsManagement>
                                     ),
                                     decoration: BoxDecoration(
                                       color: isActive
-                                          ? Colors.green.withOpacity(0.1)
-                                          : Colors.grey.withOpacity(0.1),
+                                          ? Colors.green.withValues(alpha: 0.1)
+                                          : Colors.grey.withValues(alpha: 0.1),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Text(
@@ -6647,7 +7606,7 @@ class _DepartmentComplaintPermissionsState
                   Container(
                     padding: const EdgeInsets.all(7),
                     decoration: BoxDecoration(
-                      color: Colors.indigo.withOpacity(0.1),
+                      color: Colors.indigo.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Icon(
@@ -6672,10 +7631,10 @@ class _DepartmentComplaintPermissionsState
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.05),
+                  color: Colors.blue.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: Colors.blue.withOpacity(0.1),
+                    color: Colors.blue.withValues(alpha: 0.1),
                     width: 1,
                   ),
                 ),
@@ -6684,7 +7643,7 @@ class _DepartmentComplaintPermissionsState
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: Colors.blue.withOpacity(0.1),
+                        color: Colors.blue.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: const Icon(
@@ -6714,11 +7673,11 @@ class _DepartmentComplaintPermissionsState
                   prefixIcon: const Icon(Icons.search, size: 20),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                    borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.3)),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                    borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.3)),
                   ),
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 16,
@@ -6742,7 +7701,7 @@ class _DepartmentComplaintPermissionsState
                           Container(
                             padding: const EdgeInsets.all(24),
                             decoration: BoxDecoration(
-                              color: Colors.grey.withOpacity(0.1),
+                              color: Colors.grey.withValues(alpha: 0.1),
                               shape: BoxShape.circle,
                             ),
                             child: const Icon(
@@ -6780,13 +7739,13 @@ class _DepartmentComplaintPermissionsState
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
                               color: hasAccess
-                                  ? Colors.green.withOpacity(0.3)
-                                  : Colors.grey.withOpacity(0.15),
+                                  ? Colors.green.withValues(alpha: 0.3)
+                                  : Colors.grey.withValues(alpha: 0.15),
                               width: 1,
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.03),
+                                color: Colors.black.withValues(alpha: 0.03),
                                 blurRadius: 8,
                                 offset: const Offset(0, 0),
                               ),
@@ -6799,8 +7758,8 @@ class _DepartmentComplaintPermissionsState
                               height: 36,
                               decoration: BoxDecoration(
                                 color: hasAccess
-                                    ? Colors.green.withOpacity(0.1)
-                                    : Colors.grey.withOpacity(0.1),
+                                    ? Colors.green.withValues(alpha: 0.1)
+                                    : Colors.grey.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Icon(
@@ -7007,7 +7966,7 @@ class _AutoApprovalSettingsWidgetState extends State<AutoApprovalSettingsWidget>
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.1),
+                color: Colors.blue.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Icon(Icons.schedule, color: Colors.blue, size: 20),
@@ -7038,7 +7997,7 @@ class _AutoApprovalSettingsWidgetState extends State<AutoApprovalSettingsWidget>
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.05),
+                color: Colors.blue.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
@@ -7181,12 +8140,12 @@ class _AutoApprovalSettingsWidgetState extends State<AutoApprovalSettingsWidget>
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: Colors.grey.withOpacity(0.15),
+            color: Colors.grey.withValues(alpha: 0.15),
             width: 1,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.03),
+              color: Colors.black.withValues(alpha: 0.03),
               blurRadius: 8,
               offset: const Offset(0, 0),
             ),
@@ -7201,7 +8160,7 @@ class _AutoApprovalSettingsWidgetState extends State<AutoApprovalSettingsWidget>
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.blue.withOpacity(0.1),
+                    color: Colors.blue.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child:
@@ -7228,7 +8187,7 @@ class _AutoApprovalSettingsWidgetState extends State<AutoApprovalSettingsWidget>
             const SizedBox(height: 20),
             Container(
               height: 1,
-              color: Colors.grey.withOpacity(0.1),
+              color: Colors.grey.withValues(alpha: 0.1),
             ),
             const SizedBox(height: 20),
             if (_isLoading)
@@ -7242,10 +8201,10 @@ class _AutoApprovalSettingsWidgetState extends State<AutoApprovalSettingsWidget>
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.05),
+                  color: Colors.blue.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: Colors.blue.withOpacity(0.1),
+                    color: Colors.blue.withValues(alpha: 0.1),
                     width: 1,
                   ),
                 ),
@@ -7254,7 +8213,7 @@ class _AutoApprovalSettingsWidgetState extends State<AutoApprovalSettingsWidget>
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.blue.withOpacity(0.1),
+                        color: Colors.blue.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child:
@@ -7286,7 +8245,7 @@ class _AutoApprovalSettingsWidgetState extends State<AutoApprovalSettingsWidget>
                     ),
                     Container(
                       decoration: BoxDecoration(
-                        color: Colors.blue.withOpacity(0.1),
+                        color: Colors.blue.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: IconButton(
@@ -7304,10 +8263,10 @@ class _AutoApprovalSettingsWidgetState extends State<AutoApprovalSettingsWidget>
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.orange.withOpacity(0.05),
+                    color: Colors.orange.withValues(alpha: 0.05),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: Colors.orange.withOpacity(0.3),
+                      color: Colors.orange.withValues(alpha: 0.3),
                       width: 1,
                     ),
                   ),
@@ -7316,7 +8275,7 @@ class _AutoApprovalSettingsWidgetState extends State<AutoApprovalSettingsWidget>
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: Colors.orange.withOpacity(0.1),
+                          color: Colors.orange.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: const Icon(Icons.warning,
@@ -7356,7 +8315,7 @@ class _AutoApprovalSettingsWidgetState extends State<AutoApprovalSettingsWidget>
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.05),
+                  color: Colors.blue.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Column(
@@ -7575,7 +8534,7 @@ class _AutoAssignmentSettingsWidgetState
         Container(
           decoration: BoxDecoration(
             border: Border.all(
-              color: Colors.grey.withOpacity(0.3),
+              color: Colors.grey.withValues(alpha: 0.3),
               width: 1,
             ),
             borderRadius: BorderRadius.circular(12),
@@ -7641,10 +8600,10 @@ class _AutoAssignmentSettingsWidgetState
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.indigo.withOpacity(0.05),
+              color: Colors.indigo.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                color: Colors.indigo.withOpacity(0.2),
+                color: Colors.indigo.withValues(alpha: 0.2),
                 width: 1,
               ),
             ),
@@ -7654,7 +8613,7 @@ class _AutoAssignmentSettingsWidgetState
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: Colors.indigo.withOpacity(0.1),
+                    color: Colors.indigo.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
                   child: Center(
@@ -7739,7 +8698,7 @@ class _AutoAssignmentSettingsWidgetState
             color: Colors.white,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: Colors.grey.withOpacity(0.15),
+              color: Colors.grey.withValues(alpha: 0.15),
               width: 1,
             ),
           ),
@@ -7749,7 +8708,7 @@ class _AutoAssignmentSettingsWidgetState
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.1),
+                  color: Colors.orange.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
@@ -7805,12 +8764,12 @@ class _AutoAssignmentSettingsWidgetState
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: Colors.grey.withOpacity(0.15),
+            color: Colors.grey.withValues(alpha: 0.15),
             width: 1,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.03),
+              color: Colors.black.withValues(alpha: 0.03),
               blurRadius: 8,
               offset: const Offset(0, 0),
             ),
@@ -7826,7 +8785,7 @@ class _AutoAssignmentSettingsWidgetState
                 Container(
                   padding: const EdgeInsets.all(7),
                   decoration: BoxDecoration(
-                    color: Colors.indigo.withOpacity(0.1),
+                    color: Colors.indigo.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Icon(
@@ -7856,7 +8815,7 @@ class _AutoAssignmentSettingsWidgetState
             const SizedBox(height: 20),
             Container(
               height: 1,
-              color: Colors.grey.withOpacity(0.1),
+              color: Colors.grey.withValues(alpha: 0.1),
             ),
             const SizedBox(height: 20),
 
@@ -7864,10 +8823,10 @@ class _AutoAssignmentSettingsWidgetState
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.05),
+                color: Colors.blue.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: Colors.blue.withOpacity(0.1),
+                  color: Colors.blue.withValues(alpha: 0.1),
                   width: 1,
                 ),
               ),
@@ -7879,7 +8838,7 @@ class _AutoAssignmentSettingsWidgetState
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: Colors.blue.withOpacity(0.1),
+                          color: Colors.blue.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: const Icon(
@@ -7917,13 +8876,13 @@ class _AutoAssignmentSettingsWidgetState
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: isEnabled
-                    ? Colors.green.withOpacity(0.05)
-                    : Colors.grey.withOpacity(0.05),
+                    ? Colors.green.withValues(alpha: 0.05)
+                    : Colors.grey.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: isEnabled
-                      ? Colors.green.withOpacity(0.2)
-                      : Colors.grey.withOpacity(0.2),
+                      ? Colors.green.withValues(alpha: 0.2)
+                      : Colors.grey.withValues(alpha: 0.2),
                   width: 1,
                 ),
               ),
@@ -7933,8 +8892,8 @@ class _AutoAssignmentSettingsWidgetState
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
                       color: isEnabled
-                          ? Colors.green.withOpacity(0.1)
-                          : Colors.grey.withOpacity(0.1),
+                          ? Colors.green.withValues(alpha: 0.1)
+                          : Colors.grey.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Icon(
@@ -7998,10 +8957,10 @@ class _AutoAssignmentSettingsWidgetState
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.05),
+                  color: Colors.orange.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: Colors.orange.withOpacity(0.3),
+                    color: Colors.orange.withValues(alpha: 0.3),
                     width: 1,
                   ),
                 ),
@@ -8010,7 +8969,7 @@ class _AutoAssignmentSettingsWidgetState
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: Colors.orange.withOpacity(0.1),
+                        color: Colors.orange.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: const Icon(
@@ -8061,10 +9020,10 @@ class _AutoAssignmentSettingsWidgetState
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.green.withOpacity(0.05),
+                  color: Colors.green.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: Colors.green.withOpacity(0.3),
+                    color: Colors.green.withValues(alpha: 0.3),
                     width: 1,
                   ),
                 ),
@@ -8073,7 +9032,7 @@ class _AutoAssignmentSettingsWidgetState
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: Colors.green.withOpacity(0.1),
+                        color: Colors.green.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: const Icon(
@@ -8252,8 +9211,8 @@ class _NotificationPreferencesWidgetState
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: value
-              ? iconColor.withOpacity(0.3)
-              : Colors.grey.withOpacity(0.15),
+              ? iconColor.withValues(alpha: 0.3)
+              : Colors.grey.withValues(alpha: 0.15),
           width: 1,
         ),
       ),
@@ -8265,7 +9224,7 @@ class _NotificationPreferencesWidgetState
         leading: Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: iconColor.withOpacity(0.1),
+            color: iconColor.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(10),
           ),
           child: Icon(icon, color: iconColor, size: 22),
@@ -8301,13 +9260,13 @@ class _NotificationPreferencesWidgetState
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
       decoration: BoxDecoration(
         color: isEnabled
-            ? Colors.green.withOpacity(0.1)
-            : Colors.grey.withOpacity(0.1),
+            ? Colors.green.withValues(alpha: 0.1)
+            : Colors.grey.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: isEnabled
-              ? Colors.green.withOpacity(0.3)
-              : Colors.grey.withOpacity(0.3),
+              ? Colors.green.withValues(alpha: 0.3)
+              : Colors.grey.withValues(alpha: 0.3),
           width: 1,
         ),
       ),
@@ -8372,7 +9331,7 @@ class _NotificationPreferencesWidgetState
               color: Colors.white,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: Colors.grey.withOpacity(0.15),
+                color: Colors.grey.withValues(alpha: 0.15),
                 width: 1,
               ),
             ),
@@ -8382,7 +9341,7 @@ class _NotificationPreferencesWidgetState
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.1),
+                    color: Colors.red.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(
@@ -8424,12 +9383,12 @@ class _NotificationPreferencesWidgetState
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: Colors.grey.withOpacity(0.15),
+            color: Colors.grey.withValues(alpha: 0.15),
             width: 1,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.03),
+              color: Colors.black.withValues(alpha: 0.03),
               blurRadius: 8,
               offset: const Offset(0, 0),
             ),
@@ -8445,7 +9404,7 @@ class _NotificationPreferencesWidgetState
                 Container(
                   padding: const EdgeInsets.all(7),
                   decoration: BoxDecoration(
-                    color: Colors.purple.withOpacity(0.1),
+                    color: Colors.purple.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Icon(
@@ -8475,7 +9434,7 @@ class _NotificationPreferencesWidgetState
             const SizedBox(height: 20),
             Container(
               height: 1,
-              color: Colors.grey.withOpacity(0.1),
+              color: Colors.grey.withValues(alpha: 0.1),
             ),
             const SizedBox(height: 20),
 
@@ -8483,10 +9442,10 @@ class _NotificationPreferencesWidgetState
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.05),
+                color: Colors.blue.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: Colors.blue.withOpacity(0.1),
+                  color: Colors.blue.withValues(alpha: 0.1),
                   width: 1,
                 ),
               ),
@@ -8498,7 +9457,7 @@ class _NotificationPreferencesWidgetState
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: Colors.blue.withOpacity(0.1),
+                          color: Colors.blue.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: const Icon(
@@ -8537,7 +9496,7 @@ class _NotificationPreferencesWidgetState
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.orange.withOpacity(0.1),
+                    color: Colors.orange.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Icon(
@@ -8586,7 +9545,7 @@ class _NotificationPreferencesWidgetState
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.teal.withOpacity(0.1),
+                    color: Colors.teal.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Icon(
@@ -8642,7 +9601,7 @@ class _NotificationPreferencesWidgetState
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.grey.withOpacity(0.05),
+                color: Colors.grey.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(

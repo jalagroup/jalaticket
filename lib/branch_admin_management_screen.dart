@@ -240,9 +240,6 @@ class _BranchAdminManagementState extends State<BranchAdminManagement>
 
     // Handle the result
     if (result != null && mounted) {
-      // Show loading indicator
-      setState(() => _isLoading = true);
-
       try {
         final success = await BranchAdminService.assignPlacesToBranchAdmin(
           adminId: admin['id'] as String,
@@ -250,21 +247,13 @@ class _BranchAdminManagementState extends State<BranchAdminManagement>
         );
 
         if (success && mounted) {
-          // Reload data
           await _loadBranchAdmins();
-
-          // Show success message
           _showSuccess(l10n.placesUpdatedSuccessfully);
         } else if (mounted) {
-          setState(() => _isLoading = false);
           _showError(l10n.failedToUpdatePlaces);
         }
       } catch (e) {
-        print('Error updating places: $e');
-        if (mounted) {
-          setState(() => _isLoading = false);
-          _showError('${l10n.failedToUpdatePlaces}: $e');
-        }
+        if (mounted) _showError('${l10n.failedToUpdatePlaces}: $e');
       }
     }
   }

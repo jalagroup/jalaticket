@@ -41,6 +41,7 @@ class AppLocalizations {
   String get chat => translate('chat');
   String get notifications => translate('notifications');
   String get complaints => translate('complaints');
+  String get customComplaints => translate('custom_complaints');
   String get management => translate('management');
   String get profile => translate('profile');
   String get signIn => translate('sign_in');
@@ -141,6 +142,8 @@ class AppLocalizations {
   String get cancel => translate('cancel');
   String get save => translate('save');
   String get delete => translate('delete');
+  String get selectAll => translate('select_all');
+  String get deselectAll => translate('deselect_all');
   String get edit => translate('edit');
   String get search => translate('search');
   String get filter => translate('filter');
@@ -221,6 +224,27 @@ class AppLocalizations {
   String get step1SendOTP => translate('step1_send_otp');
   String get step2EnterOTP => translate('step2_enter_otp');
   String get forgotPassword => translate('forgot_password');
+  // Admin password reset
+  String get resetToDefaultPassword => translate('reset_to_default_password');
+  String get passwordResetSuccess => translate('password_reset_success');
+  String get newDefaultPassword => translate('new_default_password');
+  String get copyPassword => translate('copy_password');
+  String get passwordCopied => translate('password_copied');
+  String get emailOrPhone => translate('email_or_phone');
+  String get optionalEmail => translate('optional_email');
+  String get emailForLogin => translate('email_for_login');
+  String get phoneUserEmailHint => translate('phone_user_email_hint');
+  // Phone auth
+  String get loginWithEmail => translate('login_with_email');
+  String get loginWithPhone => translate('login_with_phone');
+  String get enterPhoneWithCode => translate('enter_phone_with_code');
+  String get sendSmsCode => translate('send_sms_code');
+  String get smsCodeSent => translate('sms_code_sent');
+  String get verifySmsCode => translate('verify_sms_code');
+  String get invalidPhoneNumber => translate('invalid_phone_number');
+  String get phoneAccountType => translate('phone_account_type');
+  String get emailAccountType => translate('email_account_type');
+  String get phoneLoginNotRegistered => translate('phone_login_not_registered');
   String get openChat => translate('open_chat');
   String get approveAndClose => translate('approve_and_close');
   String get requestChanges => translate('request_changes');
@@ -844,6 +868,12 @@ class AppLocalizations {
   String get createYourFirstPlace => translate('create_your_first_place');
 
   String get addUser => translate('add_user');
+  String get importUsers => translate('import_users');
+  String get selectUsers => translate('select_users');
+  String get allDepartments => translate('all_departments');
+  String get loginType => translate('login_type');
+  String get phoneLogin => translate('phone_login');
+  String get emailLogin => translate('email_login');
   String get oF => translate('of');
   String get noUsersYet => translate('no_users_yet');
   String get createYourFirstUser => translate('create_your_first_user');
@@ -1331,6 +1361,8 @@ const Map<String, String> _enValues = {
   'cancel': 'Cancel',
   'save': 'Save',
   'delete': 'Delete',
+  'select_all': 'Select All',
+  'deselect_all': 'Deselect All',
   'edit': 'Edit',
   'search': 'Search',
   'filter': 'Filter',
@@ -1955,6 +1987,12 @@ const Map<String, String> _enValues = {
 
   'users': 'Users',
   'add_user': 'Add User',
+  'import_users': 'Import',
+  'select_users': 'Select',
+  'all_departments': 'All Departments',
+  'login_type': 'Login Type',
+  'phone_login': 'Phone',
+  'email_login': 'Email',
   'of': 'of',
   'no_users_yet': 'No users yet',
   'create_your_first_user': 'Create your first user',
@@ -2312,11 +2350,35 @@ const Map<String, String> _enValues = {
   "step1_send_otp": "Step 1: Send OTP",
   "step2_enter_otp": "Step 2: Enter OTP & New Password",
   "forgot_password": "Forgot Password?",
+  // Admin password reset & phone user email
+  "reset_to_default_password": "Reset to Default Password",
+  "password_reset_success": "Password reset successfully",
+  "new_default_password": "New default password",
+  "copy_password": "Copy Password",
+  "password_copied": "Password copied to clipboard",
+  "email_or_phone": "Email or Phone Number",
+  "optional_email": "Email (Optional)",
+  "email_for_login": "Email (for login)",
+  "phone_user_email_hint": "Add your email so you can also log in with it",
+  // Phone auth
+  "login_with_email": "Email",
+  "login_with_phone": "Phone",
+  "enter_phone_with_code": "Enter phone number with country code (e.g. +9665XXXXXXXX)",
+  "send_sms_code": "Send Code",
+  "sms_code_sent": "A 6-digit code was sent to your phone number",
+  "verify_sms_code": "Verify & Sign In",
+  "invalid_phone_number": "Enter a valid phone number with country code",
+  "phone_account_type": "Phone Account",
+  "email_account_type": "Email Account",
+  "phone_login_not_registered": "This phone number has no account. Contact your administrator.",
+
+  // Custom Complaints module
+  "custom_complaints": "Custom Complaints",
 };
 
 // Arabic translations
 const Map<String, String> _arValues = {
-  'app_name': 'Jala Ticketing',
+  'app_name': 'جالا للدعم',
   'welcome_back': 'مرحباً بعودتك،',
   'dashboard': 'لوحة التحكم',
   'tickets': 'التذاكر',
@@ -2419,6 +2481,8 @@ const Map<String, String> _arValues = {
   'cancel': 'إلغاء',
   'save': 'حفظ',
   'delete': 'حذف',
+  'select_all': 'تحديد الكل',
+  'deselect_all': 'إلغاء تحديد الكل',
   'edit': 'تعديل',
   'search': 'بحث',
   'filter': 'تصفية',
@@ -3035,6 +3099,12 @@ const Map<String, String> _arValues = {
 
   'users': 'المستخدمون',
   'add_user': 'إضافة مستخدم',
+  'import_users': 'استيراد',
+  'select_users': 'تحديد',
+  'all_departments': 'جميع الأقسام',
+  'login_type': 'نوع تسجيل الدخول',
+  'phone_login': 'جوال',
+  'email_login': 'بريد إلكتروني',
   'of': 'من',
   'no_users_yet': 'لا يوجد مستخدمون بعد',
   'create_your_first_user': 'أنشئ مستخدمك الأول',
@@ -3383,6 +3453,30 @@ const Map<String, String> _arValues = {
   "step1_send_otp": "الخطوة 1: إرسال الرمز",
   "step2_enter_otp": "الخطوة 2: أدخل الرمز وكلمة المرور الجديدة",
   "forgot_password": "نسيت كلمة المرور؟",
+  // Admin password reset & phone user email
+  "reset_to_default_password": "إعادة تعيين إلى كلمة المرور الافتراضية",
+  "password_reset_success": "تم إعادة تعيين كلمة المرور بنجاح",
+  "new_default_password": "كلمة المرور الافتراضية الجديدة",
+  "copy_password": "نسخ كلمة المرور",
+  "password_copied": "تم نسخ كلمة المرور",
+  "email_or_phone": "البريد الإلكتروني أو رقم الجوال",
+  "optional_email": "البريد الإلكتروني (اختياري)",
+  "email_for_login": "البريد الإلكتروني (لتسجيل الدخول)",
+  "phone_user_email_hint": "أضف بريدك الإلكتروني لتتمكن من تسجيل الدخول به أيضاً",
+  // Phone auth
+  "login_with_email": "البريد الإلكتروني",
+  "login_with_phone": "رقم الجوال",
+  "enter_phone_with_code": "أدخل رقم الجوال مع رمز الدولة (مثال: +9665XXXXXXXX)",
+  "send_sms_code": "إرسال الرمز",
+  "sms_code_sent": "تم إرسال رمز مكوّن من 6 أرقام إلى جوالك",
+  "verify_sms_code": "تحقق وسجّل الدخول",
+  "invalid_phone_number": "أدخل رقم جوال صحيح مع رمز الدولة",
+  "phone_account_type": "حساب بالجوال",
+  "email_account_type": "حساب بالبريد الإلكتروني",
+  "phone_login_not_registered": "رقم الجوال هذا ليس له حساب. تواصل مع المدير.",
+
+  // Custom Complaints module
+  "custom_complaints": "الشكاوى المخصصة",
 };
 
 class _AppLocalizationsDelegate

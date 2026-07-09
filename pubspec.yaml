@@ -1,6 +1,6 @@
 name: jalasupport
 description: Jala Support Ticketing System
-version: 1.0.3+32
+version: 1.1.0+33
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -12,6 +12,9 @@ dependencies:
   
   # State Management
   get: ^4.6.6
+
+  # Routing
+  go_router: ^14.0.0
   
   # Supabase
   supabase_flutter: ^2.3.4
@@ -56,6 +59,20 @@ dependencies:
   url_launcher: ^6.3.0
   shared_preferences: ^2.3.2
   sensors_plus: ^4.0.2
+  flutter_web_plugins:
+    sdk: flutter
+
+  # Web APIs (for custom web file picker)
+  web: ^1.1.0
+
+  # Excel import/export for bulk operations
+  excel: ^4.0.6
+
+  # Custom Complaints module
+  qr_flutter: ^4.1.0
+  flex_color_picker: ^3.7.0
+  flutter_quill: ^11.0.0
+  signature: ^5.5.0
 
 dev_dependencies:
   flutter_test:
@@ -71,9 +88,26 @@ flutter:
     - assets/fonts/
 
   fonts:
+    - family: Quicksand
+      fonts:
+        - asset: assets/fonts/Quicksand-Light.ttf
+          weight: 300
+        - asset: assets/fonts/Quicksand-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Quicksand-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Quicksand-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Quicksand-Bold.ttf
+          weight: 700
     - family: NotoSansArabic
       fonts:
         - asset: assets/fonts/NotoSansArabic-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/NotoSansArabic-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/NotoSansArabic-SemiBold.ttf
+          weight: 600
         - asset: assets/fonts/NotoSansArabic-Bold.ttf
           weight: 700
 

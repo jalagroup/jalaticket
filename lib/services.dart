@@ -228,8 +228,24 @@ class AdminUserService {
 }
 
 class AuthService {
-  static Future<bool> signIn(String email, String password) async {
+  /// Converts a phone number (+9665XXXXXXXX) to the placeholder email used
+  /// for phone-based accounts so they can log in via email+password.
+  static String _resolveLoginEmail(String input) {
+    final trimmed = input.trim();
+    if (trimmed.startsWith('+')) {
+      final digits = trimmed.replaceAll(RegExp(r'[^\d]'), '');
+      return 'phone_${digits}@phone.user';
+    }
+    // Local Israeli number: 0XXXXXXXXX → +972XXXXXXXXX
+    if (RegExp(r'^0\d{9}$').hasMatch(trimmed)) {
+      return 'phone_972${trimmed.substring(1)}@phone.user';
+    }
+    return trimmed;
+  }
+
+  static Future<bool> signIn(String emailOrPhone, String password) async {
     try {
+      final email = _resolveLoginEmail(emailOrPhone);
       print('Attempting sign in for: $email');
 
       // Step 1: Attempt authentication

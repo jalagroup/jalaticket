@@ -35,6 +35,10 @@ import 'package:jalasupport/main_mobile.dart' show myAppMobileKey;
 import 'package:jalasupport/sound_service.dart';
 import 'package:jalasupport/ai_dashboard_onboarding.dart';
 import 'package:jalasupport/ai_dashboard_screen.dart';
+import 'package:jalasupport/custom_complaints/cc_home_screen.dart';
+import 'package:flutter_web_plugins/flutter_web_plugins.dart' show usePathUrlStrategy;
+import 'package:go_router/go_router.dart';
+import 'package:jalasupport/app_router.dart';
 
 import 'dart:ui' as ui;
 
@@ -65,6 +69,10 @@ String? activeChatRoomId;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  if (kIsWeb) {
+    usePathUrlStrategy();
+  }
 
   // Firebase init (required for FCM on web)
   await Firebase.initializeApp(
@@ -196,22 +204,9 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoadingLocale) {
-      return MaterialApp(
-        debugShowCheckedModeBanner: false,
-        home: Scaffold(
-          backgroundColor: AppColors.background,
-          body: Center(
-            child: CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return MaterialApp(
-      title: 'Jala Ticketing',
+    return MaterialApp.router(
+      routerConfig: appRouter,
+      title: 'Jala Support',
       locale: _locale,
       localizationsDelegates: const [
         AppLocalizations.delegate,
@@ -228,6 +223,8 @@ class _MyAppState extends State<MyApp> {
         primaryColor: AppColors.primary,
         scaffoldBackgroundColor: AppColors.background,
         useMaterial3: true,
+        fontFamily: 'Quicksand',
+        fontFamilyFallback: const ['NotoSansArabic'],
         colorScheme: ColorScheme.light(
           primary: AppColors.primary,
           secondary: AppColors.secondary,
@@ -267,14 +264,13 @@ class _MyAppState extends State<MyApp> {
           shadowColor: Colors.grey.withOpacity(0.2),
         ),
       ),
-      home: const AuthWrapper(),
       debugShowCheckedModeBanner: false,
       builder: (context, child) {
         return Directionality(
           textDirection: _locale.languageCode == 'ar'
               ? ui.TextDirection.rtl
               : ui.TextDirection.ltr,
-          child: child!,
+          child: child ?? const SizedBox.shrink(),
         );
       },
     );
@@ -371,10 +367,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
         _hasNavigatedFromFCM = true;
 
-        setState(() {
-          // Web has no separate chat tab; tickets tab (1) is used for both
-          _currentIndex = kIsWeb ? 1 : 2;
-        });
+        // Web has no separate chat tab; tickets tab (1) is used for both.
+        if (kIsWeb) {
+          GoRouter.of(context).go('/tickets');
+          setState(() => _currentIndex = 1);
+        } else {
+          setState(() => _currentIndex = 2);
+        }
 
         Future.delayed(const Duration(seconds: 2), () {
           _hasNavigatedFromFCM = false;
@@ -504,7 +503,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void _setupNavigationItems() {
     final l10n = AppLocalizations.safeOf(context);
 
-    // Mobile navigation items (7 items)
+    // Mobile navigation items (8 items)
     _mobileNavItems = [
       NavigationItem(icon: Icons.dashboard, label: l10n.dashboard),
       NavigationItem(icon: Icons.confirmation_number, label: l10n.tickets),
@@ -512,16 +511,18 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       NavigationItem(
           icon: Icons.notifications, label: l10n.notifications, hasBadge: true),
       NavigationItem(icon: Icons.report_problem, label: l10n.complaints),
+      NavigationItem(icon: Icons.dynamic_form_outlined, label: l10n.customComplaints),
       NavigationItem(icon: Icons.settings, label: l10n.management),
       NavigationItem(icon: Icons.person, label: l10n.profile),
     ];
 
-    // Web navigation items (6 items)
+    // Web navigation items (7 items)
     _webNavItems = [
       NavigationItem(icon: Icons.dashboard, label: l10n.dashboard),
       NavigationItem(icon: Icons.confirmation_number, label: l10n.tickets),
       NavigationItem(icon: Icons.chat, label: l10n.chat),
       NavigationItem(icon: Icons.report_problem, label: l10n.complaints),
+      NavigationItem(icon: Icons.dynamic_form_outlined, label: l10n.customComplaints),
       NavigationItem(icon: Icons.settings, label: l10n.management),
       NavigationItem(icon: Icons.person, label: l10n.profile),
     ];
@@ -536,6 +537,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Restore the active tab from the URL on web (survives page refresh).
+    // Also parse any sub-route params (formId, ticketId, management tab).
+    if (kIsWeb) {
+      final path = Uri.base.path;
+      _currentIndex = tabIndexFromPath(path);
+      DeepLinkState.parseFromPath(path);
+    }
     _initializeScreen();
     _setupLocaleChangeListener(); // ✨ NEW
 
@@ -633,7 +641,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           .select('mode,saved_dashboard_id,custom_dashboard_id')
           .eq('user_id', _currentUser!.id)
           .maybeSingle();
-      if (row == null || !mounted) return;
+      if (!mounted) return;
+      // New user has no saved preference — show the built-in default immediately.
+      if (row == null) {
+        setState(() { _mainDashMode = 'default'; _loadingDashPref = false; });
+        return;
+      }
       final mode     = row['mode'] as String? ?? 'default';
       final savedId  = row['saved_dashboard_id'] as String?;
       final customId = row['custom_dashboard_id'] as String?;
@@ -1172,6 +1185,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void _navigateToChat(String? ticketId, String? chatRoomId) {
     if (ticketId == null) return;
     if (kIsWeb) {
+      GoRouter.of(context).go('/tickets');
       setState(() => _currentIndex = 1);
     } else {
       setState(() => _currentIndex = 2);
@@ -1181,6 +1195,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   void _navigateToTicket(String? ticketId, {String? type}) {
     if (ticketId == null) return;
+    if (kIsWeb) GoRouter.of(context).go('/tickets');
     setState(() => _currentIndex = 1);
     TicketNavigationService.navigateTo(
       ticketId,
@@ -1385,116 +1400,113 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     }
   }
 
-  List<Widget> _buildWebNavigationTabs() {
-    if (_webNavItems.isEmpty) return [];
+  /// Underline-style nav tab bar (no ripple, orange indicator like tickets TabBar).
+  Widget _buildWebNavTabWidget() {
+    if (_webNavItems.isEmpty) return const SizedBox();
 
-    return [
-      const SizedBox(width: 16),
-      Flexible(
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: _webNavItems.asMap().entries.where((entry) {
-              if (entry.value.icon == Icons.report_problem &&
-                  !_hasComplaintPermission) {
-                return false;
-              }
-              return true;
-            }).map((entry) {
-              final index = entry.key;
-              final item = entry.value;
-              final isSelected = _currentIndex == index;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: _webNavItems.asMap().entries.where((entry) {
+          if (entry.value.icon == Icons.report_problem &&
+              !_hasComplaintPermission) return false;
+          return true;
+        }).map((entry) {
+          final index = entry.key;
+          final item = entry.value;
+          final isSelected = _currentIndex == index;
 
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
-                    color: isSelected
-                        ? AppColors.primary.withOpacity(0.15)
-                        : Colors.transparent,
+          return MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: () {
+                GoRouter.of(context).go(pathFromTabIndex(index));
+                setState(() => _currentIndex = index);
+              },
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                height: 56,
+                alignment: Alignment.center,
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeInOut,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: _locale.languageCode == 'ar' ? 3 : 6,
                   ),
-                  child: TextButton(
-                    onPressed: () {
-                      setState(() => _currentIndex = index);
-                    },
-                    style: TextButton.styleFrom(
-                      foregroundColor: isSelected
-                          ? AppColors.primary
-                          : AppColors.onBackground,
-                      backgroundColor: Colors.transparent,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 6),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            Icon(
-                              item.icon,
-                              size: 16,
-                              color: isSelected
-                                  ? AppColors.primary
-                                  : AppColors.onBackground,
-                            ),
-                            if (item.icon == Icons.chat &&
-                                _unreadChatRoomsCount > 0)
-                              Positioned(
-                                right: -8,
-                                top: -8,
-                                child: Container(
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.primary,
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(
-                                      color: Colors.white,
-                                      width: 1.5,
-                                    ),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? AppColors.primary.withValues(alpha: 0.12)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Icon(
+                            item.icon,
+                            size: 15,
+                            color: isSelected
+                                ? AppColors.primary
+                                : Colors.grey[600],
+                          ),
+                          if (item.icon == Icons.chat &&
+                              _unreadChatRoomsCount > 0)
+                            Positioned(
+                              right: -7,
+                              top: -7,
+                              child: Container(
+                                padding: const EdgeInsets.all(3),
+                                decoration: BoxDecoration(
+                                  color: AppColors.primary,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                      color: Colors.white, width: 1.5),
+                                ),
+                                constraints: const BoxConstraints(
+                                    minWidth: 15, minHeight: 15),
+                                child: Text(
+                                  _unreadChatRoomsCount > 99
+                                      ? '99+'
+                                      : _unreadChatRoomsCount.toString(),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.bold,
                                   ),
-                                  constraints: const BoxConstraints(
-                                    minWidth: 18,
-                                    minHeight: 18,
-                                  ),
-                                  child: Text(
-                                    _unreadChatRoomsCount > 99
-                                        ? '99+'
-                                        : _unreadChatRoomsCount.toString(),
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
+                                  textAlign: TextAlign.center,
                                 ),
                               ),
-                          ],
+                            ),
+                        ],
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        _getWebNavLabel(index),
+                        style: TextStyle(
+                          color: isSelected
+                              ? AppColors.primary
+                              : Colors.grey[700],
+                          fontWeight: isSelected
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                          fontSize: 13,
+                          letterSpacing: 0.1,
                         ),
-                        const SizedBox(width: 4),
-                        Text(
-                          _getWebNavLabel(index),
-                          style: TextStyle(
-                            fontWeight:
-                                isSelected ? FontWeight.bold : FontWeight.w500,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
-              );
-            }).toList(),
-          ),
-        ),
+              ),
+            ),
+          );
+        }).toList(),
       ),
-    ];
+    );
   }
 
   /// Returns the navigation label for the given web-nav index directly from
@@ -1507,8 +1519,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       case 1: return l10n.tickets;
       case 2: return l10n.chat;
       case 3: return l10n.complaints;
-      case 4: return l10n.management;
-      case 5: return l10n.profile;
+      case 4: return l10n.customComplaints;
+      case 5: return l10n.management;
+      case 6: return l10n.profile;
       default: return '';
     }
   }
@@ -1522,8 +1535,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       case 2: return l10n.chat;
       case 3: return l10n.notifications;
       case 4: return l10n.complaints;
-      case 5: return l10n.management;
-      case 6: return l10n.profile;
+      case 5: return l10n.customComplaints;
+      case 6: return l10n.management;
+      case 7: return l10n.profile;
       default: return '';
     }
   }
@@ -1532,6 +1546,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     if (_currentUser == null) return Container();
 
     void navigateToTickets(String? status) {
+      if (kIsWeb) GoRouter.of(context).go('/tickets');
       setState(() {
         _currentIndex = 1;
         _initialTicketStatus = status;
@@ -1569,8 +1584,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             return _buildNoAccessScreen();
           }
         case 5:
-          return ManagementScreen(currentUser: _currentUser!);
+          return CcHomeScreen(currentUser: _currentUser!);
         case 6:
+          return ManagementScreen(currentUser: _currentUser!);
+        case 7:
           return ProfileScreen(
             currentUser: _currentUser!,
             onProfileImageUpdated:
@@ -1586,7 +1603,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         case 1:
           final status = _initialTicketStatus;
           _initialTicketStatus = null;
-          return TicketsScreen(currentUser: _currentUser!, initialStatus: status);
+          // Also consume any deep-link ticket ID (from /tickets/:ticketId refresh).
+          final deepTicketId = DeepLinkState.consumeTicketId();
+          return TicketsScreen(
+            currentUser: _currentUser!,
+            initialStatus: status,
+            initialTicketId: deepTicketId,
+          );
         case 2:
           WidgetsBinding.instance.addPostFrameCallback((_) {
             _loadUnreadChatRoomsCount();
@@ -1599,8 +1622,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             return _buildNoAccessScreen();
           }
         case 4:
-          return ManagementScreen(currentUser: _currentUser!);
+          return CcHomeScreen(currentUser: _currentUser!);
         case 5:
+          return ManagementScreen(
+            currentUser: _currentUser!,
+            initialTab: DeepLinkState.consumeManagementTab(),
+          );
+        case 6:
           return ProfileScreen(
             currentUser: _currentUser!,
             onProfileImageUpdated: _handleProfileImageUpdate,
@@ -1786,12 +1814,65 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     final isMobile = screenWidth < 768;
 
     if (isMobile) {
-      // Mobile: Navigate to profile tab (index 6)
-      setState(() => _currentIndex = 6);
+      // Mobile: Navigate to profile tab (index 7)
+      setState(() => _currentIndex = 7);
     } else {
-      // Web: Navigate to profile tab (index 5)
-      setState(() => _currentIndex = 5);
+      // Web: Navigate to profile tab (index 6) and update URL.
+      GoRouter.of(context).go('/profile');
+      setState(() => _currentIndex = 6);
     }
+  }
+
+  Widget _buildLogoLeading({required bool isMobile, required AppLocalizations l10n}) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: () {
+          GoRouter.of(context).go('/dashboard');
+          setState(() => _currentIndex = 0);
+        },
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: isMobile ? 8 : 10),
+          child: Row(
+            children: [
+              Container(
+                width: isMobile ? 30 : 34,
+                height: isMobile ? 30 : 34,
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Image.asset(
+                  'assets/images/logo.png',
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => Icon(
+                    Icons.support_agent,
+                    color: AppColors.primary,
+                    size: isMobile ? 16 : 20,
+                  ),
+                ),
+              ),
+              if (!isMobile) ...[
+                const SizedBox(width: 8),
+                const Flexible(
+                  child: Text(
+                    'Jala Ticketing',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 17,
+                      color: AppColors.secondary,
+                      letterSpacing: 0.2,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   PreferredSizeWidget _buildAppBar({required bool hasBottomNavBar}) {
@@ -1800,46 +1881,68 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     final isWidthNotGood = screenWidth > 1440;
     final isMobile = screenWidth < 600;
     final l10n = AppLocalizations.safeOf(context);
+    final showNavTabs = kIsWeb && isWidthNotGood && !isMobile;
 
     return AppBar(
       backgroundColor: Colors.white,
       surfaceTintColor: Colors.white,
       foregroundColor: AppColors.onBackground,
       elevation: 0,
-      title: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(6),
-            child: Image.asset(
-              'assets/images/logo.png',
-              height: isMobile ? 28 : 32,
-              width: isMobile ? 28 : 31,
-              fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) {
-                return Icon(
-                  Icons.support_agent,
-                  color: AppColors.primary,
-                  size: isMobile ? 24 : 28,
-                );
-              },
-            ),
-          ),
-          SizedBox(width: isMobile ? 8 : 12),
-          Flexible(
-            child: Text(
-              l10n.appName,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: isMobile ? 16 : 20,
-                color: AppColors.onBackground,
+      scrolledUnderElevation: 1,
+      shadowColor: Colors.black12,
+      titleSpacing: 0,
+      // When showing nav tabs: logo+name in leading, tabs in title.
+      // When showing drawer (narrow web): leading = auto hamburger, title = logo+name.
+      leadingWidth: showNavTabs ? (isMobile ? 56 : 190) : null,
+      leading: showNavTabs
+          ? _buildLogoLeading(isMobile: isMobile, l10n: l10n)
+          : null,
+      title: showNavTabs
+          ? _buildWebNavTabWidget()
+          : MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                onTap: () {
+                  GoRouter.of(context).go('/dashboard');
+                  setState(() => _currentIndex = 0);
+                },
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: isMobile ? 30 : 34,
+                      height: isMobile ? 30 : 34,
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Image.asset(
+                        'assets/images/logo.png',
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => Icon(
+                          Icons.support_agent,
+                          color: AppColors.primary,
+                          size: isMobile ? 16 : 20,
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: isMobile ? 8 : 10),
+                    Text(
+                      'Jala Ticketing',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: isMobile ? 15 : 18,
+                        color: AppColors.secondary,
+                        letterSpacing: 0.2,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
               ),
-              overflow: TextOverflow.ellipsis,
             ),
-          ),
-          if (kIsWeb && isWidthNotGood && !isMobile)
-            ..._buildWebNavigationTabs(),
-        ],
-      ),
+      centerTitle: false,
       actions: _buildResponsiveActions(
         isMobile: isMobile,
         isLargeScreen: isLargeScreen,
@@ -1982,8 +2085,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             ),
           ),
         ),
-        // ✨ Clickable Profile Name
-        Flexible(
+        // Clickable Profile Name — constrained so it never crowds the action bar
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 140),
           child: GestureDetector(
             onTap: _navigateToProfile,
             child: MouseRegion(
@@ -1993,7 +2097,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 margin: const EdgeInsets.only(right: 8),
                 decoration: BoxDecoration(
-                  color: AppColors.secondary.withOpacity(0.1),
+                  color: AppColors.secondary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(
@@ -2003,7 +2107,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                       child: Text(
                         _currentUser?.fullName ?? '',
                         style: const TextStyle(
-                          fontSize: 14,
+                          fontSize: 13,
                           fontWeight: FontWeight.w600,
                           color: AppColors.secondary,
                         ),
@@ -2011,8 +2115,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                         maxLines: 1,
                       ),
                     ),
-                    const SizedBox(width: 4),
-                    Icon(
+                    const SizedBox(width: 2),
+                    const Icon(
                       Icons.arrow_drop_down,
                       color: AppColors.secondary,
                       size: 18,
@@ -2573,22 +2677,22 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   Widget _buildFloatingBottomNavBar() {
     if (kIsWeb) return const SizedBox.shrink();
 
-    final visibleItems = _mobileNavItems.where((item) {
-      if (item.icon == Icons.report_problem && !_hasComplaintPermission) {
-        return false;
-      }
-      return true;
-    }).toList();
+    // Show only the 4 primary tabs + a "More" drawer button
+    // Indices: 0=Dashboard, 1=Tickets, 2=Chat, 3=Notifications
+    final primaryIndices = [0, 1, 2, 3];
+    final isAr = _locale.languageCode == 'ar';
+    final moreLabel = isAr ? 'المزيد' : 'More';
+    final moreActive = !primaryIndices.contains(_currentIndex);
 
     return Container(
-      margin: const EdgeInsets.fromLTRB(5, 0, 5, 20),
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+      margin: const EdgeInsets.fromLTRB(8, 0, 8, 20),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(50),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
+            color: Colors.black.withValues(alpha: 0.1),
             blurRadius: 20,
             offset: const Offset(0, -2),
             spreadRadius: 0,
@@ -2596,122 +2700,44 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         ],
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: visibleItems.asMap().entries.map((entry) {
-          final visibleIdx = entry.key;
-          final item = entry.value;
-          final actualIndex = _mobileNavItems.indexOf(item);
-          final isSelected = _currentIndex == actualIndex;
-
-          final isFirst = visibleIdx == 0;
-          final isLast = visibleIdx == visibleItems.length - 1;
-
-          return Expanded(
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: isFirst || isLast ? 4.0 : 0.0,
-              ),
-              child: GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _currentIndex = actualIndex;
-                    _isNotificationsOpen = false;
-                  });
-                },
+        children: [
+          ...primaryIndices.map((idx) {
+            final item = _mobileNavItems[idx];
+            final isSelected = _currentIndex == idx;
+            int? badge;
+            if (idx == 2) badge = _unreadChatRoomsCount > 0 ? _unreadChatRoomsCount : null;
+            if (idx == 3) badge = _unreadCount > 0 ? _unreadCount : null;
+            return _buildBottomNavItem(
+              icon: item.icon,
+              label: _getMobileNavLabel(idx),
+              isSelected: isSelected,
+              badgeCount: badge,
+              onTap: () => setState(() { _currentIndex = idx; _isNotificationsOpen = false; }),
+            );
+          }),
+          // "More" button opens drawer
+          Expanded(
+            child: Builder(
+              builder: (ctx) => GestureDetector(
+                onTap: () => Scaffold.of(ctx).openDrawer(),
                 child: Container(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   decoration: BoxDecoration(
-                    color: isSelected
-                        ? AppColors.primary.withOpacity(0.15)
-                        : Colors.transparent,
+                    color: moreActive ? AppColors.primary.withValues(alpha: 0.15) : Colors.transparent,
                     borderRadius: BorderRadius.circular(50),
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          Icon(
-                            item.icon,
-                            color: isSelected
-                                ? AppColors.primary
-                                : Colors.grey[600],
-                            size: 24,
-                          ),
-                          // ✨ IMPROVED: Badge for both Notifications and Chat
-                          if (item.hasBadge &&
-                              item.icon == Icons.notifications &&
-                              _unreadCount > 0)
-                            Positioned(
-                              right: -6,
-                              top: -6,
-                              child: Container(
-                                padding: const EdgeInsets.all(3),
-                                decoration: BoxDecoration(
-                                  color: AppColors.primary,
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: Colors.white,
-                                    width: 1.5,
-                                  ),
-                                ),
-                                constraints: const BoxConstraints(
-                                    minWidth: 16, minHeight: 16),
-                                child: Text(
-                                  _unreadCount > 99
-                                      ? '99+'
-                                      : _unreadCount.toString(),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            ),
-                          // ✨ NEW: Badge for Chat with unread chat rooms
-                          if (item.icon == Icons.chat && _unreadChatRoomsCount > 0)
-                            Positioned(
-                              right: -6,
-                              top: -6,
-                              child: Container(
-                                padding: const EdgeInsets.all(3),
-                                decoration: BoxDecoration(
-                                  color: AppColors.primary,
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: Colors.white,
-                                    width: 1.5,
-                                  ),
-                                ),
-                                constraints: const BoxConstraints(
-                                    minWidth: 16, minHeight: 16),
-                                child: Text(
-                                  _unreadChatRoomsCount > 99
-                                      ? '99+'
-                                      : _unreadChatRoomsCount.toString(),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
+                      Icon(Icons.grid_view_rounded,
+                          color: moreActive ? AppColors.primary : Colors.grey[600], size: 24),
                       const SizedBox(height: 4),
                       Text(
-                        _getMobileNavLabel(actualIndex),
+                        moreLabel,
                         style: TextStyle(
-                          fontSize: 7.5,
-                          fontWeight:
-                              isSelected ? FontWeight.bold : FontWeight.w500,
-                          color:
-                              isSelected ? AppColors.primary : Colors.grey[600],
+                          fontSize: 9,
+                          fontWeight: moreActive ? FontWeight.bold : FontWeight.w500,
+                          color: moreActive ? AppColors.primary : Colors.grey[600],
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -2721,8 +2747,70 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                 ),
               ),
             ),
-          );
-        }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomNavItem({
+    required IconData icon,
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+    int? badgeCount,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: isSelected ? AppColors.primary.withValues(alpha: 0.15) : Colors.transparent,
+            borderRadius: BorderRadius.circular(50),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(icon, color: isSelected ? AppColors.primary : Colors.grey[600], size: 24),
+                  if (badgeCount != null)
+                    Positioned(
+                      right: -6,
+                      top: -6,
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.white, width: 1.5),
+                        ),
+                        constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                        child: Text(
+                          badgeCount > 99 ? '99+' : badgeCount.toString(),
+                          style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                  color: isSelected ? AppColors.primary : Colors.grey[600],
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -2832,13 +2920,29 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                           ),
                         ),
                         const SizedBox(width: 12),
-                        const Text(
-                          'Jala Ticketing',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                          ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Jala Ticketing',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                            Text(
+                              _locale.languageCode == 'ar'
+                                  ? 'دعم ذكي · نتائج حقيقية'
+                                  : 'Smart Support · Real Results',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.65),
+                                fontSize: 11,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
