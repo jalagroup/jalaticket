@@ -1790,6 +1790,7 @@ class _RightPanel extends StatelessWidget {
               allFields: form.steps
                   .expand((s) => s.sections.expand((sec) => sec.fields))
                   .toList(),
+              allSections: form.steps.expand((s) => s.sections).toList(),
               allSteps: form.steps,
               onChanged: onChanged,
               onDeselect: onDeselect,

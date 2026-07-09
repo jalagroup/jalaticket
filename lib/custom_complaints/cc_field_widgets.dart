@@ -140,6 +140,7 @@ class CcFieldPreview extends StatelessWidget {
 class CcFieldPropertiesPanel extends StatefulWidget {
   final CcFormField field;
   final List<CcFormField> allFields;
+  final List<CcFormSection> allSections;
   final List<CcFormStep> allSteps;
   final VoidCallback onChanged;
   final VoidCallback onDeselect;
@@ -148,6 +149,7 @@ class CcFieldPropertiesPanel extends StatefulWidget {
     super.key,
     required this.field,
     required this.allFields,
+    required this.allSections,
     required this.allSteps,
     required this.onChanged,
     required this.onDeselect,
@@ -506,100 +508,111 @@ class _CcFieldPropertiesPanelState extends State<CcFieldPropertiesPanel> {
                     style: const TextStyle(fontSize: 11)),
               ),
 
-              if (widget.allSteps.length > 1 &&
-                  [CcFieldType.singleSelect, CcFieldType.radio, CcFieldType.yesNo,
+              if ([CcFieldType.singleSelect, CcFieldType.radio, CcFieldType.yesNo,
                    CcFieldType.styledSelect, CcFieldType.imageChoice].contains(field.fieldType)) ...[
                 const Divider(),
                 const SizedBox(height: 4),
-                _label(isAr ? 'منطق الانتقال' : 'Jump Logic'),
+                _label(isAr ? 'إجراءات الخيارات' : 'Option Actions'),
                 Text(
                   isAr
-                      ? 'تحديد وجهة التنقل بعد اختيار كل خيار'
-                      : 'Set where to go after each option is selected',
+                      ? 'حدد إجراءات لكل خيار عند تحديده'
+                      : 'Configure actions triggered when each option is selected',
                   style: TextStyle(fontSize: 10, color: Colors.grey[500]),
                 ),
                 const SizedBox(height: 8),
                 ...() {
-                  final List<String> optionValues;
-                  final List<String> optionLabels;
-                  if (field.fieldType == CcFieldType.yesNo) {
-                    optionValues = ['true', 'false'];
-                    optionLabels = isAr ? ['نعم', 'لا'] : ['Yes', 'No'];
-                  } else if (field.fieldType == CcFieldType.styledSelect) {
-                    optionValues = c.styledSelectOptions.map((o) => o.label).toList();
-                    optionLabels = c.styledSelectOptions.map((o) => o.label).toList();
-                  } else {
-                    optionValues = c.options;
-                    optionLabels = c.options;
+                  List<(String, String)> options = [];
+                  switch (field.fieldType) {
+                    case CcFieldType.yesNo:
+                      options = [('true', isAr ? 'نعم' : 'Yes'), ('false', isAr ? 'لا' : 'No')];
+                    case CcFieldType.styledSelect:
+                      options = c.styledSelectOptions.map((o) => (o.label, o.label)).toList();
+                    default:
+                      options = c.options.map((o) => (o, o)).toList();
                   }
-                  return optionValues.asMap().entries.map((e) {
-                    final optValue = e.value;
-                    final optLabel = optionLabels[e.key];
-                    final currentTarget = c.jumpLogic[optValue] ?? 'next';
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            flex: 2,
-                            child: Text(
-                              optLabel,
-                              style: const TextStyle(fontSize: 11),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            flex: 3,
-                            child: DropdownButtonFormField<String>(
-                              value: currentTarget,
-                              isExpanded: true,
-                              decoration: InputDecoration(
-                                isDense: true,
-                                contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 6),
-                                border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(6)),
+                  return options.map((opt) {
+                    final optionValue = opt.$1;
+                    final optionLabel = opt.$2;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 3,
+                              height: 14,
+                              decoration: BoxDecoration(
+                                color: AppColors.primary,
+                                borderRadius: BorderRadius.circular(2),
                               ),
-                              style: const TextStyle(
-                                  fontSize: 11, color: Colors.black87),
-                              items: [
-                                DropdownMenuItem(
-                                  value: 'next',
-                                  child: Text(
-                                    isAr ? 'الخطوة التالية' : 'Next step',
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'submit',
-                                  child: Text(
-                                    isAr ? 'إرسال النموذج' : 'Submit form',
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                ...widget.allSteps.map((step) => DropdownMenuItem(
-                                  value: 'step:${step.id}',
-                                  child: Text(
-                                    '→ ${step.title}',
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                )),
-                              ],
-                              onChanged: (v) {
-                                if (v == null) return;
-                                _update(() {
-                                  if (v == 'next') {
-                                    c.jumpLogic.remove(optValue);
-                                  } else {
-                                    c.jumpLogic[optValue] = v;
-                                  }
-                                });
-                              },
                             ),
-                          ),
-                        ],
-                      ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                optionLabel,
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.add_circle_outline_rounded, size: 16),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              tooltip: isAr ? 'إضافة إجراء' : 'Add action',
+                              onPressed: () => _showActionEditor(context, isAr, field, optionValue, null, -1),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        ...(c.optionActions[optionValue] ?? []).asMap().entries.map((ae) {
+                          final action = ae.value;
+                          final actionIdx = ae.key;
+                          final targetName = _resolveTargetName(
+                              action, widget.allFields, widget.allSections, widget.allSteps, isAr);
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[50],
+                              borderRadius: BorderRadius.circular(7),
+                              border: Border.all(color: Colors.grey[200]!),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(_actionIcon(action.type), size: 13, color: AppColors.primary),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    '${isAr ? action.type.labelAr : action.type.label}: $targetName',
+                                    style: const TextStyle(fontSize: 11),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                GestureDetector(
+                                  onTap: () => _showActionEditor(
+                                      context, isAr, field, optionValue, action, actionIdx),
+                                  child: const Icon(Icons.edit_outlined, size: 13, color: Colors.grey),
+                                ),
+                                const SizedBox(width: 6),
+                                GestureDetector(
+                                  onTap: () => _update(() {
+                                    final list = List<CcFieldAction>.from(
+                                        c.optionActions[optionValue] ?? []);
+                                    list.removeAt(actionIdx);
+                                    if (list.isEmpty) {
+                                      c.optionActions.remove(optionValue);
+                                    } else {
+                                      c.optionActions[optionValue] = list;
+                                    }
+                                  }),
+                                  child: const Icon(Icons.close_rounded, size: 13, color: Colors.red),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                        const SizedBox(height: 8),
+                      ],
                     );
                   }).toList();
                 }(),
@@ -681,6 +694,83 @@ class _CcFieldPropertiesPanelState extends State<CcFieldPropertiesPanel> {
           if (d != null) onChanged(d);
         },
       );
+
+  Future<void> _showActionEditor(
+    BuildContext context,
+    bool isAr,
+    CcFormField field,
+    String optionValue,
+    CcFieldAction? existing,
+    int existingIdx,
+  ) async {
+    final result = await showDialog<CcFieldAction>(
+      context: context,
+      builder: (ctx) => _ActionEditorDialog(
+        initial: existing,
+        allFields: widget.allFields,
+        allSections: widget.allSections,
+        allSteps: widget.allSteps,
+        currentFieldId: field.id,
+        isAr: isAr,
+        onSave: (a) => Navigator.pop(ctx, a),
+      ),
+    );
+    if (result == null) return;
+    _update(() {
+      final list = List<CcFieldAction>.from(field.config.optionActions[optionValue] ?? []);
+      if (existingIdx >= 0 && existingIdx < list.length) {
+        list[existingIdx] = result;
+      } else {
+        list.add(result);
+      }
+      field.config.optionActions[optionValue] = list;
+    });
+  }
+
+  IconData _actionIcon(CcFieldActionType type) => switch (type) {
+    CcFieldActionType.showField      => Icons.visibility_rounded,
+    CcFieldActionType.hideField      => Icons.visibility_off_rounded,
+    CcFieldActionType.showSection    => Icons.expand_rounded,
+    CcFieldActionType.hideSection    => Icons.compress_rounded,
+    CcFieldActionType.requireField   => Icons.star_rounded,
+    CcFieldActionType.unrequireField => Icons.star_outline_rounded,
+    CcFieldActionType.enableField    => Icons.lock_open_rounded,
+    CcFieldActionType.disableField   => Icons.lock_rounded,
+    CcFieldActionType.showToast      => Icons.notifications_rounded,
+    CcFieldActionType.jumpToStep     => Icons.arrow_forward_rounded,
+    CcFieldActionType.submitForm     => Icons.send_rounded,
+  };
+
+  String _resolveTargetName(
+    CcFieldAction action,
+    List<CcFormField> allFields,
+    List<CcFormSection> allSections,
+    List<CcFormStep> allSteps,
+    bool isAr,
+  ) {
+    switch (action.type) {
+      case CcFieldActionType.showField:
+      case CcFieldActionType.hideField:
+      case CcFieldActionType.requireField:
+      case CcFieldActionType.unrequireField:
+      case CcFieldActionType.enableField:
+      case CcFieldActionType.disableField:
+        final f = allFields.where((x) => x.id == action.targetId).firstOrNull;
+        return f?.label.isNotEmpty == true ? f!.label : (isAr ? '(حقل)' : '(field)');
+      case CcFieldActionType.showSection:
+      case CcFieldActionType.hideSection:
+        final s = allSections.where((x) => x.id == action.targetId).firstOrNull;
+        return s?.title.isNotEmpty == true ? s!.title : (isAr ? '(قسم)' : '(section)');
+      case CcFieldActionType.jumpToStep:
+        final step = allSteps.where((x) => x.id == action.targetId).firstOrNull;
+        return step?.title.isNotEmpty == true ? step!.title : (isAr ? '(خطوة)' : '(step)');
+      case CcFieldActionType.showToast:
+        final t = action.toastMessage.isNotEmpty ? action.toastMessage : (isAr ? 'رسالة' : 'message');
+        return '[${isAr ? action.toastType.labelAr : action.toastType.label}] $t';
+      case CcFieldActionType.submitForm:
+        return isAr ? 'إرسال' : 'Submit';
+    }
+  }
 }
 
 class _OptionsEditor extends StatefulWidget {
@@ -1238,6 +1328,261 @@ class _ConditionEditorDialogState extends State<_ConditionEditorDialog> {
             backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
           ),
+          child: Text(isAr ? 'حفظ' : 'Save'),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Action editor dialog ──────────────────────────────────
+
+class _ActionEditorDialog extends StatefulWidget {
+  final CcFieldAction? initial;
+  final List<CcFormField> allFields;
+  final List<CcFormSection> allSections;
+  final List<CcFormStep> allSteps;
+  final String currentFieldId;
+  final bool isAr;
+  final ValueChanged<CcFieldAction> onSave;
+
+  const _ActionEditorDialog({
+    this.initial,
+    required this.allFields,
+    required this.allSections,
+    required this.allSteps,
+    required this.currentFieldId,
+    required this.isAr,
+    required this.onSave,
+  });
+
+  @override
+  State<_ActionEditorDialog> createState() => _ActionEditorDialogState();
+}
+
+class _ActionEditorDialogState extends State<_ActionEditorDialog> {
+  late CcFieldActionType _type;
+  String? _targetId;
+  CcToastType _toastType = CcToastType.info;
+  final _toastMsgCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _type = widget.initial?.type ?? CcFieldActionType.showField;
+    _targetId = widget.initial?.targetId;
+    _toastType = widget.initial?.toastType ?? CcToastType.info;
+    _toastMsgCtrl.text = widget.initial?.toastMessage ?? '';
+  }
+
+  @override
+  void dispose() {
+    _toastMsgCtrl.dispose();
+    super.dispose();
+  }
+
+  IconData _actionIcon(CcFieldActionType type) => switch (type) {
+    CcFieldActionType.showField      => Icons.visibility_rounded,
+    CcFieldActionType.hideField      => Icons.visibility_off_rounded,
+    CcFieldActionType.showSection    => Icons.expand_rounded,
+    CcFieldActionType.hideSection    => Icons.compress_rounded,
+    CcFieldActionType.requireField   => Icons.star_rounded,
+    CcFieldActionType.unrequireField => Icons.star_outline_rounded,
+    CcFieldActionType.enableField    => Icons.lock_open_rounded,
+    CcFieldActionType.disableField   => Icons.lock_rounded,
+    CcFieldActionType.showToast      => Icons.notifications_rounded,
+    CcFieldActionType.jumpToStep     => Icons.arrow_forward_rounded,
+    CcFieldActionType.submitForm     => Icons.send_rounded,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final isAr = widget.isAr;
+
+    final needsFieldTarget = {
+      CcFieldActionType.showField,
+      CcFieldActionType.hideField,
+      CcFieldActionType.requireField,
+      CcFieldActionType.unrequireField,
+      CcFieldActionType.enableField,
+      CcFieldActionType.disableField,
+    }.contains(_type);
+    final needsSectionTarget =
+        _type == CcFieldActionType.showSection || _type == CcFieldActionType.hideSection;
+    final needsStepTarget = _type == CcFieldActionType.jumpToStep;
+    final isToast = _type == CcFieldActionType.showToast;
+
+    final validFields = widget.allFields
+        .where((f) => f.id != widget.currentFieldId && !f.fieldType.isDisplayOnly)
+        .toList();
+
+    final canSave = _type == CcFieldActionType.submitForm || isToast || _targetId != null;
+
+    return AlertDialog(
+      title: Text(
+        isAr ? 'تحرير الإجراء' : 'Edit Action',
+        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+      ),
+      content: SizedBox(
+        width: 380,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Action type dropdown
+            DropdownButtonFormField<CcFieldActionType>(
+              value: _type,
+              isExpanded: true,
+              decoration: InputDecoration(
+                labelText: isAr ? 'نوع الإجراء' : 'Action type',
+                isDense: true,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              items: CcFieldActionType.values
+                  .map((t) => DropdownMenuItem(
+                        value: t,
+                        child: Row(children: [
+                          Icon(_actionIcon(t), size: 14, color: AppColors.primary),
+                          const SizedBox(width: 8),
+                          Text(isAr ? t.labelAr : t.label,
+                              style: const TextStyle(fontSize: 13)),
+                        ]),
+                      ))
+                  .toList(),
+              onChanged: (v) {
+                if (v != null) setState(() { _type = v; _targetId = null; });
+              },
+            ),
+            const SizedBox(height: 14),
+
+            // Target field dropdown
+            if (needsFieldTarget) ...[
+              DropdownButtonFormField<String>(
+                value: _targetId,
+                isExpanded: true,
+                hint: Text(isAr ? 'اختر الحقل' : 'Select field'),
+                decoration: InputDecoration(
+                  labelText: isAr ? 'الحقل المستهدف' : 'Target field',
+                  isDense: true,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                items: validFields
+                    .map((f) => DropdownMenuItem(
+                          value: f.id,
+                          child: Text(
+                            f.label.isNotEmpty ? f.label : '[${f.fieldType.displayName}]',
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ))
+                    .toList(),
+                onChanged: (v) => setState(() => _targetId = v),
+              ),
+            ],
+
+            // Target section dropdown
+            if (needsSectionTarget) ...[
+              DropdownButtonFormField<String>(
+                value: _targetId,
+                isExpanded: true,
+                hint: Text(isAr ? 'اختر القسم' : 'Select section'),
+                decoration: InputDecoration(
+                  labelText: isAr ? 'القسم المستهدف' : 'Target section',
+                  isDense: true,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                items: widget.allSections
+                    .map((s) => DropdownMenuItem(
+                          value: s.id,
+                          child: Text(
+                            s.title.isNotEmpty ? s.title : '[Section]',
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ))
+                    .toList(),
+                onChanged: (v) => setState(() => _targetId = v),
+              ),
+            ],
+
+            // Target step dropdown
+            if (needsStepTarget) ...[
+              DropdownButtonFormField<String>(
+                value: _targetId,
+                isExpanded: true,
+                hint: Text(isAr ? 'اختر الخطوة' : 'Select step'),
+                decoration: InputDecoration(
+                  labelText: isAr ? 'الخطوة المستهدفة' : 'Target step',
+                  isDense: true,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                items: widget.allSteps
+                    .map((s) => DropdownMenuItem(
+                          value: s.id,
+                          child: Text(
+                            s.title.isNotEmpty ? s.title : '[Step]',
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ))
+                    .toList(),
+                onChanged: (v) => setState(() => _targetId = v),
+              ),
+            ],
+
+            // Toast config
+            if (isToast) ...[
+              DropdownButtonFormField<CcToastType>(
+                value: _toastType,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: isAr ? 'نوع الإشعار' : 'Notification type',
+                  isDense: true,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                items: CcToastType.values
+                    .map((t) => DropdownMenuItem(
+                          value: t,
+                          child: Text(isAr ? t.labelAr : t.label,
+                              style: const TextStyle(fontSize: 13)),
+                        ))
+                    .toList(),
+                onChanged: (v) { if (v != null) setState(() => _toastType = v); },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _toastMsgCtrl,
+                maxLines: 2,
+                decoration: InputDecoration(
+                  labelText: isAr ? 'نص الإشعار' : 'Notification message',
+                  hintText: isAr ? 'أدخل الرسالة...' : 'Enter message...',
+                  isDense: true,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                style: const TextStyle(fontSize: 13),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(isAr ? 'إلغاء' : 'Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: canSave
+              ? () {
+                  widget.onSave(CcFieldAction(
+                    type: _type,
+                    targetId: (_type == CcFieldActionType.submitForm || isToast)
+                        ? null
+                        : _targetId,
+                    toastType: _toastType,
+                    toastMessage: _toastMsgCtrl.text.trim(),
+                  ));
+                }
+              : null,
           child: Text(isAr ? 'حفظ' : 'Save'),
         ),
       ],

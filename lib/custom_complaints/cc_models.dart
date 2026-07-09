@@ -504,6 +504,103 @@ class CcFormField {
       };
 }
 
+// ── Option action types ───────────────────────────────────
+
+enum CcFieldActionType {
+  showField('show_field'),
+  hideField('hide_field'),
+  showSection('show_section'),
+  hideSection('hide_section'),
+  requireField('require_field'),
+  unrequireField('unrequire_field'),
+  enableField('enable_field'),
+  disableField('disable_field'),
+  showToast('show_toast'),
+  jumpToStep('jump_to_step'),
+  submitForm('submit_form');
+
+  const CcFieldActionType(this.value);
+  final String value;
+  static CcFieldActionType fromString(String v) =>
+      CcFieldActionType.values.firstWhere((e) => e.value == v,
+          orElse: () => CcFieldActionType.showField);
+
+  String get label => switch (this) {
+    showField => 'Show Field',
+    hideField => 'Hide Field',
+    showSection => 'Show Section',
+    hideSection => 'Hide Section',
+    requireField => 'Make Required',
+    unrequireField => 'Make Optional',
+    enableField => 'Enable Field',
+    disableField => 'Disable Field',
+    showToast => 'Show Notification',
+    jumpToStep => 'Go to Step',
+    submitForm => 'Submit Form',
+  };
+
+  String get labelAr => switch (this) {
+    showField => 'إظهار الحقل',
+    hideField => 'إخفاء الحقل',
+    showSection => 'إظهار القسم',
+    hideSection => 'إخفاء القسم',
+    requireField => 'جعله إلزامياً',
+    unrequireField => 'جعله اختيارياً',
+    enableField => 'تفعيل الحقل',
+    disableField => 'تعطيل الحقل',
+    showToast => 'إظهار إشعار',
+    jumpToStep => 'الانتقال لخطوة',
+    submitForm => 'إرسال النموذج',
+  };
+}
+
+enum CcToastType {
+  success('success'),
+  info('info'),
+  warning('warning'),
+  error('error');
+
+  const CcToastType(this.value);
+  final String value;
+  static CcToastType fromString(String v) =>
+      CcToastType.values.firstWhere((e) => e.value == v,
+          orElse: () => CcToastType.info);
+  String get label => switch (this) {
+    success => 'Success', info => 'Info', warning => 'Warning', error => 'Error',
+  };
+  String get labelAr => switch (this) {
+    success => 'نجاح', info => 'معلومات', warning => 'تحذير', error => 'خطأ',
+  };
+}
+
+class CcFieldAction {
+  final CcFieldActionType type;
+  final String? targetId;       // fieldId, sectionId, or stepId
+  final CcToastType toastType;
+  final String toastMessage;
+
+  const CcFieldAction({
+    required this.type,
+    this.targetId,
+    this.toastType = CcToastType.info,
+    this.toastMessage = '',
+  });
+
+  factory CcFieldAction.fromJson(Map<String, dynamic> j) => CcFieldAction(
+    type: CcFieldActionType.fromString(j['type'] as String? ?? 'show_field'),
+    targetId: j['target_id'] as String?,
+    toastType: CcToastType.fromString(j['toast_type'] as String? ?? 'info'),
+    toastMessage: j['toast_message'] as String? ?? '',
+  );
+
+  Map<String, dynamic> toJson() => {
+    'type': type.value,
+    if (targetId != null) 'target_id': targetId,
+    if (type == CcFieldActionType.showToast) 'toast_type': toastType.value,
+    if (type == CcFieldActionType.showToast) 'toast_message': toastMessage,
+  };
+}
+
 // ── Field configuration ───────────────────────────────────
 
 class CcFieldConfig {
@@ -558,8 +655,8 @@ class CcFieldConfig {
   // Conditional logic
   List<CcCondition> conditions;
   CcConditionOperator conditionOperator;
-  // Jump logic
-  Map<String, String> jumpLogic;
+  // Option actions
+  Map<String, List<CcFieldAction>> optionActions;
 
   CcFieldConfig({
     this.desktopColWidth = 8,
@@ -597,13 +694,13 @@ class CcFieldConfig {
     List<StyledSelectOption>? styledSelectOptions,
     List<CcCondition>? conditions,
     this.conditionOperator = CcConditionOperator.and,
-    Map<String, String>? jumpLogic,
+    Map<String, List<CcFieldAction>>? optionActions,
   })  : options = options ?? [],
         imageUrls = imageUrls ?? [],
         allowedExtensions = allowedExtensions ?? [],
         styledSelectOptions = styledSelectOptions ?? [],
         conditions = conditions ?? [],
-        jumpLogic = jumpLogic ?? {};
+        optionActions = optionActions ?? {};
 
   factory CcFieldConfig.fromJson(Map<String, dynamic> j) => CcFieldConfig(
         desktopColWidth: j['desktop_col_width'] as int? ?? 8,
@@ -646,9 +743,10 @@ class CcFieldConfig {
             .toList(),
         conditionOperator: CcConditionOperator.fromString(
             j['condition_operator'] as String? ?? 'and'),
-        jumpLogic: Map<String, String>.from(
-            (j['jump_logic'] as Map? ?? {})
-                .map((k, v) => MapEntry(k.toString(), v.toString()))),
+        optionActions: (j['option_actions'] as Map? ?? {}).map((k, v) =>
+          MapEntry(k.toString(), (v as List? ?? [])
+            .map((a) => CcFieldAction.fromJson(a as Map<String, dynamic>))
+            .toList())),
       );
 
   Map<String, dynamic> toJson() => {
@@ -687,7 +785,7 @@ class CcFieldConfig {
         'styled_select_options': styledSelectOptions.map((o) => o.toJson()).toList(),
         'conditions': conditions.map((c) => c.toJson()).toList(),
         'condition_operator': conditionOperator.value,
-        'jump_logic': jumpLogic,
+        'option_actions': optionActions.map((k, v) => MapEntry(k, v.map((a) => a.toJson()).toList())),
       };
 }
 

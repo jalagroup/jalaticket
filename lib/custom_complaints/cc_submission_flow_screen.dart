@@ -113,6 +113,15 @@ class _CcFormFillViewState extends State<CcFormFillView> {
   Set<String> _errorFieldIds = {};
   Map<String, String> _typeErrors = {};
 
+  // Action-computed runtime state
+  Map<String, bool> _actionHiddenFields = {};
+  Map<String, bool> _sectionHiddenBySA = {};
+  Map<String, bool> _actionDisabledFields = {};
+  Map<String, bool?> _actionForcedRequired = {};
+
+  // Step navigation history for back button
+  final List<int> _stepHistory = [];
+
   @override
   void initState() {
     super.initState();
@@ -135,6 +144,17 @@ class _CcFormFillViewState extends State<CcFormFillView> {
 
   List<CcFormField> get _allFields =>
       widget.form.steps.expand((s) => s.sections.expand((sec) => sec.fields)).toList();
+
+  CcFormField? _findField(String fieldId) {
+    for (final step in widget.form.steps) {
+      for (final section in step.sections) {
+        for (final field in section.fields) {
+          if (field.id == fieldId) return field;
+        }
+      }
+    }
+    return null;
+  }
 
   bool _evaluateCondition(CcCondition c) {
     final actual = _values[c.sourceFieldId];
@@ -168,6 +188,8 @@ class _CcFormFillViewState extends State<CcFormFillView> {
   }
 
   bool _isVisible(CcFormField field) {
+    if (_actionHiddenFields[field.id] == true) return false;
+    if (_sectionHiddenBySA[field.sectionId] == true) return false;
     final conds = field.config.conditions;
     if (conds.isEmpty) return true;
     if (field.config.conditionOperator == CcConditionOperator.or) {
@@ -188,7 +210,9 @@ class _CcFormFillViewState extends State<CcFormFillView> {
       for (final field in section.fields) {
         if (field.fieldType.isDisplayOnly) continue;
         if (!_isVisible(field)) continue;
-        if (field.config.required) {
+        if (_actionDisabledFields[field.id] == true) continue;
+        final isRequired = _actionForcedRequired[field.id] ?? field.config.required;
+        if (isRequired) {
           if (field.fieldType == CcFieldType.attachment ||
               field.fieldType == CcFieldType.imageAttachment) {
             if ((_pendingFiles[field.id] ?? []).isEmpty) {
@@ -231,20 +255,121 @@ class _CcFormFillViewState extends State<CcFormFillView> {
     return errors;
   }
 
-  /// Checks if any visible field in the current step has jump logic for its current value.
+  void _recomputeActionState() {
+    final Map<String, bool> hidden = {};
+    final Map<String, bool> sectionHidden = {};
+    final Map<String, bool> disabled = {};
+    final Map<String, bool?> forcedRequired = {};
+
+    for (final step in widget.form.steps) {
+      for (final section in step.sections) {
+        for (final field in section.fields) {
+          if (field.config.optionActions.isEmpty) continue;
+          final value = _values[field.id];
+          if (value == null) continue;
+          final actions = field.config.optionActions[value.toString()] ?? [];
+          for (final action in actions) {
+            switch (action.type) {
+              case CcFieldActionType.showField:
+                if (action.targetId != null) hidden[action.targetId!] = false;
+              case CcFieldActionType.hideField:
+                if (action.targetId != null) hidden[action.targetId!] = true;
+              case CcFieldActionType.showSection:
+                if (action.targetId != null) sectionHidden[action.targetId!] = false;
+              case CcFieldActionType.hideSection:
+                if (action.targetId != null) sectionHidden[action.targetId!] = true;
+              case CcFieldActionType.requireField:
+                if (action.targetId != null) forcedRequired[action.targetId!] = true;
+              case CcFieldActionType.unrequireField:
+                if (action.targetId != null) forcedRequired[action.targetId!] = false;
+              case CcFieldActionType.enableField:
+                if (action.targetId != null) disabled[action.targetId!] = false;
+              case CcFieldActionType.disableField:
+                if (action.targetId != null) disabled[action.targetId!] = true;
+              default:
+                break;
+            }
+          }
+        }
+      }
+    }
+
+    setState(() {
+      _actionHiddenFields = hidden;
+      _sectionHiddenBySA = sectionHidden;
+      _actionDisabledFields = disabled;
+      _actionForcedRequired = forcedRequired;
+    });
+  }
+
+  void _showActionToast(CcToastType type, String message) {
+    if (!mounted || message.trim().isEmpty) return;
+    final color = switch (type) {
+      CcToastType.success => const Color(0xFF22C55E),
+      CcToastType.info    => const Color(0xFF3B82F6),
+      CcToastType.warning => const Color(0xFFF59E0B),
+      CcToastType.error   => const Color(0xFFEF4444),
+    };
+    final icon = switch (type) {
+      CcToastType.success => Icons.check_circle_rounded,
+      CcToastType.info    => Icons.info_rounded,
+      CcToastType.warning => Icons.warning_rounded,
+      CcToastType.error   => Icons.error_rounded,
+    };
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      backgroundColor: color,
+      duration: const Duration(seconds: 3),
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      content: Row(
+        children: [
+          Icon(icon, color: Colors.white, size: 18),
+          const SizedBox(width: 8),
+          Expanded(child: Text(message, style: const TextStyle(color: Colors.white, fontSize: 13))),
+        ],
+      ),
+    ));
+  }
+
+  void _handleValueChanged(String fieldId, dynamic value) {
+    setState(() {
+      _values[fieldId] = value;
+      _errorFieldIds.remove(fieldId);
+      _typeErrors.remove(fieldId);
+    });
+
+    if (value != null) {
+      final field = _findField(fieldId);
+      if (field != null) {
+        final actions = field.config.optionActions[value.toString()] ?? [];
+        for (final action in actions) {
+          if (action.type == CcFieldActionType.showToast) {
+            _showActionToast(action.toastType, action.toastMessage);
+          }
+        }
+      }
+    }
+
+    _recomputeActionState();
+  }
+
+  /// Checks if any visible field in the current step has optionActions for its current value.
   /// Returns 'submit', a step ID string, or null (= advance normally).
   String? _resolveJumpTarget() {
     final step = widget.form.steps[_currentStepIndex];
     for (final section in step.sections) {
       for (final field in section.fields) {
         if (!_isVisible(field)) continue;
-        if (field.config.jumpLogic.isEmpty) continue;
+        if (field.config.optionActions.isEmpty) continue;
         final value = _values[field.id];
         if (value == null) continue;
-        final target = field.config.jumpLogic[value.toString()];
-        if (target == null || target == 'next') continue;
-        if (target == 'submit') return 'submit';
-        if (target.startsWith('step:')) return target.substring(5);
+        final actions = field.config.optionActions[value.toString()] ?? [];
+        for (final action in actions) {
+          if (action.type == CcFieldActionType.submitForm) return 'submit';
+          if (action.type == CcFieldActionType.jumpToStep && action.targetId != null) {
+            return action.targetId!;
+          }
+        }
       }
     }
     return null;
@@ -289,7 +414,6 @@ class _CcFormFillViewState extends State<CcFormFillView> {
         return;
       }
       setState(() { _errorFieldIds = {}; _typeErrors = {}; });
-      // Check jump logic first
       final jumpTarget = _resolveJumpTarget();
       if (jumpTarget == 'submit') {
         _submit();
@@ -298,12 +422,13 @@ class _CcFormFillViewState extends State<CcFormFillView> {
       if (jumpTarget != null) {
         final idx = widget.form.steps.indexWhere((s) => s.id == jumpTarget);
         if (idx >= 0) {
+          _stepHistory.add(_currentStepIndex);
           setState(() => _currentStepIndex = idx);
           return;
         }
       }
-      // Default: next step or submit
       if (_currentStepIndex < widget.form.steps.length - 1) {
+        _stepHistory.add(_currentStepIndex);
         setState(() => _currentStepIndex++);
       } else {
         _submit();
@@ -311,12 +436,11 @@ class _CcFormFillViewState extends State<CcFormFillView> {
     }
   }
 
-  /// Returns _goBack callback only when there is somewhere to go and it is not
-  /// the first step (with no previous screen) or the last step (submit).
   VoidCallback? _resolveOnBack(CcForm form) {
     if (!form.allowBack) return null;
     final isLastStep = _currentStepIndex == form.steps.length - 1;
     if (isLastStep) return null;
+    if (_stepHistory.isNotEmpty) return _goBack;
     if (_currentStepIndex > 0) return _goBack;
     if (form.identityMode == CcIdentityMode.choice) return _goBack;
     return null;
@@ -325,13 +449,15 @@ class _CcFormFillViewState extends State<CcFormFillView> {
   void _goBack() {
     setState(() { _stepError = null; _errorFieldIds = {}; _typeErrors = {}; });
     if (_stage == _Stage.step) {
-      if (_currentStepIndex > 0) {
-        setState(() => _currentStepIndex--);
+      if (_stepHistory.isNotEmpty) {
+        setState(() => _currentStepIndex = _stepHistory.removeLast());
       } else if (widget.form.identityMode == CcIdentityMode.choice) {
-        // Allow going back to identity choice from first step only
         setState(() => _stage = _Stage.identity);
       }
-      // No going back to the onboarding/welcome screen once steps have started
+    } else if (_stage == _Stage.identity) {
+      if (widget.form.showOnboarding && widget.form.onboardingConfig != null) {
+        setState(() => _stage = _Stage.onboarding);
+      }
     }
   }
 
@@ -478,11 +604,7 @@ class _CcFormFillViewState extends State<CcFormFillView> {
           typeErrors: _typeErrors,
           isVisible: _isVisible,
           error: _stepError,
-          onValueChanged: (fieldId, v) => setState(() {
-            _values[fieldId] = v;
-            _errorFieldIds.remove(fieldId);
-            _typeErrors.remove(fieldId);
-          }),
+          onValueChanged: _handleValueChanged,
           onFilesChanged: (fieldId, files) => setState(() {
             _pendingFiles[fieldId] = files;
             if (files.isNotEmpty) {
@@ -492,6 +614,8 @@ class _CcFormFillViewState extends State<CcFormFillView> {
           }),
           onNext: _goNext,
           onBack: _resolveOnBack(form),
+          disabledFields: _actionDisabledFields,
+          hiddenSections: _sectionHiddenBySA,
         );
     }
   }
@@ -837,6 +961,8 @@ class _StepStage extends StatefulWidget {
   final VoidCallback onNext;
   final VoidCallback? onBack;
   final Map<String, String> typeErrors;
+  final Map<String, bool> disabledFields;
+  final Map<String, bool> hiddenSections;
 
   const _StepStage({
     required this.form,
@@ -851,6 +977,8 @@ class _StepStage extends StatefulWidget {
     required this.onNext,
     this.onBack,
     this.typeErrors = const {},
+    this.disabledFields = const {},
+    this.hiddenSections = const {},
   });
 
   @override
@@ -955,21 +1083,23 @@ class _StepStageState extends State<_StepStage> {
                               ),
                             ),
                           ),
-                        for (int si = 0; si < step.sections.length; si++) ...[
-                          _SectionBlock(
-                            section: step.sections[si],
-                            sectionIndex: si,
-                            showDivider: si > 0,
-                            isMobile: isMobile,
-                            values: widget.values,
-                            pendingFiles: widget.pendingFiles,
-                            errorFieldIds: widget.errorFieldIds,
-                            typeErrors: widget.typeErrors,
-                            isVisible: widget.isVisible,
-                            onValueChanged: widget.onValueChanged,
-                            onFilesChanged: widget.onFilesChanged,
-                          ),
-                        ],
+                        for (int si = 0; si < step.sections.length; si++)
+                          if (widget.hiddenSections[step.sections[si].id] != true) ...[
+                            _SectionBlock(
+                              section: step.sections[si],
+                              sectionIndex: si,
+                              showDivider: si > 0,
+                              isMobile: isMobile,
+                              values: widget.values,
+                              pendingFiles: widget.pendingFiles,
+                              errorFieldIds: widget.errorFieldIds,
+                              typeErrors: widget.typeErrors,
+                              isVisible: widget.isVisible,
+                              onValueChanged: widget.onValueChanged,
+                              onFilesChanged: widget.onFilesChanged,
+                              disabledFields: widget.disabledFields,
+                            ),
+                          ],
                         if (widget.error != null)
                           Padding(
                             padding: const EdgeInsets.only(top: 4, bottom: 8),
@@ -1134,6 +1264,7 @@ class _SectionBlock extends StatelessWidget {
   final bool Function(CcFormField) isVisible;
   final void Function(String, dynamic) onValueChanged;
   final void Function(String, List<_PendingFile>) onFilesChanged;
+  final Map<String, bool> disabledFields;
 
   const _SectionBlock({
     required this.section,
@@ -1147,6 +1278,7 @@ class _SectionBlock extends StatelessWidget {
     required this.isVisible,
     required this.onValueChanged,
     required this.onFilesChanged,
+    this.disabledFields = const {},
   });
 
   @override
@@ -1216,6 +1348,7 @@ class _SectionBlock extends StatelessWidget {
                 typeErrors: typeErrors,
                 onValueChanged: onValueChanged,
                 onFilesChanged: onFilesChanged,
+                disabledFields: disabledFields,
               ),
             ),
         ],
@@ -1235,6 +1368,7 @@ class _FieldRows extends StatelessWidget {
   final Map<String, String> typeErrors;
   final void Function(String, dynamic) onValueChanged;
   final void Function(String, List<_PendingFile>) onFilesChanged;
+  final Map<String, bool> disabledFields;
 
   const _FieldRows({
     required this.fields,
@@ -1245,6 +1379,7 @@ class _FieldRows extends StatelessWidget {
     this.typeErrors = const {},
     required this.onValueChanged,
     required this.onFilesChanged,
+    this.disabledFields = const {},
   });
 
   @override
@@ -1283,19 +1418,21 @@ class _FieldRows extends StatelessWidget {
               final widgets = <Widget>[];
               for (final entry in row) {
                 if (widgets.isNotEmpty) widgets.add(const SizedBox(width: 12));
-                widgets.add(Expanded(
-                  flex: entry.value,
-                  child: _FieldInput(
-                    key: ValueKey(entry.key.id),
-                    field: entry.key,
-                    value: values[entry.key.id],
-                    files: pendingFiles[entry.key.id] ?? const [],
-                    showError: errorFieldIds.contains(entry.key.id),
-                    errorMessage: typeErrors[entry.key.id],
-                    onChanged: (v) => onValueChanged(entry.key.id, v),
-                    onFilesChanged: (f) => onFilesChanged(entry.key.id, f),
-                  ),
-                ));
+                Widget fieldWidget = _FieldInput(
+                  key: ValueKey(entry.key.id),
+                  field: entry.key,
+                  value: values[entry.key.id],
+                  files: pendingFiles[entry.key.id] ?? const [],
+                  showError: errorFieldIds.contains(entry.key.id),
+                  errorMessage: typeErrors[entry.key.id],
+                  onChanged: (v) => onValueChanged(entry.key.id, v),
+                  onFilesChanged: (f) => onFilesChanged(entry.key.id, f),
+                );
+                final isDisabled = disabledFields[entry.key.id] == true;
+                if (isDisabled) {
+                  fieldWidget = Opacity(opacity: 0.45, child: IgnorePointer(child: fieldWidget));
+                }
+                widgets.add(Expanded(flex: entry.value, child: fieldWidget));
               }
               return widgets;
             }(),
