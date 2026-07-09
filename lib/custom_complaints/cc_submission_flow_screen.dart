@@ -231,6 +231,25 @@ class _CcFormFillViewState extends State<CcFormFillView> {
     return errors;
   }
 
+  /// Checks if any visible field in the current step has jump logic for its current value.
+  /// Returns 'submit', a step ID string, or null (= advance normally).
+  String? _resolveJumpTarget() {
+    final step = widget.form.steps[_currentStepIndex];
+    for (final section in step.sections) {
+      for (final field in section.fields) {
+        if (!_isVisible(field)) continue;
+        if (field.config.jumpLogic.isEmpty) continue;
+        final value = _values[field.id];
+        if (value == null) continue;
+        final target = field.config.jumpLogic[value.toString()];
+        if (target == null || target == 'next') continue;
+        if (target == 'submit') return 'submit';
+        if (target.startsWith('step:')) return target.substring(5);
+      }
+    }
+    return null;
+  }
+
   void _goNext() {
     final isAr = Localizations.localeOf(context).languageCode == 'ar';
     setState(() => _stepError = null);
@@ -270,6 +289,20 @@ class _CcFormFillViewState extends State<CcFormFillView> {
         return;
       }
       setState(() { _errorFieldIds = {}; _typeErrors = {}; });
+      // Check jump logic first
+      final jumpTarget = _resolveJumpTarget();
+      if (jumpTarget == 'submit') {
+        _submit();
+        return;
+      }
+      if (jumpTarget != null) {
+        final idx = widget.form.steps.indexWhere((s) => s.id == jumpTarget);
+        if (idx >= 0) {
+          setState(() => _currentStepIndex = idx);
+          return;
+        }
+      }
+      // Default: next step or submit
       if (_currentStepIndex < widget.form.steps.length - 1) {
         setState(() => _currentStepIndex++);
       } else {
@@ -370,12 +403,17 @@ class _CcFormFillViewState extends State<CcFormFillView> {
             }),
       ]);
 
-      if (widget.form.notifyCreatorOnSubmit) {
+      if (widget.form.notifyCreatorOnSubmit ||
+          widget.form.notifyAdditionalEmails.isNotEmpty ||
+          widget.form.notifyAdditionalUserIds.isNotEmpty) {
         CcService.notifyFormSubmission(
           formId: widget.form.id,
           submissionId: submission.id,
           formTitle: widget.form.title,
-          notifyEmail: widget.form.notifyEmail,
+          notifyEmail: widget.form.notifyCreatorOnSubmit ? widget.form.notifyEmail : null,
+          additionalEmails: widget.form.notifyAdditionalEmails,
+          additionalUserIds: widget.form.notifyAdditionalUserIds,
+          customMessage: widget.form.notifyCustomMessage,
         );
       }
 

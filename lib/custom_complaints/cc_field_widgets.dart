@@ -139,12 +139,16 @@ class CcFieldPreview extends StatelessWidget {
 
 class CcFieldPropertiesPanel extends StatefulWidget {
   final CcFormField field;
+  final List<CcFormField> allFields;
+  final List<CcFormStep> allSteps;
   final VoidCallback onChanged;
   final VoidCallback onDeselect;
 
   const CcFieldPropertiesPanel({
     super.key,
     required this.field,
+    required this.allFields,
+    required this.allSteps,
     required this.onChanged,
     required this.onDeselect,
   });
@@ -455,24 +459,151 @@ class _CcFieldPropertiesPanelState extends State<CcFieldPropertiesPanel> {
                 style: TextStyle(fontSize: 10, color: Colors.grey[500]),
               ),
               const SizedBox(height: 6),
-              ...c.conditions.asMap().entries.map((e) => _ConditionRow(
-                    condition: e.value,
-                    onRemove: () => _update(() => c.conditions.removeAt(e.key)),
-                  )),
+              ...c.conditions.asMap().entries.map((e) {
+                final matches = widget.allFields.where((f) => f.id == e.value.sourceFieldId);
+                final srcField = matches.isEmpty ? null : matches.first;
+                final srcLabel = srcField != null
+                    ? (srcField.label.isNotEmpty ? srcField.label : (isAr ? srcField.fieldType.displayNameAr : srcField.fieldType.displayName))
+                    : (e.value.sourceFieldId.isEmpty
+                        ? (isAr ? '(حقل)' : '(field)')
+                        : (isAr ? '(حقل محذوف)' : '(deleted field)'));
+                return _ConditionRow(
+                  condition: e.value,
+                  sourceFieldLabel: srcLabel,
+                  onRemove: () => _update(() => c.conditions.removeAt(e.key)),
+                  onTap: () async {
+                    final result = await showDialog<CcCondition>(
+                      context: context,
+                      builder: (dialogCtx) => _ConditionEditorDialog(
+                        initial: e.value,
+                        allFields: widget.allFields,
+                        currentFieldId: field.id,
+                        onSave: (cond) => Navigator.pop(dialogCtx, cond),
+                      ),
+                    );
+                    if (result != null) {
+                      _update(() => c.conditions[e.key] = result);
+                    }
+                  },
+                );
+              }),
               TextButton.icon(
-                onPressed: () {
-                  // simplest: condition refers to a field id typed manually,
-                  // full UI for field-picker can be wired with the form's field list
-                  _update(() => c.conditions.add(CcCondition(
-                        sourceFieldId: '',
-                        rule: CcConditionRule.equals,
-                        value: '',
-                      )));
+                onPressed: () async {
+                  final result = await showDialog<CcCondition>(
+                    context: context,
+                    builder: (dialogCtx) => _ConditionEditorDialog(
+                      allFields: widget.allFields,
+                      currentFieldId: field.id,
+                      onSave: (cond) => Navigator.pop(dialogCtx, cond),
+                    ),
+                  );
+                  if (result != null) {
+                    _update(() => c.conditions.add(result));
+                  }
                 },
                 icon: const Icon(Icons.add_rounded, size: 14),
                 label: Text(isAr ? 'إضافة شرط' : 'Add condition',
                     style: const TextStyle(fontSize: 11)),
               ),
+
+              if (widget.allSteps.length > 1 &&
+                  [CcFieldType.singleSelect, CcFieldType.radio, CcFieldType.yesNo,
+                   CcFieldType.styledSelect, CcFieldType.imageChoice].contains(field.fieldType)) ...[
+                const Divider(),
+                const SizedBox(height: 4),
+                _label(isAr ? 'منطق الانتقال' : 'Jump Logic'),
+                Text(
+                  isAr
+                      ? 'تحديد وجهة التنقل بعد اختيار كل خيار'
+                      : 'Set where to go after each option is selected',
+                  style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+                ),
+                const SizedBox(height: 8),
+                ...() {
+                  final List<String> optionValues;
+                  final List<String> optionLabels;
+                  if (field.fieldType == CcFieldType.yesNo) {
+                    optionValues = ['true', 'false'];
+                    optionLabels = isAr ? ['نعم', 'لا'] : ['Yes', 'No'];
+                  } else if (field.fieldType == CcFieldType.styledSelect) {
+                    optionValues = c.styledSelectOptions.map((o) => o.label).toList();
+                    optionLabels = c.styledSelectOptions.map((o) => o.label).toList();
+                  } else {
+                    optionValues = c.options;
+                    optionLabels = c.options;
+                  }
+                  return optionValues.asMap().entries.map((e) {
+                    final optValue = e.value;
+                    final optLabel = optionLabels[e.key];
+                    final currentTarget = c.jumpLogic[optValue] ?? 'next';
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: Text(
+                              optLabel,
+                              style: const TextStyle(fontSize: 11),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            flex: 3,
+                            child: DropdownButtonFormField<String>(
+                              value: currentTarget,
+                              isExpanded: true,
+                              decoration: InputDecoration(
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 6),
+                                border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(6)),
+                              ),
+                              style: const TextStyle(
+                                  fontSize: 11, color: Colors.black87),
+                              items: [
+                                DropdownMenuItem(
+                                  value: 'next',
+                                  child: Text(
+                                    isAr ? 'الخطوة التالية' : 'Next step',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'submit',
+                                  child: Text(
+                                    isAr ? 'إرسال النموذج' : 'Submit form',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                ...widget.allSteps.map((step) => DropdownMenuItem(
+                                  value: 'step:${step.id}',
+                                  child: Text(
+                                    '→ ${step.title}',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                )),
+                              ],
+                              onChanged: (v) {
+                                if (v == null) return;
+                                _update(() {
+                                  if (v == 'next') {
+                                    c.jumpLogic.remove(optValue);
+                                  } else {
+                                    c.jumpLogic[optValue] = v;
+                                  }
+                                });
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList();
+                }(),
+              ],
             ],
           ),
         ),
@@ -789,33 +920,327 @@ class _StyledOptionsEditorState extends State<_StyledOptionsEditor> {
 
 class _ConditionRow extends StatelessWidget {
   final CcCondition condition;
+  final String sourceFieldLabel;
   final VoidCallback onRemove;
+  final VoidCallback onTap;
 
-  const _ConditionRow({required this.condition, required this.onRemove});
+  const _ConditionRow({
+    required this.condition,
+    required this.sourceFieldLabel,
+    required this.onRemove,
+    required this.onTap,
+  });
+
+  String _ruleLabel(CcConditionRule rule, bool isAr) {
+    if (isAr) {
+      switch (rule) {
+        case CcConditionRule.equals:      return 'يساوي';
+        case CcConditionRule.notEquals:   return 'لا يساوي';
+        case CcConditionRule.contains:    return 'يحتوي على';
+        case CcConditionRule.notContains: return 'لا يحتوي على';
+        case CcConditionRule.greaterThan: return 'أكبر من';
+        case CcConditionRule.lessThan:    return 'أصغر من';
+        case CcConditionRule.isEmpty:     return 'فارغ';
+        case CcConditionRule.isNotEmpty:  return 'غير فارغ';
+      }
+    } else {
+      switch (rule) {
+        case CcConditionRule.equals:      return 'equals';
+        case CcConditionRule.notEquals:   return 'not equals';
+        case CcConditionRule.contains:    return 'contains';
+        case CcConditionRule.notContains: return 'does not contain';
+        case CcConditionRule.greaterThan: return 'greater than';
+        case CcConditionRule.lessThan:    return 'less than';
+        case CcConditionRule.isEmpty:     return 'is empty';
+        case CcConditionRule.isNotEmpty:  return 'is not empty';
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(color: const Color(0xFFF7F7F9), borderRadius: BorderRadius.circular(6)),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              '${condition.sourceFieldId.isEmpty ? "(field)" : condition.sourceFieldId} ${condition.rule.value} ${condition.value ?? ""}',
-              style: const TextStyle(fontSize: 10),
-              overflow: TextOverflow.ellipsis,
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
+    final needsValue = condition.rule != CcConditionRule.isEmpty &&
+        condition.rule != CcConditionRule.isNotEmpty;
+    final valueStr = needsValue && condition.value != null ? ' ${condition.value}' : '';
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF7F7F9),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                '$sourceFieldLabel ${_ruleLabel(condition.rule, isAr)}$valueStr',
+                style: const TextStyle(fontSize: 10),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.close_rounded, size: 12),
-            onPressed: onRemove,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-          ),
-        ],
+            IconButton(
+              icon: const Icon(Icons.close_rounded, size: 12),
+              onPressed: onRemove,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+            ),
+          ],
+        ),
       ),
+    );
+  }
+}
+
+// ── Condition editor dialog ────────────────────────────────
+
+class _ConditionEditorDialog extends StatefulWidget {
+  final CcCondition? initial;
+  final List<CcFormField> allFields;
+  final String currentFieldId;
+  final ValueChanged<CcCondition> onSave;
+
+  const _ConditionEditorDialog({
+    this.initial,
+    required this.allFields,
+    required this.currentFieldId,
+    required this.onSave,
+  });
+
+  @override
+  State<_ConditionEditorDialog> createState() => _ConditionEditorDialogState();
+}
+
+class _ConditionEditorDialogState extends State<_ConditionEditorDialog> {
+  String? _sourceFieldId;
+  CcConditionRule _rule = CcConditionRule.equals;
+  String _value = '';
+
+  @override
+  void initState() {
+    super.initState();
+    final init = widget.initial;
+    if (init != null && init.sourceFieldId.isNotEmpty) {
+      _sourceFieldId = init.sourceFieldId;
+      _rule = init.rule;
+      _value = init.value?.toString() ?? '';
+    }
+  }
+
+  String _ruleLabel(CcConditionRule rule, bool isAr) {
+    if (isAr) {
+      switch (rule) {
+        case CcConditionRule.equals:      return 'يساوي';
+        case CcConditionRule.notEquals:   return 'لا يساوي';
+        case CcConditionRule.contains:    return 'يحتوي على';
+        case CcConditionRule.notContains: return 'لا يحتوي على';
+        case CcConditionRule.greaterThan: return 'أكبر من';
+        case CcConditionRule.lessThan:    return 'أصغر من';
+        case CcConditionRule.isEmpty:     return 'فارغ';
+        case CcConditionRule.isNotEmpty:  return 'غير فارغ';
+      }
+    } else {
+      switch (rule) {
+        case CcConditionRule.equals:      return 'equals';
+        case CcConditionRule.notEquals:   return 'not equals';
+        case CcConditionRule.contains:    return 'contains';
+        case CcConditionRule.notContains: return 'does not contain';
+        case CcConditionRule.greaterThan: return 'greater than';
+        case CcConditionRule.lessThan:    return 'less than';
+        case CcConditionRule.isEmpty:     return 'is empty';
+        case CcConditionRule.isNotEmpty:  return 'is not empty';
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
+
+    final validSourceFields = widget.allFields
+        .where((f) => f.id != widget.currentFieldId && !f.fieldType.isDisplayOnly)
+        .toList();
+
+    final srcMatches = _sourceFieldId == null
+        ? <CcFormField>[]
+        : validSourceFields.where((f) => f.id == _sourceFieldId).toList();
+    final selectedField = srcMatches.isEmpty ? null : srcMatches.first;
+
+    final needsValue = _rule != CcConditionRule.isEmpty &&
+        _rule != CcConditionRule.isNotEmpty;
+
+    // Build value widget based on selected field type
+    Widget? valueWidget;
+    if (needsValue && selectedField != null) {
+      if (selectedField.fieldType == CcFieldType.yesNo) {
+        final yesNoVal = _value.isEmpty ? 'true' : _value;
+        valueWidget = DropdownButtonFormField<String>(
+          value: yesNoVal == 'true' || yesNoVal == 'false' ? yesNoVal : 'true',
+          isExpanded: true,
+          decoration: InputDecoration(
+            isDense: true,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+          ),
+          items: [
+            DropdownMenuItem(value: 'true',  child: Text(isAr ? 'نعم' : 'Yes')),
+            DropdownMenuItem(value: 'false', child: Text(isAr ? 'لا'  : 'No')),
+          ],
+          onChanged: (v) => setState(() => _value = v ?? 'true'),
+        );
+      } else if ([
+        CcFieldType.singleSelect,
+        CcFieldType.multiSelect,
+        CcFieldType.checkboxGroup,
+        CcFieldType.radio,
+        CcFieldType.imageChoice,
+        CcFieldType.styledSelect,
+      ].contains(selectedField.fieldType)) {
+        final options = selectedField.fieldType == CcFieldType.styledSelect
+            ? selectedField.config.styledSelectOptions.map((o) => o.label).toList()
+            : selectedField.config.options;
+        if (options.isNotEmpty) {
+          valueWidget = DropdownButtonFormField<String>(
+            value: options.contains(_value) ? _value : null,
+            isExpanded: true,
+            decoration: InputDecoration(
+              isDense: true,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+            ),
+            hint: Text(isAr ? 'اختر قيمة' : 'Select a value',
+                style: const TextStyle(fontSize: 12)),
+            items: options
+                .map((o) => DropdownMenuItem(
+                      value: o,
+                      child: Text(o,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12)),
+                    ))
+                .toList(),
+            onChanged: (v) => setState(() => _value = v ?? ''),
+          );
+        } else {
+          valueWidget = TextFormField(
+            initialValue: _value,
+            decoration: InputDecoration(
+              isDense: true,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+            ),
+            style: const TextStyle(fontSize: 12),
+            onChanged: (v) => setState(() => _value = v),
+          );
+        }
+      } else {
+        valueWidget = TextFormField(
+          initialValue: _value,
+          decoration: InputDecoration(
+            isDense: true,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+          ),
+          style: const TextStyle(fontSize: 12),
+          onChanged: (v) => setState(() => _value = v),
+        );
+      }
+    }
+
+    return AlertDialog(
+      title: Text(
+        widget.initial != null
+            ? (isAr ? 'تعديل الشرط' : 'Edit condition')
+            : (isAr ? 'إضافة شرط' : 'Add condition'),
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+      ),
+      content: SizedBox(
+        width: 340,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(isAr ? 'الحقل المصدر' : 'Source field',
+                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                    color: AppColors.secondary)),
+            const SizedBox(height: 4),
+            DropdownButtonFormField<String>(
+              value: _sourceFieldId,
+              isExpanded: true,
+              decoration: InputDecoration(
+                isDense: true,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+              ),
+              hint: Text(isAr ? 'اختر حقل' : 'Select field',
+                  style: const TextStyle(fontSize: 12)),
+              items: validSourceFields
+                  .map((f) => DropdownMenuItem(
+                        value: f.id,
+                        child: Text(
+                          f.label.isNotEmpty
+                              ? f.label
+                              : (isAr ? f.fieldType.displayNameAr : f.fieldType.displayName),
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ))
+                  .toList(),
+              onChanged: (v) => setState(() {
+                _sourceFieldId = v;
+                _value = '';
+              }),
+            ),
+            const SizedBox(height: 12),
+            Text(isAr ? 'القاعدة' : 'Rule',
+                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                    color: AppColors.secondary)),
+            const SizedBox(height: 4),
+            DropdownButtonFormField<CcConditionRule>(
+              value: _rule,
+              isExpanded: true,
+              decoration: InputDecoration(
+                isDense: true,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+              ),
+              items: CcConditionRule.values
+                  .map((r) => DropdownMenuItem(
+                        value: r,
+                        child: Text(_ruleLabel(r, isAr),
+                            style: const TextStyle(fontSize: 12)),
+                      ))
+                  .toList(),
+              onChanged: (v) =>
+                  setState(() => _rule = v ?? CcConditionRule.equals),
+            ),
+            if (needsValue && valueWidget != null) ...[
+              const SizedBox(height: 12),
+              Text(isAr ? 'القيمة' : 'Value',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                      color: AppColors.secondary)),
+              const SizedBox(height: 4),
+              valueWidget,
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(isAr ? 'إلغاء' : 'Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: _sourceFieldId == null
+              ? null
+              : () => widget.onSave(CcCondition(
+                    sourceFieldId: _sourceFieldId!,
+                    rule: _rule,
+                    value: needsValue ? _value : null,
+                  )),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+          ),
+          child: Text(isAr ? 'حفظ' : 'Save'),
+        ),
+      ],
     );
   }
 }

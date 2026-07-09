@@ -96,6 +96,11 @@ class _CcFormBuilderScreenState extends State<CcFormBuilderScreen>
         'progress_style': _form!.progressStyle.value,
         'logo_url': _form!.logoUrl,
         'is_active': _form!.isActive,
+        'notify_creator_on_submit': _form!.notifyCreatorOnSubmit,
+        'notify_email': _form!.notifyEmail,
+        'notify_additional_emails': _form!.notifyAdditionalEmails,
+        'notify_additional_user_ids': _form!.notifyAdditionalUserIds,
+        'notify_custom_message': _form!.notifyCustomMessage,
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1782,6 +1787,10 @@ class _RightPanel extends StatelessWidget {
       child: selectedField != null
           ? CcFieldPropertiesPanel(
               field: selectedField!,
+              allFields: form.steps
+                  .expand((s) => s.sections.expand((sec) => sec.fields))
+                  .toList(),
+              allSteps: form.steps,
               onChanged: onChanged,
               onDeselect: onDeselect,
             )
@@ -1834,6 +1843,68 @@ class _SettingsTabState extends State<_SettingsTab> {
   bool _uploadingLogo = false;
   bool _qrExporting = false;
   final _qrKey = GlobalKey();
+  late TextEditingController _customMsgCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _customMsgCtrl = TextEditingController(
+        text: widget.form.notifyCustomMessage ?? '');
+  }
+
+  @override
+  void dispose() {
+    _customMsgCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _showAddEmailDialog(bool isAr) async {
+    final ctrl = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(isAr ? 'إضافة بريد إلكتروني' : 'Add email'),
+        content: TextFormField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.emailAddress,
+          decoration: InputDecoration(
+            hintText: 'example@domain.com',
+            isDense: true,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(isAr ? 'إلغاء' : 'Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final email = ctrl.text.trim();
+              if (email.contains('@') && email.contains('.')) {
+                Navigator.pop(ctx, email);
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+            ),
+            child: Text(isAr ? 'إضافة' : 'Add'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (result != null && mounted) {
+      setState(() {
+        if (!widget.form.notifyAdditionalEmails.contains(result)) {
+          widget.form.notifyAdditionalEmails.add(result);
+          widget.onChanged();
+        }
+      });
+    }
+  }
 
   Future<void> _pickLogo(bool isAr) async {
     final result = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
@@ -2329,6 +2400,7 @@ class _SettingsTabState extends State<_SettingsTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // ── Toggle ───────────────────────────────────
                   SwitchListTile(
                     dense: true,
                     activeColor: AppColors.primary,
@@ -2351,6 +2423,7 @@ class _SettingsTabState extends State<_SettingsTab> {
                     value: widget.form.notifyCreatorOnSubmit,
                     onChanged: (v) { widget.form.notifyCreatorOnSubmit = v; widget.onChanged(); },
                   ),
+                  // ── Primary email ─────────────────────────────
                   if (widget.form.notifyCreatorOnSubmit) ...[
                     const Divider(height: 1, indent: 16, endIndent: 16),
                     Padding(
@@ -2373,6 +2446,108 @@ class _SettingsTabState extends State<_SettingsTab> {
                       ),
                     ),
                   ],
+                  // ── Additional recipients ─────────────────────
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.group_outlined, size: 16, color: Color(0xFF7C3AED)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                isAr ? 'مستلمون إضافيون' : 'Additional email recipients',
+                                style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                              ),
+                              Text(
+                                isAr ? 'إرسال الإشعار إلى عناوين إضافية' : 'Also notify these addresses',
+                                style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        ...widget.form.notifyAdditionalEmails.map((email) => Chip(
+                          label: Text(email, style: const TextStyle(fontSize: 11)),
+                          deleteIcon: const Icon(Icons.close_rounded, size: 14),
+                          onDeleted: () => setState(() {
+                            widget.form.notifyAdditionalEmails.remove(email);
+                            widget.onChanged();
+                          }),
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
+                        )),
+                        ActionChip(
+                          avatar: const Icon(Icons.add_rounded, size: 14),
+                          label: Text(isAr ? 'إضافة بريد' : 'Add email',
+                              style: const TextStyle(fontSize: 11)),
+                          onPressed: () => _showAddEmailDialog(isAr),
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ],
+                    ),
+                  ),
+                  // ── Custom message ────────────────────────────
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.message_outlined, size: 16, color: Color(0xFF7C3AED)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                isAr ? 'رسالة مخصصة' : 'Custom notification message',
+                                style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                              ),
+                              Text(
+                                isAr
+                                    ? 'رسالة مخصصة في الإشعارات بدلاً من الرسالة الافتراضية'
+                                    : 'Message sent in notifications instead of the default message',
+                                style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
+                    child: TextFormField(
+                      controller: _customMsgCtrl,
+                      maxLines: 3,
+                      decoration: InputDecoration(
+                        hintText: isAr ? 'اكتب رسالتك هنا...' : 'Type your message here...',
+                        isDense: true,
+                        filled: true,
+                        fillColor: Colors.grey[50],
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey[300]!)),
+                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey[200]!)),
+                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF7C3AED))),
+                      ),
+                      style: const TextStyle(fontSize: 13),
+                      onChanged: (v) {
+                        widget.form.notifyCustomMessage = v.trim().isEmpty ? null : v.trim();
+                        widget.onChanged();
+                      },
+                    ),
+                  ),
                 ],
               ),
             ),

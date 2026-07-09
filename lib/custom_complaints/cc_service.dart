@@ -716,19 +716,22 @@ class CcService {
     required String submissionId,
     required String formTitle,
     String? notifyEmail,
+    List<String> additionalEmails = const [],
+    List<String> additionalUserIds = const [],
+    String? customMessage,
   }) async {
     try {
-      await _supabase.functions.invoke(
-        'notify-form-submission',
-        body: {
-          'form_id': formId,
-          'submission_id': submissionId,
-          'form_title': formTitle,
-          if (notifyEmail != null) 'notify_email': notifyEmail,
-        },
-      );
+      await _supabase.functions.invoke('notify-form-submission', body: {
+        'form_id': formId,
+        'submission_id': submissionId,
+        'form_title': formTitle,
+        if (notifyEmail != null) 'notify_email': notifyEmail,
+        if (additionalEmails.isNotEmpty) 'additional_emails': additionalEmails,
+        if (additionalUserIds.isNotEmpty) 'additional_user_ids': additionalUserIds,
+        if (customMessage != null && customMessage.isNotEmpty) 'custom_message': customMessage,
+      });
     } catch (e) {
-      debugPrint('Notification send failed (non-critical): $e');
+      debugPrint('[CC] notify failed: $e');
     }
   }
 }

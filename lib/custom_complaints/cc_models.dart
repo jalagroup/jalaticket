@@ -272,6 +272,9 @@ class CcForm {
   bool isActive;
   bool notifyCreatorOnSubmit;
   String? notifyEmail;
+  List<String> notifyAdditionalEmails;
+  List<String> notifyAdditionalUserIds;
+  String? notifyCustomMessage;
   bool allowBack;
   final DateTime createdAt;
   DateTime updatedAt;
@@ -296,13 +299,18 @@ class CcForm {
     required this.isActive,
     this.notifyCreatorOnSubmit = false,
     this.notifyEmail,
+    List<String>? notifyAdditionalEmails,
+    List<String>? notifyAdditionalUserIds,
+    this.notifyCustomMessage,
     this.allowBack = true,
     required this.createdAt,
     required this.updatedAt,
     List<CcFormStep>? steps,
     List<CcFormAudience>? audience,
   })  : steps = steps ?? [],
-        audience = audience ?? [];
+        audience = audience ?? [],
+        notifyAdditionalEmails = notifyAdditionalEmails ?? [],
+        notifyAdditionalUserIds = notifyAdditionalUserIds ?? [];
 
   factory CcForm.fromJson(Map<String, dynamic> j) => CcForm(
         id: j['id'] as String,
@@ -320,6 +328,9 @@ class CcForm {
         isActive: j['is_active'] as bool? ?? true,
         notifyCreatorOnSubmit: j['notify_creator_on_submit'] as bool? ?? false,
         notifyEmail: j['notify_email'] as String?,
+        notifyAdditionalEmails: List<String>.from(j['notify_additional_emails'] as List? ?? []),
+        notifyAdditionalUserIds: List<String>.from(j['notify_additional_user_ids'] as List? ?? []),
+        notifyCustomMessage: j['notify_custom_message'] as String?,
         allowBack: j['allow_back'] as bool? ?? true,
         createdAt: DateTime.parse(j['created_at'] as String),
         updatedAt: DateTime.parse(j['updated_at'] as String),
@@ -340,6 +351,9 @@ class CcForm {
         'is_active': isActive,
         'notify_creator_on_submit': notifyCreatorOnSubmit,
         'notify_email': notifyEmail,
+        'notify_additional_emails': notifyAdditionalEmails,
+        'notify_additional_user_ids': notifyAdditionalUserIds,
+        'notify_custom_message': notifyCustomMessage,
         'allow_back': allowBack,
       };
 
@@ -544,6 +558,8 @@ class CcFieldConfig {
   // Conditional logic
   List<CcCondition> conditions;
   CcConditionOperator conditionOperator;
+  // Jump logic
+  Map<String, String> jumpLogic;
 
   CcFieldConfig({
     this.desktopColWidth = 8,
@@ -581,11 +597,13 @@ class CcFieldConfig {
     List<StyledSelectOption>? styledSelectOptions,
     List<CcCondition>? conditions,
     this.conditionOperator = CcConditionOperator.and,
+    Map<String, String>? jumpLogic,
   })  : options = options ?? [],
         imageUrls = imageUrls ?? [],
         allowedExtensions = allowedExtensions ?? [],
         styledSelectOptions = styledSelectOptions ?? [],
-        conditions = conditions ?? [];
+        conditions = conditions ?? [],
+        jumpLogic = jumpLogic ?? {};
 
   factory CcFieldConfig.fromJson(Map<String, dynamic> j) => CcFieldConfig(
         desktopColWidth: j['desktop_col_width'] as int? ?? 8,
@@ -628,6 +646,9 @@ class CcFieldConfig {
             .toList(),
         conditionOperator: CcConditionOperator.fromString(
             j['condition_operator'] as String? ?? 'and'),
+        jumpLogic: Map<String, String>.from(
+            (j['jump_logic'] as Map? ?? {})
+                .map((k, v) => MapEntry(k.toString(), v.toString()))),
       );
 
   Map<String, dynamic> toJson() => {
@@ -666,6 +687,7 @@ class CcFieldConfig {
         'styled_select_options': styledSelectOptions.map((o) => o.toJson()).toList(),
         'conditions': conditions.map((c) => c.toJson()).toList(),
         'condition_operator': conditionOperator.value,
+        'jump_logic': jumpLogic,
       };
 }
 
