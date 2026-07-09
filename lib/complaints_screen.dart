@@ -366,6 +366,8 @@ class _ComplaintsScreenState extends State<ComplaintsScreen>
               indicatorWeight: 2,
               indicatorSize: TabBarIndicatorSize.tab,
               dividerColor: Colors.transparent,
+              splashFactory: NoSplash.splashFactory,
+              overlayColor: WidgetStateProperty.all(Colors.transparent),
               labelStyle: const TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,

@@ -1318,8 +1318,16 @@ class _TrackingTimelineWidgetState extends State<TrackingTimelineWidget> {
 class TicketsScreen extends StatefulWidget {
   final UserModel currentUser;
   final String? initialStatus;
+  /// When set (e.g. on page refresh at /tickets/:ticketId), the screen will
+  /// scroll to and highlight this ticket after loading.
+  final String? initialTicketId;
 
-  const TicketsScreen({super.key, required this.currentUser, this.initialStatus});
+  const TicketsScreen({
+    super.key,
+    required this.currentUser,
+    this.initialStatus,
+    this.initialTicketId,
+  });
 
   @override
   State<TicketsScreen> createState() => _TicketsScreenState();
@@ -1472,6 +1480,10 @@ class _TicketsScreenState extends State<TicketsScreen>
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _handlePendingNavigation();
+      // Deep-link: jump to a specific ticket on page refresh (/tickets/:ticketId).
+      if (widget.initialTicketId != null) {
+        _jumpToTicket(widget.initialTicketId!);
+      }
     });
 
     // Register for in-app notification navigation.
@@ -2853,6 +2865,8 @@ class _TicketsScreenState extends State<TicketsScreen>
               indicatorWeight: 2,
               indicatorSize: TabBarIndicatorSize.tab,
               dividerColor: Colors.transparent,
+              splashFactory: NoSplash.splashFactory,
+              overlayColor: WidgetStateProperty.all(Colors.transparent),
               labelStyle: const TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
