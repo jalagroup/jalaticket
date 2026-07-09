@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import 'package:jalasupport/activity.dart';
+import 'package:jalasupport/reminders/reminders_list_screen.dart';
 import 'package:jalasupport/ai_dashboard_screen.dart';
 import 'package:jalasupport/ai_insights.dart';
 import 'package:jalasupport/branch_admin_management_screen.dart';
@@ -1137,6 +1138,7 @@ class ManagementScreen extends StatefulWidget {
           'aiinsights': 11,
           'problemreports': 12,
           'systemsettings': 13,
+          'reminders': 14,
         };
         return map[n];
       case UserType.superAdmin:
@@ -1150,10 +1152,11 @@ class ManagementScreen extends StatefulWidget {
           'preferences': 6,
           'aiinsights': 7,
           'aidashboard': 8,
+          'reminders': 9,
         };
         return map[n];
       case UserType.superUser:
-        const map = {'users': 0, 'preferences': 1};
+        const map = {'users': 0, 'preferences': 1, 'reminders': 2};
         return map[n];
       default:
         return 0; // only one tab (preferences)
@@ -1213,11 +1216,11 @@ class _ManagementScreenState extends State<ManagementScreen>
   int _getTabCount() {
     switch (widget.currentUser.userType) {
       case UserType.systemAdmin:
-        return 14;
+        return 15;
       case UserType.superAdmin:
-        return 9;
+        return 10;
       case UserType.superUser:
-        return 2;
+        return 3;
       default:
         return 1;
     }
@@ -1249,6 +1252,7 @@ class _ManagementScreenState extends State<ManagementScreen>
         Tab(icon: const Icon(Icons.auto_awesome, size: 20), text: l10n.aiInsights),
         Tab(icon: const Icon(Icons.bug_report_rounded, size: 20), text: l10n.problemReports),
         Tab(icon: const Icon(Icons.tune, size: 20), text: l10n.systemSettings),
+        const Tab(icon: Icon(Icons.alarm_rounded, size: 20), text: 'Reminders'),
       ]);
     } else if (widget.currentUser.userType == UserType.superAdmin) {
       tabs.addAll([
@@ -1261,11 +1265,13 @@ class _ManagementScreenState extends State<ManagementScreen>
         Tab(icon: const Icon(Icons.settings, size: 20), text: l10n.preferences),
         Tab(icon: const Icon(Icons.auto_awesome, size: 20), text: l10n.aiInsights),
         Tab(icon: const Icon(Icons.dashboard_customize, size: 20), text: l10n.aiDashboard),
+        const Tab(icon: Icon(Icons.alarm_rounded, size: 20), text: 'Reminders'),
       ]);
     } else if (widget.currentUser.userType == UserType.superUser) {
       tabs.addAll([
         Tab(icon: const Icon(Icons.people, size: 20), text: l10n.users),
         Tab(icon: const Icon(Icons.settings, size: 20), text: l10n.preferences),
+        const Tab(icon: Icon(Icons.alarm_rounded, size: 20), text: 'Reminders'),
       ]);
     } else {
       tabs.add(Tab(
@@ -1328,6 +1334,9 @@ class _ManagementScreenState extends State<ManagementScreen>
         case 13:
           view = SystemSettingsScreen(currentUser: widget.currentUser);
           break;
+        case 14:
+          view = SmartRemindersScreen(currentUser: widget.currentUser);
+          break;
         default:
           view =
               Center(child: Text(AppLocalizations.safeOf(context).invalidTab));
@@ -1361,6 +1370,9 @@ class _ManagementScreenState extends State<ManagementScreen>
         case 8:
           view = AiDashboardScreen(currentUser: widget.currentUser);
           break;
+        case 9:
+          view = SmartRemindersScreen(currentUser: widget.currentUser);
+          break;
         default:
           view =
               Center(child: Text(AppLocalizations.safeOf(context).invalidTab));
@@ -1372,6 +1384,9 @@ class _ManagementScreenState extends State<ManagementScreen>
           break;
         case 1:
           view = NotificationPreferencesWidget(currentUser: widget.currentUser);
+          break;
+        case 2:
+          view = SmartRemindersScreen(currentUser: widget.currentUser);
           break;
         default:
           view =
