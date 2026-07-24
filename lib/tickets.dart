@@ -24,25 +24,75 @@ import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-/// Filters a department list to only those allowed by the user's place.
-/// If the place has no restrictions (empty list) or the placeId is null,
-/// the full list is returned unchanged.
-Future<List<DepartmentModel>> _filterDeptsByPlaceId(
-    List<DepartmentModel> all, String? placeId) async {
-  if (placeId == null) return all;
-  try {
-    final data = await supabase
-        .from('places')
-        .select('allowed_department_ids')
-        .eq('id', placeId)
-        .maybeSingle();
-    final rawIds = data?['allowed_department_ids'];
-    if (rawIds is! List || rawIds.isEmpty) return all;
-    final allowed = rawIds.map((e) => e.toString()).toSet();
-    return all.where((d) => allowed.contains(d.id)).toList();
-  } catch (_) {
-    return all;
+/// Filters a department list to only those allowed by the user's place and
+/// by the user's own department (intersection of both restrictions). If a
+/// restriction is empty (or the corresponding id is null), it is treated as
+/// "no restriction" at that level, matching the place/department permission
+/// model used across the app.
+Future<List<DepartmentModel>> filterDeptsByPlaceId(
+    List<DepartmentModel> all, String? placeId, [String? departmentId]) async {
+  Set<String>? placeAllowed;
+  if (placeId != null) {
+    try {
+      final data = await supabase
+          .from('places')
+          .select('allowed_department_ids')
+          .eq('id', placeId)
+          .maybeSingle();
+      final rawIds = data?['allowed_department_ids'];
+      if (rawIds is List && rawIds.isNotEmpty) {
+        placeAllowed = rawIds.map((e) => e.toString()).toSet();
+      }
+    } catch (_) {}
   }
+
+  Set<String>? deptAllowed;
+  if (departmentId != null) {
+    try {
+      final data = await supabase
+          .from('departments')
+          .select('allowed_department_ids')
+          .eq('id', departmentId)
+          .maybeSingle();
+      final rawIds = data?['allowed_department_ids'];
+      if (rawIds is List && rawIds.isNotEmpty) {
+        deptAllowed = rawIds.map((e) => e.toString()).toSet();
+      }
+    } catch (_) {}
+  }
+
+  if (placeAllowed == null && deptAllowed == null) return all;
+  return all.where((d) {
+    if (placeAllowed != null && !placeAllowed.contains(d.id)) return false;
+    if (deptAllowed != null && !deptAllowed.contains(d.id)) return false;
+    return true;
+  }).toList();
+}
+
+/// Fallback palette so a department without an explicit color still shows
+/// a consistent, distinguishable color on its ticket tag.
+const _kDepartmentColorPalette = [
+  Colors.blue,
+  Colors.green,
+  Colors.orange,
+  Colors.purple,
+  Colors.teal,
+  Colors.brown,
+  Colors.indigo,
+  Colors.pink,
+  Colors.cyan,
+  Colors.deepOrange,
+];
+
+Color _departmentTagColor(String? hex, String departmentId) {
+  if (hex != null && hex.isNotEmpty) {
+    var v = hex.replaceAll('#', '');
+    if (v.length == 6) v = 'FF$v';
+    final parsed = int.tryParse(v, radix: 16);
+    if (parsed != null) return Color(parsed);
+  }
+  final hash = departmentId.codeUnits.fold<int>(0, (sum, c) => sum + c);
+  return _kDepartmentColorPalette[hash % _kDepartmentColorPalette.length];
 }
 
 // REPLACE the entire OptimizedDialog class
@@ -76,7 +126,7 @@ class OptimizedDialog extends StatelessWidget {
             : MediaQuery.of(context).size.width * 0.6);
 
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       backgroundColor: Colors.transparent,
       elevation: 0,
       child: Container(
@@ -87,35 +137,32 @@ class OptimizedDialog extends StatelessWidget {
         ),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(10),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.16),
-              blurRadius: 48,
+              color: Colors.black.withOpacity(0.12),
+              blurRadius: 32,
               spreadRadius: 0,
-              offset: const Offset(0, 14),
+              offset: const Offset(0, 10),
             ),
           ],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Gradient Header
+            // Header
             Container(
               padding: EdgeInsets.symmetric(
                 horizontal: 20,
                 vertical: isMobile ? 13 : 16,
               ),
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFFf16936), Color(0xFFcf4f1a)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(10),
+                  topRight: Radius.circular(10),
                 ),
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(20),
-                  topRight: Radius.circular(20),
-                ),
+                border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
               ),
               child: Row(
                 children: [
@@ -125,22 +172,22 @@ class OptimizedDialog extends StatelessWidget {
                       style: TextStyle(
                         fontSize: isMobile ? 16 : 18,
                         fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                        letterSpacing: 0.3,
+                        color: Colors.grey[850],
+                        letterSpacing: 0.2,
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
                   InkWell(
                     onTap: () => Navigator.pop(context),
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(8),
                     child: Container(
                       padding: const EdgeInsets.all(5),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.18),
-                        borderRadius: BorderRadius.circular(20),
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Icon(Icons.close, size: 18, color: Colors.white),
+                      child: Icon(Icons.close, size: 18, color: Colors.grey[700]),
                     ),
                   ),
                 ],
@@ -165,12 +212,12 @@ class OptimizedDialog extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                 decoration: BoxDecoration(
-                  color: Colors.grey[50],
+                  color: Colors.white,
                   borderRadius: const BorderRadius.only(
-                    bottomLeft: Radius.circular(20),
-                    bottomRight: Radius.circular(20),
+                    bottomLeft: Radius.circular(10),
+                    bottomRight: Radius.circular(10),
                   ),
-                  border: Border(top: BorderSide(color: Colors.grey[100]!)),
+                  border: Border(top: BorderSide(color: Colors.grey.shade200)),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
@@ -1418,6 +1465,9 @@ class _TicketsScreenState extends State<TicketsScreen>
   List<String> _allowedTicketTypes = [];
   List<String> _allowedDepartmentIds = [];
 
+  // Departments this super admin is assigned to (multi-department support)
+  Set<String> _superAdminDepartmentIds = {};
+
   final List<TicketStatus> _statuses = [
     TicketStatus.pending,
     TicketStatus.inprogress,
@@ -1490,27 +1540,97 @@ class _TicketsScreenState extends State<TicketsScreen>
     TicketNavigationService.setListener(_onNavigationRequested);
 
     _loadPlacePermissions();
+    _loadSuperAdminDepartments();
+  }
+
+  /// A super admin can be assigned to multiple departments; load the full
+  /// set once so ticket visibility/actions can check membership instead of
+  /// a single-department equality.
+  Future<void> _loadSuperAdminDepartments() async {
+    if (widget.currentUser.userType != UserType.superAdmin) return;
+    try {
+      final response = await supabase
+          .from('admin_departments')
+          .select('department_id')
+          .eq('admin_id', widget.currentUser.id);
+      final ids = response
+          .map<String>((json) => json['department_id'] as String)
+          .toSet();
+      // Legacy single department field, kept as a safety net in case a
+      // super admin hasn't been migrated into admin_departments yet.
+      if (widget.currentUser.departmentId != null) {
+        ids.add(widget.currentUser.departmentId!);
+      }
+      if (!mounted) return;
+      setState(() => _superAdminDepartmentIds = ids);
+      // The ticket-counts realtime subscription may have already delivered
+      // its initial snapshot (and been processed) before this async lookup
+      // resolved, in which case _ticketCounts was computed against an empty
+      // _superAdminDepartmentIds — under-counting to just this admin's own
+      // tickets. Re-subscribing forces a fresh snapshot to be reprocessed
+      // now that the department set is known, instead of waiting for the
+      // next unrelated realtime event to happen to correct it.
+      _setupRealTimeTicketCounts();
+    } catch (e) {
+      debugPrint('⚠️ Could not load super admin departments: $e');
+    }
   }
 
   Future<void> _loadPlacePermissions() async {
+    List<String> parseList(dynamic v) =>
+        v is List ? v.map((e) => e.toString()).toList() : [];
+
+    List<String> placeDepartmentIds = [];
+    List<String> placeTicketTypes = [];
     final placeId = widget.currentUser.placeId;
-    if (placeId == null) return;
-    try {
-      final data = await supabase
-          .from('places')
-          .select('allowed_department_ids, allowed_ticket_types')
-          .eq('id', placeId)
-          .maybeSingle();
-      if (data == null || !mounted) return;
-      List<String> parseList(dynamic v) =>
-          v is List ? v.map((e) => e.toString()).toList() : [];
-      setState(() {
-        _allowedDepartmentIds = parseList(data['allowed_department_ids']);
-        _allowedTicketTypes = parseList(data['allowed_ticket_types']);
-      });
-    } catch (e) {
-      debugPrint('⚠️ Could not load place permissions: $e');
+    if (placeId != null) {
+      try {
+        final data = await supabase
+            .from('places')
+            .select('allowed_department_ids, allowed_ticket_types')
+            .eq('id', placeId)
+            .maybeSingle();
+        if (data != null) {
+          placeDepartmentIds = parseList(data['allowed_department_ids']);
+          placeTicketTypes = parseList(data['allowed_ticket_types']);
+        }
+      } catch (e) {
+        debugPrint('⚠️ Could not load place permissions: $e');
+      }
     }
+
+    List<String> deptTicketTypes = [];
+    List<String> deptAllowedDepartmentIds = [];
+    final departmentId = widget.currentUser.departmentId;
+    if (departmentId != null) {
+      try {
+        final data = await supabase
+            .from('departments')
+            .select('allowed_ticket_types, allowed_department_ids')
+            .eq('id', departmentId)
+            .maybeSingle();
+        if (data != null) {
+          deptTicketTypes = parseList(data['allowed_ticket_types']);
+          deptAllowedDepartmentIds = parseList(data['allowed_department_ids']);
+        }
+      } catch (e) {
+        debugPrint('⚠️ Could not load department permissions: $e');
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _allowedDepartmentIds = placeDepartmentIds.isEmpty
+          ? deptAllowedDepartmentIds
+          : (deptAllowedDepartmentIds.isEmpty
+              ? placeDepartmentIds
+              : placeDepartmentIds.where(deptAllowedDepartmentIds.contains).toList());
+      _allowedTicketTypes = placeTicketTypes.isEmpty
+          ? deptTicketTypes
+          : (deptTicketTypes.isEmpty
+              ? placeTicketTypes
+              : placeTicketTypes.where(deptTicketTypes.contains).toList());
+    });
   }
 
   void _onNavigationRequested() {
@@ -2195,12 +2315,11 @@ class _TicketsScreenState extends State<TicketsScreen>
           }
         }
       } else if (widget.currentUser.userType == UserType.superAdmin) {
-        if (widget.currentUser.departmentId != null) {
+        if (_superAdminDepartmentIds.isNotEmpty) {
           for (final ticketData in data) {
             try {
               final ticket = TicketModel.fromJson(ticketData);
-              if (ticket.targetDepartmentId ==
-                      widget.currentUser.departmentId ||
+              if (_superAdminDepartmentIds.contains(ticket.targetDepartmentId) ||
                   ticket.createdBy == widget.currentUser.id ||
                   (ticket.parentTicketId != null &&
                       await _isSubticketAccessible(ticket))) {
@@ -2520,9 +2639,9 @@ class _TicketsScreenState extends State<TicketsScreen>
             debugPrint('❌ Error checking branch admin places: $e');
           }
         } else if (widget.currentUser.userType == UserType.superAdmin) {
-          if (widget.currentUser.departmentId != null) {
+          if (_superAdminDepartmentIds.isNotEmpty) {
             shouldCount =
-                ticket.targetDepartmentId == widget.currentUser.departmentId ||
+                _superAdminDepartmentIds.contains(ticket.targetDepartmentId) ||
                     ticket.createdBy == widget.currentUser.id ||
                     (ticket.parentTicketId != null &&
                         await _isSubticketAccessible(ticket));
@@ -2580,8 +2699,7 @@ class _TicketsScreenState extends State<TicketsScreen>
 
       if (parentTicket == null) return false;
 
-      return parentTicket['target_department_id'] ==
-          widget.currentUser.departmentId;
+      return _superAdminDepartmentIds.contains(parentTicket['target_department_id']);
     } catch (e) {
       debugPrint('❌ Error checking subticket accessibility: $e');
       return false;
@@ -3055,7 +3173,7 @@ class _TicketsScreenState extends State<TicketsScreen>
                       child: Row(children: [
                         Icon(Icons.computer, size: 18, color: Colors.blue),
                         SizedBox(width: 8),
-                        Text(l10n.itSolutionTicket),
+                        Flexible(child: Text(l10n.itSolutionTicket, overflow: TextOverflow.ellipsis)),
                       ]),
                     ),
                   if (allowed('places_maintenance'))
@@ -3064,7 +3182,7 @@ class _TicketsScreenState extends State<TicketsScreen>
                       child: Row(children: [
                         Icon(Icons.home_repair_service, size: 18, color: Colors.green),
                         SizedBox(width: 8),
-                        Text(l10n.placesMaintenanceTicket),
+                        Flexible(child: Text(l10n.placesMaintenanceTicket, overflow: TextOverflow.ellipsis)),
                       ]),
                     ),
                   if (allowed('complaint'))
@@ -3073,7 +3191,7 @@ class _TicketsScreenState extends State<TicketsScreen>
                       child: Row(children: [
                         Icon(Icons.report_problem, size: 18, color: Colors.orange),
                         SizedBox(width: 8),
-                        Text(l10n.qualityComplaint),
+                        Flexible(child: Text(l10n.qualityComplaint, overflow: TextOverflow.ellipsis)),
                       ]),
                     ),
                   if (allowed('individuals_maintenance'))
@@ -3082,7 +3200,7 @@ class _TicketsScreenState extends State<TicketsScreen>
                       child: Row(children: [
                         Icon(Icons.person_pin, size: 18, color: Colors.purple),
                         SizedBox(width: 8),
-                        Text(l10n.individualsMaintenanceTicket),
+                        Flexible(child: Text(l10n.individualsMaintenanceTicket, overflow: TextOverflow.ellipsis)),
                       ]),
                     ),
                   if (allowed('requests'))
@@ -3091,7 +3209,7 @@ class _TicketsScreenState extends State<TicketsScreen>
                       child: Row(children: [
                         Icon(Icons.request_page, size: 18, color: Colors.teal),
                         SizedBox(width: 8),
-                        Text(l10n.requestsTicket),
+                        Flexible(child: Text(l10n.requestsTicket, overflow: TextOverflow.ellipsis)),
                       ]),
                     ),
                   if (allowed('trucks_maintenance'))
@@ -3100,7 +3218,7 @@ class _TicketsScreenState extends State<TicketsScreen>
                       child: Row(children: [
                         Icon(Icons.local_shipping, size: 18, color: Colors.brown),
                         SizedBox(width: 8),
-                        Text(l10n.truckMaintenanceTicket),
+                        Flexible(child: Text(l10n.truckMaintenanceTicket, overflow: TextOverflow.ellipsis)),
                       ]),
                     ),
                 ];
@@ -3829,7 +3947,7 @@ class _TicketsScreenState extends State<TicketsScreen>
               final ticket = tickets[index];
               return Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 4),
+                padding: const EdgeInsets.symmetric(vertical: 3),
                 child: EnhancedTicketCard(
                   key: ValueKey(ticket.id),
                   ticket: ticket,
@@ -3838,6 +3956,7 @@ class _TicketsScreenState extends State<TicketsScreen>
                   onRefresh: _refreshData,
                   unreadCount: getUnreadCount(ticket.id),
                   currentTabStatus: currentStatus,
+                  superAdminDepartmentIds: _superAdminDepartmentIds,
                 ),
               );
             },
@@ -4111,6 +4230,9 @@ class EnhancedTicketCard extends StatefulWidget {
   final VoidCallback onRefresh;
   final int unreadCount;
   final TicketStatus currentTabStatus;
+  // Departments this super admin is assigned to (multi-department support).
+  // Unused for other roles.
+  final Set<String> superAdminDepartmentIds;
 
   const EnhancedTicketCard({
     super.key,
@@ -4120,6 +4242,7 @@ class EnhancedTicketCard extends StatefulWidget {
     required this.onRefresh,
     this.unreadCount = 0,
     required this.currentTabStatus,
+    this.superAdminDepartmentIds = const {},
   });
 
   @override
@@ -4146,6 +4269,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
   String? _departmentName;
   String? _departmentNameEn;
   String? _departmentNameAr;
+  String? _departmentColor;
   String? _problemTitleName;
   String? _problemTitleNameEn;
   String? _problemTitleNameAr;
@@ -4393,7 +4517,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
       try {
         final deptResponse = await supabase
             .from('departments')
-            .select('name, name_en, name_ar')
+            .select('name, name_en, name_ar, color')
             .eq('id', widget.ticket.targetDepartmentId)
             .maybeSingle();
 
@@ -4401,6 +4525,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
           _departmentName = deptResponse['name'];
           _departmentNameEn = deptResponse['name_en'];
           _departmentNameAr = deptResponse['name_ar'];
+          _departmentColor = deptResponse['color'];
         } else {
           print(
               'Department not found for ID: ${widget.ticket.targetDepartmentId}');
@@ -4861,7 +4986,10 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
     return InkWell(
       onTap: _toggleExpanded,
       child: Container(
-        padding: EdgeInsets.all(isMobile ? 12 : 16),
+        padding: EdgeInsets.symmetric(
+          horizontal: isMobile ? 12 : 16,
+          vertical: isMobile ? 7 : 9,
+        ),
         child: Column(
           children: [
             // Check-in status indicator at the top
@@ -5004,6 +5132,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
           children: [
             _buildStatusBadge(),
             _buildPriorityBadge(),
+            _buildDepartmentBadge(),
             if (widget.ticket.underSupervision &&
                 widget.ticket.status == TicketStatus.prefinished)
               _buildSupervisionBadge(),
@@ -5214,6 +5343,8 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
             _buildStatusBadge(),
             const SizedBox(width: 6),
             _buildPriorityBadge(),
+            const SizedBox(width: 6),
+            _buildDepartmentBadge(),
             if (widget.ticket.underSupervision &&
                 widget.ticket.status == TicketStatus.prefinished) ...[
               const SizedBox(width: 6),
@@ -5513,6 +5644,8 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
             _buildStatusBadge(),
             const SizedBox(width: 6),
             _buildPriorityBadge(),
+            const SizedBox(width: 6),
+            _buildDepartmentBadge(),
           ],
         ),
         const SizedBox(height: 4),
@@ -5574,6 +5707,8 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
           _buildStatusBadge(),
           const SizedBox(width: 6),
           _buildPriorityBadge(),
+          const SizedBox(width: 6),
+          _buildDepartmentBadge(),
         ],
       ),
     );
@@ -5682,6 +5817,36 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
       case PriorityType.urgent:
         return l10n.urgent;
     }
+  }
+
+  // Colored tag naming the ticket's target department.
+  Widget _buildDepartmentBadge() {
+    final color = _departmentTagColor(_departmentColor, widget.ticket.targetDepartmentId);
+    final label = _localizedEntityName(
+        _departmentName, _departmentNameEn, _departmentNameAr, 'Department');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.business_outlined, size: 11, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // Small badge shown in the header row
@@ -5878,7 +6043,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
     final isMobile = MediaQuery.of(context).size.width < 768;
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
       decoration: BoxDecoration(
         color: Colors.grey.withOpacity(0.02),
         borderRadius: const BorderRadius.only(
@@ -7247,7 +7412,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
     final actions = <Map<String, dynamic>>[];
 
     // Check if super admin is from the target department
-    if (widget.currentUser.departmentId == widget.ticket.targetDepartmentId) {
+    if (widget.superAdminDepartmentIds.contains(widget.ticket.targetDepartmentId)) {
       // NEW: Super Admin can start working on ticket themselves (for pending tickets)
       if (widget.ticket.status == TicketStatus.pending &&
           widget.ticket.assignedTo == null) {
@@ -7332,7 +7497,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
     if ([TicketStatus.pending, TicketStatus.inprogress]
             .contains(widget.ticket.status) &&
         widget.ticket.createdBy != widget.currentUser.id &&
-        widget.currentUser.departmentId == widget.ticket.targetDepartmentId) {
+        widget.superAdminDepartmentIds.contains(widget.ticket.targetDepartmentId)) {
       actions.add({
         'label': l10n.wrongInfo,
         'icon': Icons.error_outline,
@@ -7343,7 +7508,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
 
     // Super admin can reassign ticket to a different department
     // (shows for any ticket in their department while it's still open)
-    if (widget.currentUser.departmentId == widget.ticket.targetDepartmentId &&
+    if (widget.superAdminDepartmentIds.contains(widget.ticket.targetDepartmentId) &&
         [TicketStatus.pending, TicketStatus.inprogress]
             .contains(widget.ticket.status)) {
       actions.add({
@@ -7694,7 +7859,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
     // Super admin of target department can go back from closed
     if (widget.ticket.status == TicketStatus.closed &&
         widget.currentUser.userType == UserType.superAdmin &&
-        widget.currentUser.departmentId == widget.ticket.targetDepartmentId) {
+        widget.superAdminDepartmentIds.contains(widget.ticket.targetDepartmentId)) {
       return true;
     }
 
@@ -7704,7 +7869,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
             widget.currentUser.userType == UserType.systemAdmin)) {
       // Only if they're from the target department or system admin
       if (widget.currentUser.userType == UserType.systemAdmin ||
-          widget.currentUser.departmentId == widget.ticket.targetDepartmentId) {
+          widget.superAdminDepartmentIds.contains(widget.ticket.targetDepartmentId)) {
         return true;
       }
     }
@@ -7713,7 +7878,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
     if (widget.ticket.status == TicketStatus.inprogress &&
         widget.ticket.assignedTo != null &&
         widget.currentUser.userType == UserType.superAdmin &&
-        widget.currentUser.departmentId == widget.ticket.targetDepartmentId) {
+        widget.superAdminDepartmentIds.contains(widget.ticket.targetDepartmentId)) {
       return true;
     }
 
@@ -11360,6 +11525,10 @@ class _CreateTicketDialogState extends State<CreateTicketDialog> {
       return;
     }
 
+    final noProblemTitleGiven = _useOtherProblemTitle
+        ? _otherProblemTitleController.text.trim().isEmpty
+        : _selectedProblemTitleId == null;
+
     setState(() => _isLoading = true);
 
     try {
@@ -11382,7 +11551,7 @@ class _CreateTicketDialogState extends State<CreateTicketDialog> {
             _useOtherProblemTitle ? null : _selectedProblemTitleId,
         'other_problem_title': _useOtherProblemTitle
             ? _otherProblemTitleController.text.trim()
-            : null,
+            : (noProblemTitleGiven ? _titleController.text.trim() : null),
         'custom_problem_title': null,
         'priority': _selectedPriority.value,
         'high_priority_explain': (_selectedPriority == PriorityType.high ||
@@ -11956,6 +12125,11 @@ class _CreateTicketDialogState extends State<CreateTicketDialog> {
                 fontSize: 14,
                 fontWeight: FontWeight.bold,
               ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              l10n.problemTitleOptionalNote,
+              style: TextStyle(fontSize: 11, color: Colors.grey[600], fontStyle: FontStyle.italic),
             ),
             const SizedBox(height: 8),
             if (_useOtherProblemTitle) ...[
@@ -13367,25 +13541,9 @@ class ITSolutionTicketDialogContent extends StatelessWidget {
         const SizedBox(height: 10),
 
         // Priority Dropdown
-        DropdownButtonFormField<PriorityType>(
+        SearchableDropdown<PriorityType>(
+          labelText: l10n.priorityRequired,
           value: selectedPriority,
-          decoration: InputDecoration(
-            labelText: '${l10n.priority} *',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            isDense: true,
-            filled: true,
-            fillColor: Colors.grey.shade50,
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: Colors.grey.shade300),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Color(0xFFF16936), width: 1.5),
-            ),
-          ),
           items: PriorityType.values.map((priority) {
             return DropdownMenuItem(
               value: priority,
@@ -13417,6 +13575,7 @@ class ITSolutionTicketDialogContent extends StatelessWidget {
               ),
             );
           }).toList(),
+          getLabel: (priority) => _getPriorityText(priority, l10n).toUpperCase(),
           onChanged: (value) {
             if (value != null) {
               onPriorityChanged(value);
@@ -13466,22 +13625,22 @@ class ITSolutionTicketDialogContent extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.blue.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.blue.withOpacity(0.3)),
+            color: Colors.blue.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: Colors.blue.withOpacity(0.2)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  const Icon(Icons.info_outline, color: Colors.blue, size: 16),
+                  Icon(Icons.info_outline, color: Colors.blue.shade600, size: 16),
                   const SizedBox(width: 8),
                   Text(
                     l10n.itSolutionTicket,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: Colors.blue,
+                      color: Colors.blue.shade600,
                       fontSize: 13,
                     ),
                   ),
@@ -13763,7 +13922,8 @@ class _PlacesMaintenanceTicketScreenState
       var departments = departmentsResponse
           .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
           .toList();
-      departments = await _filterDeptsByPlaceId(departments, widget.currentUser.placeId);
+      departments = await filterDeptsByPlaceId(
+          departments, widget.currentUser.placeId, widget.currentUser.departmentId);
 
       setState(() {
         _departments = departments;
@@ -14232,29 +14392,6 @@ class _PlacesMaintenanceTicketScreenState
       return;
     }
 
-    // Problem title validation - Only if problemTitles exist
-    if (_problemTitles.isNotEmpty) {
-      if (!_useCustomProblem && _selectedProblemTitleId == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(l10n.pleaseSelectProblemOrCustom),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-
-      if (_useCustomProblem && _customProblemController.text.trim().isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(l10n.pleaseEnterCustomProblem),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-    }
-
     setState(() => _isLoading = true);
 
     try {
@@ -14270,13 +14407,19 @@ class _PlacesMaintenanceTicketScreenState
         'location': _locationController.text.trim().isNotEmpty
             ? _locationController.text.trim()
             : null,
-        // AUTO-SET: If problem titles list is empty, send "Other", otherwise send selected/custom
+        // AUTO-SET: problem title is optional; falls back to the main title when left blank
         'problem_title_id': (_problemTitles.isNotEmpty && !_useCustomProblem)
             ? _selectedProblemTitleId
             : null,
         'other_problem_title': _problemTitles.isEmpty
-            ? 'Other'
-            : (_useCustomProblem ? _customProblemController.text.trim() : null),
+            ? _titleController.text.trim()
+            : (_useCustomProblem
+                ? (_customProblemController.text.trim().isEmpty
+                    ? _titleController.text.trim()
+                    : _customProblemController.text.trim())
+                : (_selectedProblemTitleId == null
+                    ? _titleController.text.trim()
+                    : null)),
         'priority': _selectedPriority.value,
         'high_priority_explain': (_selectedPriority == PriorityType.high ||
                 _selectedPriority == PriorityType.urgent)
@@ -14662,11 +14805,16 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
         const SizedBox(height: 10),
 
         // Problem Title Section
+        Text(
+          l10n.problemTitleOptionalNote,
+          style: TextStyle(fontSize: 11, color: Colors.grey[600], fontStyle: FontStyle.italic),
+        ),
+        const SizedBox(height: 4),
         if (problemTitles.isEmpty || useCustomProblem) ...[
           TextField(
             controller: customProblemController,
             decoration: InputDecoration(
-              labelText: '${l10n.problemTitle} *',
+              labelText: l10n.problemTitle,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
               hintText: l10n.describeProblem,
               contentPadding:
@@ -14692,7 +14840,7 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
           ),
         ] else ...[
           SearchableDropdown<String>(
-            labelText: '${l10n.problemTitle} *',
+            labelText: l10n.problemTitle,
             hintText: l10n.selectProblemType,
             value: selectedProblemTitleId,
             items: problemTitles
@@ -14711,25 +14859,9 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
         const SizedBox(height: 10),
 
         // Priority Dropdown
-        DropdownButtonFormField<PriorityType>(
+        SearchableDropdown<PriorityType>(
+          labelText: l10n.priorityRequired,
           value: selectedPriority,
-          decoration: InputDecoration(
-            labelText: l10n.priorityRequired,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            isDense: true,
-            filled: true,
-            fillColor: Colors.grey.shade50,
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: Colors.grey.shade300),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Color(0xFFF16936), width: 1.5),
-            ),
-          ),
           items: PriorityType.values.map((priority) {
             return DropdownMenuItem(
               value: priority,
@@ -14759,6 +14891,7 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
               ),
             );
           }).toList(),
+          getLabel: (priority) => _getPriorityText(priority, l10n).toUpperCase(),
           onChanged: (value) {
             if (value != null) {
               onPriorityChanged(value);
@@ -14871,22 +15004,22 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.green.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.green.withOpacity(0.3)),
+            color: Colors.green.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: Colors.green.withOpacity(0.2)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  const Icon(Icons.info_outline, color: Colors.green, size: 16),
+                  Icon(Icons.info_outline, color: Colors.green.shade600, size: 16),
                   const SizedBox(width: 8),
                   Text(
                     l10n.placesTicketInfo,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: Colors.green,
+                      color: Colors.green.shade600,
                       fontSize: 13,
                     ),
                   ),
@@ -15153,7 +15286,8 @@ class _IndividualsMaintenanceTicketScreenState
       var departments = departmentsResponse
           .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
           .toList();
-      departments = await _filterDeptsByPlaceId(departments, widget.currentUser.placeId);
+      departments = await filterDeptsByPlaceId(
+          departments, widget.currentUser.placeId, widget.currentUser.departmentId);
 
       setState(() {
         _departments = departments;
@@ -15594,29 +15728,6 @@ class _IndividualsMaintenanceTicketScreenState
       return;
     }
 
-    // Problem title validation - Only if problemTitles exist
-    if (_problemTitles.isNotEmpty) {
-      if (!_useCustomProblem && _selectedProblemTitleId == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(l10n.pleaseSelectProblemOrCustom),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-
-      if (_useCustomProblem && _customProblemController.text.trim().isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(l10n.pleaseEnterCustomProblem),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-    }
-
     setState(() => _isLoading = true);
 
     try {
@@ -15632,13 +15743,19 @@ class _IndividualsMaintenanceTicketScreenState
         'location': _locationController.text.trim().isNotEmpty
             ? _locationController.text.trim()
             : null,
-        // AUTO-SET: If problem titles list is empty, send "Other", otherwise send selected/custom
+        // AUTO-SET: problem title is optional; falls back to the main title when left blank
         'problem_title_id': (_problemTitles.isNotEmpty && !_useCustomProblem)
             ? _selectedProblemTitleId
             : null,
         'other_problem_title': _problemTitles.isEmpty
-            ? 'Other'
-            : (_useCustomProblem ? _customProblemController.text.trim() : null),
+            ? _titleController.text.trim()
+            : (_useCustomProblem
+                ? (_customProblemController.text.trim().isEmpty
+                    ? _titleController.text.trim()
+                    : _customProblemController.text.trim())
+                : (_selectedProblemTitleId == null
+                    ? _titleController.text.trim()
+                    : null)),
         'priority': _selectedPriority.value,
         'high_priority_explain': (_selectedPriority == PriorityType.high ||
                 _selectedPriority == PriorityType.urgent)
@@ -15982,11 +16099,16 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
         const SizedBox(height: 10),
 
         // Problem Title Section
+        Text(
+          l10n.problemTitleOptionalNote,
+          style: TextStyle(fontSize: 11, color: Colors.grey[600], fontStyle: FontStyle.italic),
+        ),
+        const SizedBox(height: 4),
         if (problemTitles.isEmpty || useCustomProblem) ...[
           TextField(
             controller: customProblemController,
             decoration: InputDecoration(
-              labelText: '${l10n.problemTitle} *',
+              labelText: l10n.problemTitle,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
               hintText: l10n.describeProblem,
               contentPadding:
@@ -16012,7 +16134,7 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
           ),
         ] else ...[
           SearchableDropdown<String>(
-            labelText: '${l10n.problemTitle} *',
+            labelText: l10n.problemTitle,
             hintText: l10n.selectProblemType,
             value: selectedProblemTitleId,
             items: problemTitles
@@ -16031,25 +16153,9 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
         const SizedBox(height: 10),
 
         // Priority Dropdown
-        DropdownButtonFormField<PriorityType>(
+        SearchableDropdown<PriorityType>(
+          labelText: l10n.priorityRequired,
           value: selectedPriority,
-          decoration: InputDecoration(
-            labelText: l10n.priorityRequired,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            isDense: true,
-            filled: true,
-            fillColor: Colors.grey.shade50,
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: Colors.grey.shade300),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Color(0xFFF16936), width: 1.5),
-            ),
-          ),
           items: PriorityType.values.map((priority) {
             return DropdownMenuItem(
               value: priority,
@@ -16079,6 +16185,7 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
               ),
             );
           }).toList(),
+          getLabel: (priority) => _getPriorityText(priority, l10n).toUpperCase(),
           onChanged: (value) {
             if (value != null) {
               onPriorityChanged(value);
@@ -16191,23 +16298,23 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.purple.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.purple.withOpacity(0.3)),
+            color: Colors.purple.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: Colors.purple.withOpacity(0.2)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  const Icon(Icons.info_outline,
-                      color: Colors.purple, size: 16),
+                  Icon(Icons.info_outline,
+                      color: Colors.purple.shade600, size: 16),
                   const SizedBox(width: 8),
                   Text(
                     l10n.individualsTicketInfo,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: Colors.purple,
+                      color: Colors.purple.shade600,
                       fontSize: 13,
                     ),
                   ),
@@ -16467,7 +16574,8 @@ class _RequestsTicketScreenState extends State<RequestsTicketScreen> {
       var departments = departmentsResponse
           .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
           .toList();
-      departments = await _filterDeptsByPlaceId(departments, widget.currentUser.placeId);
+      departments = await filterDeptsByPlaceId(
+          departments, widget.currentUser.placeId, widget.currentUser.departmentId);
 
       setState(() {
         _departments = departments;
@@ -17199,25 +17307,9 @@ class RequestsTicketContent extends StatelessWidget {
         const SizedBox(height: 16),
 
         // Priority Dropdown
-        DropdownButtonFormField<PriorityType>(
+        SearchableDropdown<PriorityType>(
+          labelText: l10n.priorityRequired,
           value: selectedPriority,
-          decoration: InputDecoration(
-            labelText: l10n.priorityRequired,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            isDense: true,
-            filled: true,
-            fillColor: Colors.grey.shade50,
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: Colors.grey.shade300),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Color(0xFFF16936), width: 1.5),
-            ),
-          ),
           items: PriorityType.values.map((priority) {
             return DropdownMenuItem(
               value: priority,
@@ -17247,6 +17339,7 @@ class RequestsTicketContent extends StatelessWidget {
               ),
             );
           }).toList(),
+          getLabel: (priority) => _getPriorityText(priority, l10n).toUpperCase(),
           onChanged: (value) {
             if (value != null) {
               onPriorityChanged(value);
@@ -17359,22 +17452,22 @@ class RequestsTicketContent extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.teal.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.teal.withOpacity(0.3)),
+            color: Colors.teal.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: Colors.teal.withOpacity(0.2)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  const Icon(Icons.info_outline, color: Colors.teal, size: 16),
+                  Icon(Icons.info_outline, color: Colors.teal.shade600, size: 16),
                   const SizedBox(width: 8),
                   Text(
                     l10n.requestsTicketInfo,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: Colors.teal,
+                      color: Colors.teal.shade600,
                       fontSize: 13,
                     ),
                   ),
@@ -17662,7 +17755,8 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
       var departments = departmentsResponse
           .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
           .toList();
-      departments = await _filterDeptsByPlaceId(departments, widget.currentUser.placeId);
+      departments = await filterDeptsByPlaceId(
+          departments, widget.currentUser.placeId, widget.currentUser.departmentId);
 
       setState(() {
         _departments = departments;
@@ -17934,6 +18028,10 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
       return;
     }
 
+    final noProblemTitleGiven = _useOtherProblemTitle
+        ? _otherProblemTitleController.text.trim().isEmpty
+        : _selectedProblemTitleId == null;
+
     setState(() => _isLoading = true);
 
     try {
@@ -17956,7 +18054,7 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
             _useOtherProblemTitle ? null : _selectedProblemTitleId,
         'other_problem_title': _useOtherProblemTitle
             ? _otherProblemTitleController.text.trim()
-            : null,
+            : (noProblemTitleGiven ? _titleController.text.trim() : null),
         'custom_problem_title': null,
         'priority': _selectedPriority.value,
         'high_priority_explain': (_selectedPriority == PriorityType.high ||
@@ -18563,6 +18661,11 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
+                    const SizedBox(height: 2),
+                    Text(
+                      l10n.problemTitleOptionalNote,
+                      style: TextStyle(fontSize: 11, color: Colors.grey[600], fontStyle: FontStyle.italic),
+                    ),
                     const SizedBox(height: 8),
                     if (_useOtherProblemTitle) ...[
                       TextField(
@@ -18953,7 +19056,8 @@ class _CreateSubticketDialogState extends State<CreateSubticketDialog> {
       var departments = departmentsResponse
           .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
           .toList();
-      departments = await _filterDeptsByPlaceId(departments, widget.currentUser.placeId);
+      departments = await filterDeptsByPlaceId(
+          departments, widget.currentUser.placeId, widget.currentUser.departmentId);
 
       setState(() {
         _departments = departments;
@@ -19572,25 +19676,9 @@ class CreateSubticketContent extends StatelessWidget {
         ],
 
         // Priority Dropdown
-        DropdownButtonFormField<PriorityType>(
+        SearchableDropdown<PriorityType>(
+          labelText: l10n.priorityRequired,
           value: selectedPriority,
-          decoration: InputDecoration(
-            labelText: '${l10n.priority} *',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            isDense: true,
-            filled: true,
-            fillColor: Colors.grey.shade50,
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: Colors.grey.shade300),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Color(0xFFF16936), width: 1.5),
-            ),
-          ),
           items: PriorityType.values.map((priority) {
             return DropdownMenuItem(
               value: priority,
@@ -19622,6 +19710,7 @@ class CreateSubticketContent extends StatelessWidget {
               ),
             );
           }).toList(),
+          getLabel: (priority) => _getPriorityText(priority, l10n).toUpperCase(),
           onChanged: (value) {
             if (value != null) {
               onPriorityChanged(value);
@@ -19945,7 +20034,8 @@ class _CreateSubticketScreenState extends State<CreateSubticketScreen> {
       var departments = departmentsResponse
           .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
           .toList();
-      departments = await _filterDeptsByPlaceId(departments, widget.currentUser.placeId);
+      departments = await filterDeptsByPlaceId(
+          departments, widget.currentUser.placeId, widget.currentUser.departmentId);
 
       setState(() {
         _departments = departments;

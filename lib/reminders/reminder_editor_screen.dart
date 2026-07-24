@@ -2,6 +2,9 @@ import 'package:excel/excel.dart' as xl;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../email_templates/email_template_editor_panel.dart';
+import '../email_templates/email_template_models.dart';
+import '../email_templates/email_template_preview.dart';
 import '../main.dart';
 import '../models.dart';
 import 'reminder_models.dart';
@@ -88,6 +91,12 @@ class _ReminderEditorScreenState extends State<ReminderEditorScreen> {
   bool _chanApp = true;
   bool _chanEmail = false;
 
+  // Email template override
+  String _emailTemplateSource = 'main'; // 'main' | 'custom'
+  EmailTemplateMode _emailTemplateMode = EmailTemplateMode.visual;
+  List<EmailTemplateBlock> _emailTemplateBlocks = [];
+  final _emailTemplateHtmlCtrl = TextEditingController();
+
   @override
   void initState() {
     super.initState();
@@ -170,6 +179,11 @@ class _ReminderEditorScreenState extends State<ReminderEditorScreen> {
     _chanApp = e.channels.contains('app');
     _chanEmail = e.channels.contains('email');
 
+    _emailTemplateSource = e.emailTemplateSource;
+    _emailTemplateMode = e.emailTemplateMode ?? EmailTemplateMode.visual;
+    _emailTemplateBlocks = List<EmailTemplateBlock>.from(e.emailTemplateBlocks);
+    _emailTemplateHtmlCtrl.text = e.emailTemplateHtmlSource ?? '';
+
     if (mounted) setState(() {});
   }
 
@@ -186,6 +200,7 @@ class _ReminderEditorScreenState extends State<ReminderEditorScreen> {
     _mappedFieldCtrl.dispose();
     _msgTitleCtrl.dispose();
     _msgBodyCtrl.dispose();
+    _emailTemplateHtmlCtrl.dispose();
     for (final h in _apiHeaders) {
       (h['key'] as TextEditingController).dispose();
       (h['value'] as TextEditingController).dispose();
@@ -353,6 +368,12 @@ class _ReminderEditorScreenState extends State<ReminderEditorScreen> {
         'msg_title_template': _msgTitleCtrl.text,
         'msg_body_template': _msgBodyCtrl.text,
         'recipient_config': _buildRecipientConfig(),
+        'email_template_source': _emailTemplateSource,
+        'email_template_mode': _emailTemplateSource == 'custom' ? _emailTemplateMode.value : null,
+        'email_template_blocks': _emailTemplateSource == 'custom'
+            ? _emailTemplateBlocks.map((b) => b.toJson()).toList()
+            : <Map<String, dynamic>>[],
+        'email_template_html_source': _emailTemplateSource == 'custom' ? _emailTemplateHtmlCtrl.text : null,
       };
 
       if (_isEdit) {
@@ -376,6 +397,14 @@ class _ReminderEditorScreenState extends State<ReminderEditorScreen> {
           msgTitleTemplate: data['msg_title_template'] as String,
           msgBodyTemplate: data['msg_body_template'] as String,
           recipientConfig: data['recipient_config'] as Map<String, dynamic>,
+          emailTemplateSource: data['email_template_source'] as String,
+          emailTemplateMode: data['email_template_mode'] != null
+              ? EmailTemplateMode.fromString(data['email_template_mode'] as String)
+              : null,
+          emailTemplateBlocks: (data['email_template_blocks'] as List)
+              .map((b) => EmailTemplateBlock.fromJson(b as Map<String, dynamic>))
+              .toList(),
+          emailTemplateHtmlSource: data['email_template_html_source'] as String?,
           createdAt: DateTime.now(),
           updatedAt: DateTime.now(),
         );
@@ -1293,6 +1322,89 @@ class _ReminderEditorScreenState extends State<ReminderEditorScreen> {
           activeThumbColor: AppColors.primary,
           contentPadding: EdgeInsets.zero,
         ),
+        const SizedBox(height: 12),
+        _buildEmailTemplateSection(),
+      ],
+    );
+  }
+
+  Widget _buildEmailTemplateSection() {
+    final mergeFields = <String>[
+      'system.now',
+      ..._previewedFields,
+      ..._previewedFields.map((f) => 'days_until.$f'),
+      ..._previewedFields.map((f) => 'days_since.$f'),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(_isAr ? 'قالب البريد الإلكتروني' : 'Email template',
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.secondary)),
+        if (!_chanEmail) ...[
+          const SizedBox(height: 4),
+          Text(
+            _isAr
+                ? 'سيُستخدم هذا القالب فقط عند تفعيل قناة البريد الإلكتروني أعلاه'
+                : 'This only takes effect once the Email channel above is enabled',
+            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+          ),
+        ],
+        const SizedBox(height: 8),
+        SegmentedButton<String>(
+          segments: [
+            ButtonSegment(value: 'main', label: Text(_isAr ? 'القالب الرئيسي' : 'Main template')),
+            ButtonSegment(value: 'custom', label: Text(_isAr ? 'قالب مخصص لهذا التذكير' : 'Custom for this reminder')),
+          ],
+          selected: {_emailTemplateSource},
+          onSelectionChanged: (s) => setState(() => _emailTemplateSource = s.first),
+        ),
+        if (_emailTemplateSource == 'custom') ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 420,
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey.shade200),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final wide = constraints.maxWidth >= 700;
+                  final editor = EmailTemplateEditorPanel(
+                    mode: _emailTemplateMode,
+                    blocks: _emailTemplateBlocks,
+                    htmlController: _emailTemplateHtmlCtrl,
+                    mergeFields: mergeFields,
+                    onModeChanged: (m) => setState(() => _emailTemplateMode = m),
+                    onChanged: () => setState(() {}),
+                  );
+                  final preview = EmailTemplatePreview(
+                    mode: _emailTemplateMode,
+                    blocks: _emailTemplateBlocks,
+                    htmlSource: _emailTemplateHtmlCtrl.text,
+                  );
+                  if (!wide) {
+                    return Column(
+                      children: [
+                        Expanded(child: editor),
+                        Container(height: 1, color: Colors.grey.shade200),
+                        Expanded(child: preview),
+                      ],
+                    );
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(child: editor),
+                      Container(width: 1, color: Colors.grey.shade200),
+                      Expanded(child: preview),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }

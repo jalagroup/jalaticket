@@ -21,11 +21,15 @@ Deno.serve(async (req) => {
 
   const now = new Date().toISOString();
 
+  // A reminder that has never run has next_run_at = NULL (it's only ever set
+  // once execute-reminder finishes a run). `.lte()` alone never matches NULL,
+  // so newly created reminders would otherwise sit forever without ever
+  // firing their first run — treat NULL as "due now" too.
   const { data: dueReminders, error } = await supabase
     .from("reminders")
     .select("id")
     .eq("is_active", true)
-    .lte("next_run_at", now);
+    .or(`next_run_at.is.null,next_run_at.lte.${now}`);
 
   if (error) return json({ error: error.message }, 500);
   if (!dueReminders || dueReminders.length === 0) {

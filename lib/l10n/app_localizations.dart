@@ -498,6 +498,7 @@ class AppLocalizations {
   String get selectNatureOfWork => translate('select_nature_of_work');
   String get noNatureOfWorkAvailable =>
       translate('no_nature_of_work_available');
+  String get noDepartmentsAvailable => translate('no_departments_available');
   String get highPriorityExplanation => translate('high_priority_explanation');
   String get explainWhyUrgent => translate('explain_why_urgent');
   String get noFilesSelected => translate('no_files_selected');
@@ -547,6 +548,7 @@ class AppLocalizations {
   String get specificLocation => translate('specific_location');
   String get specificLocationHint => translate('specific_location_hint');
   String get problemTitle => translate('problem_title');
+  String get problemTitleOptionalNote => translate('problem_title_optional_note');
   String get selectProblemType => translate('select_problem_type');
   String get enterCustomProblem => translate('enter_custom_problem');
   String get customProblemTitle => translate('custom_problem_title');
@@ -1153,6 +1155,9 @@ class AppLocalizations {
   String get logs => translate('logs');
   String get preferences => translate('preferences');
   String get autoAssign => translate('auto_assign');
+  String get reminders => translate('reminders');
+  String get customFields => translate('custom_fields');
+  String get emailTemplates => translate('email_templates');
   String get reports => translate('reports');
   String get invalidTab => translate('invalid_tab');
   String get noManagementOptionsAvailable =>
@@ -1660,6 +1665,7 @@ const Map<String, String> _enValues = {
   'select_nature_of_work': 'Select nature of work',
   'no_nature_of_work_available':
       'No nature of work options available for this department.',
+  'no_departments_available': 'No departments available.',
   'high_priority_explanation': 'High Priority Explanation',
   'explain_why_urgent': 'Explain why this is urgent/high priority',
   'no_files_selected': 'No files selected',
@@ -1702,6 +1708,7 @@ const Map<String, String> _enValues = {
   'specific_location': 'Specific Location',
   'specific_location_hint': 'Room number, floor, etc.',
   'problem_title': 'Problem Title',
+  'problem_title_optional_note': 'Optional — if left blank, the main title above will be used.',
   'select_problem_type': 'Select problem type',
   'enter_custom_problem': 'Enter custom problem title',
   'custom_problem_title': 'Custom Problem Title',
@@ -2246,6 +2253,9 @@ const Map<String, String> _enValues = {
   'logs': 'Logs',
   'preferences': 'Preferences',
   'auto_assign': 'Auto-Assign',
+  'reminders': 'Reminders',
+  'custom_fields': 'Custom Fields',
+  'email_templates': 'Email Templates',
   'reports': 'Reports',
   'invalid_tab': 'Invalid tab',
   'no_management_options_available': 'No management options available',
@@ -2517,7 +2527,7 @@ const Map<String, String> _arValues = {
   'it_solution_ticket': 'تذكرة حلول تقنية',
   'places_maintenance_ticket': 'تذكرة صيانة أماكن',
   'quality_complaint': 'شكوى جودة',
-  'individuals_maintenance_ticket': 'تذكرة صيانة مشاكل فردية',
+  'individuals_maintenance_ticket': 'تذكرة صيانة مشاكل و أعطال الشخص الواحد',
   'requests_ticket': 'تذكرة طلبات',
   'truck_maintenance_ticket': 'تذكرة صيانة شاحنات',
   'create': 'إنشاء',
@@ -2779,6 +2789,7 @@ const Map<String, String> _arValues = {
   'select_nature_of_work': 'اختر طبيعة العمل',
   'no_nature_of_work_available':
       'لا توجد خيارات لطبيعة العمل متاحة لهذا القسم.',
+  'no_departments_available': 'لا توجد أقسام متاحة.',
   'high_priority_explanation': 'توضيح الأولوية العالية',
   'explain_why_urgent': 'اشرح لماذا هذا عاجل/أولوية عالية',
   'no_files_selected': 'لم يتم تحديد ملفات',
@@ -2822,6 +2833,7 @@ const Map<String, String> _arValues = {
   'specific_location': 'الموقع المحدد',
   'specific_location_hint': 'رقم الغرفة، الطابق، إلخ.',
   'problem_title': 'عنوان المشكلة',
+  'problem_title_optional_note': 'اختياري — إذا تُرك فارغاً، سيُستخدم العنوان الرئيسي أعلاه.',
   'select_problem_type': 'اختر نوع المشكلة',
   'enter_custom_problem': 'أدخل عنوان مشكلة مخصص',
   'custom_problem_title': 'عنوان مشكلة مخصص',
@@ -2838,13 +2850,13 @@ const Map<String, String> _arValues = {
   'notified_when_work_begins': 'سيتم إشعارك عند بدء العمل',
 
   // Individuals Maintenance Ticket
-  'individuals_maintenance_ticket_title': 'تذكرة صيانة مشاكل فردية',
+  'individuals_maintenance_ticket_title':  'تذكرة صيانة مشاكل و أعطال الشخص الواحد',
   'individuals_brief_description': 'وصف موجز للمشكلة',
   'individuals_detailed_description': 'وصف تفصيلي للمشكلة',
   'place_individual_info': 'المكان: فرد (غير مرتبط بموقع محدد)',
   'specific_location_optional': 'الموقع المحدد (اختياري)',
   'where_individual_located': 'أين يقع هذا الفرد؟',
-  'individuals_ticket_info': 'تذكرة صيانة مشاكل فردية',
+  'individuals_ticket_info':  'تذكرة صيانة مشاكل و أعطال الشخص الواحد',
   'for_issues_related_individuals':
       'للمشاكل المتعلقة بالأفراد (غير مرتبطة بالأماكن)',
   'add_photos_documents': 'أضف صور أو مستندات إذا كانت مفيدة',
@@ -3350,6 +3362,9 @@ const Map<String, String> _arValues = {
   'logs': 'السجلات',
   'preferences': 'التفضيلات',
   'auto_assign': 'التعيين التلقائي',
+  'reminders': 'التذكيرات',
+  'custom_fields': 'الحقول المخصصة',
+  'email_templates': 'قوالب البريد الإلكتروني',
   'reports': 'التقارير',
   'invalid_tab': 'علامة تبويب غير صالحة',
   'no_management_options_available': 'لا توجد خيارات إدارة متاحة',

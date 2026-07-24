@@ -62,21 +62,8 @@ class _IndividualsMaintenanceTicketDialogState
           .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
           .toList();
 
-      final placeId = widget.currentUser.placeId;
-      if (placeId != null) {
-        try {
-          final placeData = await supabase
-              .from('places')
-              .select('allowed_department_ids')
-              .eq('id', placeId)
-              .maybeSingle();
-          final rawIds = placeData?['allowed_department_ids'];
-          if (rawIds is List && rawIds.isNotEmpty) {
-            final allowed = rawIds.map((e) => e.toString()).toSet();
-            departments = departments.where((d) => allowed.contains(d.id)).toList();
-          }
-        } catch (_) {}
-      }
+      departments = await filterDeptsByPlaceId(
+          departments, widget.currentUser.placeId, widget.currentUser.departmentId);
 
       setState(() {
         _departments = departments;
@@ -283,21 +270,6 @@ class _IndividualsMaintenanceTicketDialogState
       return;
     }
 
-    // Problem title validation
-    if (_problemTitles.isNotEmpty && !_useCustomProblem && _selectedProblemTitleId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.pleaseSelectProblemOrCustom)),
-      );
-      return;
-    }
-
-    if ((_problemTitles.isEmpty || _useCustomProblem) && _customProblemController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.pleaseEnterCustomProblem)),
-      );
-      return;
-    }
-
     setState(() => _isLoading = true);
 
     try {
@@ -310,9 +282,19 @@ class _IndividualsMaintenanceTicketDialogState
         'location': _locationController.text.isNotEmpty
             ? _locationController.text.trim()
             : null,
+        // Problem title is optional; falls back to the main title when left blank
         'problem_title_id': (_problemTitles.isNotEmpty && !_useCustomProblem) ? _selectedProblemTitleId : null,
-        'other_problem_title':
-            _useCustomProblem ? _customProblemController.text.trim() : (_problemTitles.isEmpty ? _customProblemController.text.trim() : null),
+        'other_problem_title': _problemTitles.isEmpty
+            ? (_customProblemController.text.trim().isEmpty
+                ? _titleController.text.trim()
+                : _customProblemController.text.trim())
+            : (_useCustomProblem
+                ? (_customProblemController.text.trim().isEmpty
+                    ? _titleController.text.trim()
+                    : _customProblemController.text.trim())
+                : (_selectedProblemTitleId == null
+                    ? _titleController.text.trim()
+                    : null)),
         'priority': _selectedPriority.value,
         'high_priority_explain': (_selectedPriority == PriorityType.high ||
                 _selectedPriority == PriorityType.urgent)
@@ -496,11 +478,11 @@ class _IndividualsMaintenanceTicketDialogState
           onPressed: (_isLoading || _isUploadingFiles) ? null : _createTicket,
           style: ElevatedButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            backgroundColor: Colors.purple,
+            backgroundColor: Colors.purple.shade600,
             foregroundColor: Colors.white,
             elevation: 0,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(6),
             ),
           ),
           child: (_isLoading || _isUploadingFiles)
@@ -877,11 +859,11 @@ class _ITSolutionTicketDialogState extends State<ITSolutionTicketDialog> {
           onPressed: (_isLoading || _isUploadingFiles) ? null : _createTicket,
           style: ElevatedButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            backgroundColor: Colors.blue,
+            backgroundColor: Colors.blue.shade600,
             foregroundColor: Colors.white,
             elevation: 0,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(6),
             ),
           ),
           child: (_isLoading || _isUploadingFiles)
@@ -998,21 +980,8 @@ class _PlacesMaintenanceTicketDialogState
             .toList();
       }
 
-      final placeId = widget.currentUser.placeId;
-      if (placeId != null) {
-        try {
-          final placeData = await supabase
-              .from('places')
-              .select('allowed_department_ids')
-              .eq('id', placeId)
-              .maybeSingle();
-          final rawIds = placeData?['allowed_department_ids'];
-          if (rawIds is List && rawIds.isNotEmpty) {
-            final allowed = rawIds.map((e) => e.toString()).toSet();
-            departments = departments.where((d) => allowed.contains(d.id)).toList();
-          }
-        } catch (_) {}
-      }
+      departments = await filterDeptsByPlaceId(
+          departments, widget.currentUser.placeId, widget.currentUser.departmentId);
 
       setState(() {
         _departments = departments;
@@ -1276,27 +1245,6 @@ class _PlacesMaintenanceTicketDialogState
       return;
     }
 
-    // Problem title validation
-    if (_problemTitles.isNotEmpty && !_useCustomProblem && _selectedProblemTitleId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(l10n.pleaseSelectProblemOrCustom),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    if ((_problemTitles.isEmpty || _useCustomProblem) && _customProblemController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(l10n.pleaseEnterCustomProblem),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
     setState(() => _isLoading = true);
 
     try {
@@ -1312,10 +1260,19 @@ class _PlacesMaintenanceTicketDialogState
         'location': _locationController.text.trim().isNotEmpty
             ? _locationController.text.trim()
             : null,
+        // Problem title is optional; falls back to the main title when left blank
         'problem_title_id': (_problemTitles.isNotEmpty && !_useCustomProblem) ? _selectedProblemTitleId : null,
-        'other_problem_title': _useCustomProblem
-            ? _customProblemController.text.trim()
-            : (_problemTitles.isEmpty ? _customProblemController.text.trim() : null),
+        'other_problem_title': _problemTitles.isEmpty
+            ? (_customProblemController.text.trim().isEmpty
+                ? _titleController.text.trim()
+                : _customProblemController.text.trim())
+            : (_useCustomProblem
+                ? (_customProblemController.text.trim().isEmpty
+                    ? _titleController.text.trim()
+                    : _customProblemController.text.trim())
+                : (_selectedProblemTitleId == null
+                    ? _titleController.text.trim()
+                    : null)),
         'priority': _selectedPriority.value,
         'high_priority_explain': (_selectedPriority == PriorityType.high ||
                 _selectedPriority == PriorityType.urgent)
@@ -1517,11 +1474,11 @@ class _PlacesMaintenanceTicketDialogState
           onPressed: (_isLoading || _isUploadingFiles) ? null : _createTicket,
           style: ElevatedButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            backgroundColor: Colors.green,
+            backgroundColor: Colors.green.shade600,
             foregroundColor: Colors.white,
             elevation: 0,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(6),
             ),
           ),
           child: (_isLoading || _isUploadingFiles)
@@ -1614,10 +1571,13 @@ class _RequestsTicketDialogState extends State<RequestsTicketDialog> {
   Future<void> _loadData() async {
     try {
       final departmentsResponse = await supabase.from('departments').select();
+      List<DepartmentModel> departments = departmentsResponse
+          .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
+          .toList();
+      departments = await filterDeptsByPlaceId(
+          departments, widget.currentUser.placeId, widget.currentUser.departmentId);
       setState(() {
-        _departments = departmentsResponse
-            .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
-            .toList();
+        _departments = departments;
       });
     } catch (e) {
       print('Error loading data: $e');
@@ -2001,11 +1961,11 @@ class _RequestsTicketDialogState extends State<RequestsTicketDialog> {
           onPressed: (_isLoading || _isUploadingFiles) ? null : _createTicket,
           style: ElevatedButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            backgroundColor: Colors.teal,
+            backgroundColor: Colors.teal.shade600,
             foregroundColor: Colors.white,
             elevation: 0,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(6),
             ),
           ),
           child: (_isLoading || _isUploadingFiles)

@@ -1,18 +1,26 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flex_color_picker/flex_color_picker.dart';
 import 'dart:async';
 import 'package:jalasupport/activity.dart';
 import 'package:jalasupport/reminders/reminders_list_screen.dart';
 import 'package:jalasupport/ai_dashboard_screen.dart';
 import 'package:jalasupport/ai_insights.dart';
 import 'package:jalasupport/branch_admin_management_screen.dart';
+import 'package:jalasupport/bulk_edit_users_dialog.dart';
 import 'package:jalasupport/bulk_import_users_dialog.dart';
+import 'package:jalasupport/email_templates/email_template_designer_screen.dart';
 import 'package:jalasupport/problem_reports_admin_screen.dart';
 import 'package:jalasupport/l10n/app_localizations.dart';
 import 'package:jalasupport/main.dart';
 import 'package:jalasupport/models.dart';
 import 'package:jalasupport/services.dart';
+import 'package:jalasupport/user_picker.dart';
+import 'package:jalasupport/user_fields/field_definitions_screen.dart';
+import 'package:jalasupport/user_fields/user_field_models.dart';
+import 'package:jalasupport/user_fields/user_field_service.dart';
+import 'package:jalasupport/user_fields/user_profile_dialog.dart';
 
 class CreateUserDialog extends StatefulWidget {
   final UserModel currentUser;
@@ -36,19 +44,50 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
 
   UserType _selectedUserType = UserType.user;
   String? _selectedDepartmentId;
+  Set<String> _selectedDepartmentIds = {};
   String? _selectedPlaceId;
   List<String> _natureOfWork = [];
   bool _usePhoneAccount = false;   // toggle: email vs phone
+  UserModel? _directManager;
 
   List<DepartmentModel> _departments = [];
   List<PlaceModel> _places = [];
   bool _isLoading = false;
+
+  // Departments THIS super admin manages — when creating an 'admin' user,
+  // they may only place them in one of these, never an arbitrary department.
+  Set<String> _creatorDepartmentIds = {};
+
+  /// Departments selectable in the single-department (Admin) dropdown.
+  List<DepartmentModel> get _departmentOptionsForAdmin {
+    if (widget.currentUser.userType != UserType.superAdmin) return _departments;
+    return _departments.where((d) => _creatorDepartmentIds.contains(d.id)).toList();
+  }
 
   @override
   void initState() {
     super.initState();
     _loadData();
     _setDefaultUserType();
+    _loadCreatorDepartments();
+  }
+
+  Future<void> _loadCreatorDepartments() async {
+    if (widget.currentUser.userType != UserType.superAdmin) return;
+    try {
+      final response = await supabase
+          .from('admin_departments')
+          .select('department_id')
+          .eq('admin_id', widget.currentUser.id);
+      final ids = response.map<String>((json) => json['department_id'] as String).toSet();
+      if (widget.currentUser.departmentId != null) {
+        ids.add(widget.currentUser.departmentId!);
+      }
+      if (!mounted) return;
+      setState(() => _creatorDepartmentIds = ids);
+    } catch (e) {
+      debugPrint('⚠️ Could not load creator departments: $e');
+    }
   }
 
   void _setDefaultUserType() {
@@ -91,6 +130,56 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
     }
   }
 
+  Widget _buildDepartmentsMultiSelectSection(String lang) {
+    final l10n = AppLocalizations.safeOf(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '${l10n.department} *',
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey[700]),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade50,
+            border: Border.all(color: Colors.grey.shade200),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: _departments.isEmpty
+              ? Text(l10n.noDepartmentsAvailable, style: TextStyle(fontSize: 12, color: Colors.grey[500]))
+              : Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: _departments.map((d) {
+                    final isSelected = _selectedDepartmentIds.contains(d.id);
+                    return FilterChip(
+                      label: Text(d.localizedName(lang), style: const TextStyle(fontSize: 12)),
+                      selected: isSelected,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      selectedColor: const Color(0xFFfff3e0),
+                      checkmarkColor: const Color(0xFFf16936),
+                      side: BorderSide(color: isSelected ? const Color(0xFFffcc80) : Colors.grey.shade300),
+                      onSelected: (selected) {
+                        setState(() {
+                          if (selected) {
+                            _selectedDepartmentIds.add(d.id);
+                          } else {
+                            _selectedDepartmentIds.remove(d.id);
+                          }
+                        });
+                      },
+                    );
+                  }).toList(),
+                ),
+        ),
+      ],
+    );
+  }
+
   Future<void> _createUser() async {
     final l10n = AppLocalizations.safeOf(context);
 
@@ -119,9 +208,14 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
       }
     }
 
-    if ((_selectedUserType == UserType.superAdmin ||
-            _selectedUserType == UserType.admin) &&
-        _selectedDepartmentId == null) {
+    if (_selectedUserType == UserType.admin && _selectedDepartmentId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.pleaseSelectDepartmentForAdminUsers)),
+      );
+      return;
+    }
+
+    if (_selectedUserType == UserType.superAdmin && _selectedDepartmentIds.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(l10n.pleaseSelectDepartmentForAdminUsers)),
       );
@@ -167,9 +261,37 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
       );
 
       if (response.data != null && response.data['success'] == true) {
+        final data = response.data as Map<String, dynamic>;
+        final newUserId = data['user_id'] as String?;
+        if (_selectedUserType == UserType.superAdmin &&
+            _selectedDepartmentIds.isNotEmpty &&
+            newUserId != null) {
+          try {
+            await supabase.from('admin_departments').insert(
+                  _selectedDepartmentIds
+                      .map((deptId) => {
+                            'admin_id': newUserId,
+                            'department_id': deptId,
+                            'created_by': widget.currentUser.id,
+                          })
+                      .toList(),
+                );
+          } catch (e) {
+            debugPrint('Failed to save admin departments: $e');
+          }
+        }
+        if (_directManager != null && newUserId != null) {
+          try {
+            await supabase
+                .from('users')
+                .update({'direct_manager_id': _directManager!.id})
+                .eq('id', newUserId);
+          } catch (e) {
+            debugPrint('Failed to save direct manager: $e');
+          }
+        }
         if (mounted) {
           setState(() => _isLoading = false);
-          final data = response.data as Map<String, dynamic>;
           final generatedPassword = data['generated_password'] as String?;
 
           Navigator.pop(context);
@@ -465,20 +587,25 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
                       onChanged: (value) => setState(() {
                         _selectedUserType = value!;
                         _selectedDepartmentId = null;
+                        _selectedDepartmentIds = {};
                         _selectedPlaceId = null;
                         _natureOfWork.clear();
                       }),
                     ),
-                    if (_selectedUserType == UserType.superAdmin || _selectedUserType == UserType.admin) ...[
+                    if (_selectedUserType == UserType.admin) ...[
                       const SizedBox(height: 10),
                       DropdownButtonFormField<String>(
                         value: _selectedDepartmentId,
                         isDense: true,
                         style: const TextStyle(fontSize: 14, color: Colors.black87),
                         decoration: _field('${l10n.department} *', Icons.business_outlined),
-                        items: _departments.map((d) => DropdownMenuItem(value: d.id, child: Text(d.localizedName(lang), style: const TextStyle(fontSize: 13)))).toList(),
+                        items: _departmentOptionsForAdmin.map((d) => DropdownMenuItem(value: d.id, child: Text(d.localizedName(lang), style: const TextStyle(fontSize: 13)))).toList(),
                         onChanged: (v) => setState(() => _selectedDepartmentId = v),
                       ),
+                    ],
+                    if (_selectedUserType == UserType.superAdmin) ...[
+                      const SizedBox(height: 10),
+                      _buildDepartmentsMultiSelectSection(lang),
                     ],
                     if (_selectedUserType == UserType.superUser &&
                         widget.currentUser.userType != UserType.superUser) ...[
@@ -574,6 +701,40 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
                         ),
                       ),
                     ],
+                    const SizedBox(height: 10),
+                    Text(
+                      lang == 'ar' ? 'المدير المباشر (اختياري)' : 'Direct manager (optional)',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey[700]),
+                    ),
+                    const SizedBox(height: 6),
+                    InkWell(
+                      onTap: () async {
+                        final picked = await showUserPicker(
+                          context,
+                          title: lang == 'ar' ? 'اختر المدير المباشر' : 'Select direct manager',
+                        );
+                        if (picked != null) setState(() => _directManager = picked);
+                      },
+                      borderRadius: BorderRadius.circular(10),
+                      child: InputDecorator(
+                        decoration: _field(lang == 'ar' ? 'المدير المباشر' : 'Direct manager', Icons.supervisor_account_outlined),
+                        child: Row(children: [
+                          Expanded(
+                            child: Text(
+                              _directManager?.fullName ?? (lang == 'ar' ? 'بدون مدير مباشر' : 'No direct manager'),
+                              style: TextStyle(fontSize: 13, color: _directManager != null ? Colors.grey[850] : Colors.grey[400]),
+                            ),
+                          ),
+                          if (_directManager != null)
+                            InkWell(
+                              onTap: () => setState(() => _directManager = null),
+                              child: Icon(Icons.close, size: 16, color: Colors.grey[500]),
+                            )
+                          else
+                            Icon(Icons.arrow_drop_down, color: Colors.grey[500]),
+                        ]),
+                      ),
+                    ),
                     const SizedBox(height: 4),
                   ],
                 ),
@@ -691,6 +852,7 @@ class _EditUserDialogState extends State<EditUserDialog> {
 
   late UserType _selectedUserType;
   String? _selectedDepartmentId;
+  Set<String> _selectedDepartmentIds = {};
   String? _selectedPlaceId;
 
   List<String> _selectedNatureOfWorkIds = [];
@@ -708,6 +870,25 @@ class _EditUserDialogState extends State<EditUserDialog> {
     _loadData();
     if (widget.userToEdit.userType == UserType.admin) {
       _loadAdminNatureOfWork();
+    }
+    if (widget.userToEdit.userType == UserType.superAdmin) {
+      _loadAdminDepartments();
+    }
+  }
+
+  Future<void> _loadAdminDepartments() async {
+    try {
+      final response = await supabase
+          .from('admin_departments')
+          .select('department_id')
+          .eq('admin_id', widget.userToEdit.id);
+      setState(() {
+        _selectedDepartmentIds = response
+            .map<String>((json) => json['department_id'] as String)
+            .toSet();
+      });
+    } catch (e) {
+      print('Error loading admin departments: $e');
     }
   }
 
@@ -778,6 +959,15 @@ class _EditUserDialogState extends State<EditUserDialog> {
       return;
     }
 
+    if (_selectedUserType == UserType.superAdmin &&
+        _canEditDepartment() &&
+        _selectedDepartmentIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.pleaseSelectDepartmentForAdminUsers)),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -787,8 +977,7 @@ class _EditUserDialogState extends State<EditUserDialog> {
             ? null
             : _phoneController.text.trim(),
         'user_type': _selectedUserType.value,
-        'department_id': (_selectedUserType == UserType.superAdmin ||
-                _selectedUserType == UserType.admin)
+        'department_id': _selectedUserType == UserType.admin
             ? _selectedDepartmentId
             : null,
         'place_id': (_selectedUserType == UserType.superUser ||
@@ -817,6 +1006,25 @@ class _EditUserDialogState extends State<EditUserDialog> {
               .toList();
 
           await supabase.from('admin_nature_of_work').insert(insertData);
+        }
+      }
+
+      if (_selectedUserType == UserType.superAdmin && _canEditDepartment()) {
+        await supabase
+            .from('admin_departments')
+            .delete()
+            .eq('admin_id', widget.userToEdit.id);
+
+        if (_selectedDepartmentIds.isNotEmpty) {
+          final insertData = _selectedDepartmentIds
+              .map((deptId) => {
+                    'admin_id': widget.userToEdit.id,
+                    'department_id': deptId,
+                    'created_by': widget.currentUser.id,
+                  })
+              .toList();
+
+          await supabase.from('admin_departments').insert(insertData);
         }
       }
 
@@ -907,6 +1115,59 @@ class _EditUserDialogState extends State<EditUserDialog> {
 
   bool _canEditDepartment() {
     return widget.currentUser.userType == UserType.systemAdmin;
+  }
+
+  Widget _buildDepartmentsMultiSelectSection(String lang) {
+    final l10n = AppLocalizations.safeOf(context);
+    final canEdit = _canEditDepartment();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          l10n.department,
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey[700]),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade50,
+            border: Border.all(color: Colors.grey.shade200),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: _departments.isEmpty
+              ? Text(l10n.noDepartmentsAvailable, style: TextStyle(fontSize: 12, color: Colors.grey[500]))
+              : Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: _departments.map((d) {
+                    final isSelected = _selectedDepartmentIds.contains(d.id);
+                    return FilterChip(
+                      label: Text(d.localizedName(lang), style: const TextStyle(fontSize: 12)),
+                      selected: isSelected,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      selectedColor: const Color(0xFFfff3e0),
+                      checkmarkColor: const Color(0xFFf16936),
+                      side: BorderSide(color: isSelected ? const Color(0xFFffcc80) : Colors.grey.shade300),
+                      onSelected: canEdit
+                          ? (selected) {
+                              setState(() {
+                                if (selected) {
+                                  _selectedDepartmentIds.add(d.id);
+                                } else {
+                                  _selectedDepartmentIds.remove(d.id);
+                                }
+                              });
+                            }
+                          : null,
+                    );
+                  }).toList(),
+                ),
+        ),
+      ],
+    );
   }
 
   bool _canEditPlace() {
@@ -1024,12 +1285,12 @@ class _EditUserDialogState extends State<EditUserDialog> {
                           ? (v) => setState(() {
                                 _selectedUserType = v!;
                                 _selectedDepartmentId = null;
+                                _selectedDepartmentIds = {};
                                 _selectedPlaceId = null;
                               })
                           : null,
                     ),
-                    if (_selectedUserType == UserType.superAdmin ||
-                        _selectedUserType == UserType.admin) ...[
+                    if (_selectedUserType == UserType.admin) ...[
                       const SizedBox(height: 10),
                       DropdownButtonFormField<String>(
                         value: _selectedDepartmentId,
@@ -1039,6 +1300,10 @@ class _EditUserDialogState extends State<EditUserDialog> {
                         items: _departments.map((d) => DropdownMenuItem(value: d.id, child: Text(d.localizedName(lang), style: const TextStyle(fontSize: 13)))).toList(),
                         onChanged: _canEditDepartment() ? (v) => setState(() => _selectedDepartmentId = v) : null,
                       ),
+                    ],
+                    if (_selectedUserType == UserType.superAdmin) ...[
+                      const SizedBox(height: 10),
+                      _buildDepartmentsMultiSelectSection(lang),
                     ],
                     if (_selectedUserType == UserType.superUser ||
                         _selectedUserType == UserType.user) ...[
@@ -1139,6 +1404,8 @@ class ManagementScreen extends StatefulWidget {
           'problemreports': 12,
           'systemsettings': 13,
           'reminders': 14,
+          'customfields': 15,
+          'emailtemplates': 16,
         };
         return map[n];
       case UserType.superAdmin:
@@ -1167,10 +1434,24 @@ class ManagementScreen extends StatefulWidget {
   State<ManagementScreen> createState() => _ManagementScreenState();
 }
 
+/// Plain data for one management tab — deliberately NOT the `Tab` widget
+/// class, since `Tab` is designed to be rendered by an actual `TabBar` and
+/// carries widget/element-lifecycle expectations (e.g. its `icon` is a real
+/// mounted `Widget` instance) that don't apply when just reading it back out
+/// as data for a custom strip.
+class _MgmtTabSpec {
+  final IconData icon;
+  final String label;
+  const _MgmtTabSpec(this.icon, this.label);
+}
+
 class _ManagementScreenState extends State<ManagementScreen>
     with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   late TabController _tabController;
+  bool _tabControllerReady = false;
   final Map<int, Widget> _cachedTabs = {};
+  final ScrollController _tabStripScroll = ScrollController();
+  List<GlobalKey> _tabKeys = [];
 
   @override
   bool get wantKeepAlive => true;
@@ -1178,13 +1459,20 @@ class _ManagementScreenState extends State<ManagementScreen>
   @override
   void initState() {
     super.initState();
+    _initTabController();
+  }
+
+  void _initTabController() {
     _tabController = TabController(
       length: _getTabCount(),
       vsync: this,
     );
+    _tabControllerReady = true;
+    _tabKeys = List.generate(_getTabCount(), (_) => GlobalKey());
 
     // Update the URL whenever the user switches management tabs so the active
-    // tab survives a page refresh (e.g. /management/2).
+    // tab survives a page refresh (e.g. /management/2), and keep the active
+    // pill scrolled into view in the custom tab strip.
     _tabController.addListener(_onTabChanged);
 
     // Restore the tab from a deep-link URL (e.g. /management/users on refresh).
@@ -1200,15 +1488,43 @@ class _ManagementScreenState extends State<ManagementScreen>
     }
   }
 
+  int? _lastScrolledTabIndex;
+
   void _onTabChanged() {
     // URL stays at /management — tab state is local. Deep-linking on initial
     // load is handled via DeepLinkState.managementTab in initState.
+    //
+    // _tabController notifies on every animation tick (not just discrete
+    // index changes) — the body TabBarView allows swiping between tabs, so
+    // this fires continuously during any swipe/transition. Dedupe to one
+    // scroll-into-view per actual settled index, and defer it to after the
+    // frame finishes building so it never runs mid-layout.
+    final idx = _tabController.index;
+    if (idx == _lastScrolledTabIndex) return;
+    if (idx < 0 || idx >= _tabKeys.length) return;
+    _lastScrolledTabIndex = idx;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final keyContext = _tabKeys[idx].currentContext;
+      if (keyContext == null) return;
+      Scrollable.ensureVisible(
+        keyContext,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.explicit,
+        alignment: 0.5,
+      );
+    });
   }
 
   @override
   void dispose() {
-    _tabController.removeListener(_onTabChanged);
-    _tabController.dispose();
+    if (_tabControllerReady) {
+      _tabController.removeListener(_onTabChanged);
+      _tabController.dispose();
+    }
+    _tabStripScroll.dispose();
     _cachedTabs.clear();
     super.dispose();
   }
@@ -1216,7 +1532,7 @@ class _ManagementScreenState extends State<ManagementScreen>
   int _getTabCount() {
     switch (widget.currentUser.userType) {
       case UserType.systemAdmin:
-        return 15;
+        return 17;
       case UserType.superAdmin:
         return 10;
       case UserType.superUser:
@@ -1226,56 +1542,51 @@ class _ManagementScreenState extends State<ManagementScreen>
     }
   }
 
-  List<Tab> _getTabs() {
+  List<_MgmtTabSpec> _getTabs() {
     final l10n = AppLocalizations.safeOf(context);
-    final tabs = <Tab>[];
+    final tabs = <_MgmtTabSpec>[];
 
     if (widget.currentUser.userType == UserType.systemAdmin) {
       tabs.addAll([
-        Tab(icon: const Icon(Icons.business, size: 20), text: l10n.departments),
-        Tab(icon: const Icon(Icons.location_on, size: 20), text: l10n.places),
-        Tab(icon: const Icon(Icons.people, size: 20), text: l10n.users),
-        Tab(
-            icon: const Icon(Icons.admin_panel_settings, size: 20),
-            text: l10n.branchAdmins), // NEW TAB
-        Tab(icon: const Icon(Icons.title, size: 20), text: l10n.problemTitles),
-        Tab(icon: const Icon(Icons.build, size: 20), text: l10n.parts),
-        Tab(
-            icon: const Icon(Icons.inventory, size: 20),
-            text: l10n.complaintItems),
-        Tab(icon: const Icon(Icons.shield, size: 20), text: l10n.permissions),
-        Tab(
-            icon: const Icon(Icons.schedule, size: 20),
-            text: l10n.autoApproval),
-        Tab(icon: const Icon(Icons.history, size: 20), text: l10n.logs),
-        Tab(icon: const Icon(Icons.settings, size: 20), text: l10n.preferences),
-        Tab(icon: const Icon(Icons.auto_awesome, size: 20), text: l10n.aiInsights),
-        Tab(icon: const Icon(Icons.bug_report_rounded, size: 20), text: l10n.problemReports),
-        Tab(icon: const Icon(Icons.tune, size: 20), text: l10n.systemSettings),
-        const Tab(icon: Icon(Icons.alarm_rounded, size: 20), text: 'Reminders'),
+        _MgmtTabSpec(Icons.business, l10n.departments),
+        _MgmtTabSpec(Icons.location_on, l10n.places),
+        _MgmtTabSpec(Icons.people, l10n.users),
+        _MgmtTabSpec(Icons.admin_panel_settings, l10n.branchAdmins), // NEW TAB
+        _MgmtTabSpec(Icons.title, l10n.problemTitles),
+        _MgmtTabSpec(Icons.build, l10n.parts),
+        _MgmtTabSpec(Icons.inventory, l10n.complaintItems),
+        _MgmtTabSpec(Icons.shield, l10n.permissions),
+        _MgmtTabSpec(Icons.schedule, l10n.autoApproval),
+        _MgmtTabSpec(Icons.history, l10n.logs),
+        _MgmtTabSpec(Icons.settings, l10n.preferences),
+        _MgmtTabSpec(Icons.auto_awesome, l10n.aiInsights),
+        _MgmtTabSpec(Icons.bug_report_rounded, l10n.problemReports),
+        _MgmtTabSpec(Icons.tune, l10n.systemSettings),
+        _MgmtTabSpec(Icons.alarm_rounded, l10n.reminders),
+        _MgmtTabSpec(Icons.extension_rounded, l10n.customFields),
+        _MgmtTabSpec(Icons.mail_outline_rounded, l10n.emailTemplates),
       ]);
     } else if (widget.currentUser.userType == UserType.superAdmin) {
       tabs.addAll([
-        Tab(icon: const Icon(Icons.work, size: 20), text: l10n.natureOfWork),
-        Tab(icon: const Icon(Icons.title, size: 20), text: l10n.problemTitles),
-        Tab(icon: const Icon(Icons.build, size: 20), text: l10n.parts),
-        Tab(icon: const Icon(Icons.people, size: 20), text: l10n.users),
-        Tab(icon: const Icon(Icons.assessment, size: 20), text: l10n.reports),
-        Tab(icon: const Icon(Icons.autorenew, size: 20), text: l10n.autoAssign),
-        Tab(icon: const Icon(Icons.settings, size: 20), text: l10n.preferences),
-        Tab(icon: const Icon(Icons.auto_awesome, size: 20), text: l10n.aiInsights),
-        Tab(icon: const Icon(Icons.dashboard_customize, size: 20), text: l10n.aiDashboard),
-        const Tab(icon: Icon(Icons.alarm_rounded, size: 20), text: 'Reminders'),
+        _MgmtTabSpec(Icons.work, l10n.natureOfWork),
+        _MgmtTabSpec(Icons.title, l10n.problemTitles),
+        _MgmtTabSpec(Icons.build, l10n.parts),
+        _MgmtTabSpec(Icons.people, l10n.users),
+        _MgmtTabSpec(Icons.assessment, l10n.reports),
+        _MgmtTabSpec(Icons.autorenew, l10n.autoAssign),
+        _MgmtTabSpec(Icons.settings, l10n.preferences),
+        _MgmtTabSpec(Icons.auto_awesome, l10n.aiInsights),
+        _MgmtTabSpec(Icons.dashboard_customize, l10n.aiDashboard),
+        _MgmtTabSpec(Icons.alarm_rounded, l10n.reminders),
       ]);
     } else if (widget.currentUser.userType == UserType.superUser) {
       tabs.addAll([
-        Tab(icon: const Icon(Icons.people, size: 20), text: l10n.users),
-        Tab(icon: const Icon(Icons.settings, size: 20), text: l10n.preferences),
-        const Tab(icon: Icon(Icons.alarm_rounded, size: 20), text: 'Reminders'),
+        _MgmtTabSpec(Icons.people, l10n.users),
+        _MgmtTabSpec(Icons.settings, l10n.preferences),
+        _MgmtTabSpec(Icons.alarm_rounded, l10n.reminders),
       ]);
     } else {
-      tabs.add(Tab(
-          icon: const Icon(Icons.settings, size: 20), text: l10n.preferences));
+      tabs.add(_MgmtTabSpec(Icons.settings, l10n.preferences));
     }
 
     return tabs;
@@ -1336,6 +1647,12 @@ class _ManagementScreenState extends State<ManagementScreen>
           break;
         case 14:
           view = SmartRemindersScreen(currentUser: widget.currentUser);
+          break;
+        case 15:
+          view = const FieldDefinitionsScreen();
+          break;
+        case 16:
+          view = const EmailTemplateDesignerScreen();
           break;
         default:
           view =
@@ -1471,31 +1788,10 @@ class _ManagementScreenState extends State<ManagementScreen>
         ),
         automaticallyImplyLeading: false,
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(52),
+          preferredSize: const Size.fromHeight(54),
           child: Column(
             children: [
-              TabBar(
-                controller: _tabController,
-                tabs: _getTabs(),
-                isScrollable: true,
-                tabAlignment: TabAlignment.start,
-                labelColor: AppColors.primary,
-                unselectedLabelColor: Colors.grey[500],
-                indicatorColor: AppColors.primary,
-                indicatorWeight: 2.5,
-                dividerColor: Colors.transparent,
-                splashFactory: NoSplash.splashFactory,
-                overlayColor: WidgetStateProperty.all(Colors.transparent),
-                labelStyle: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                ),
-                unselectedLabelStyle: const TextStyle(
-                  fontWeight: FontWeight.w500,
-                  fontSize: 13,
-                ),
-                physics: const BouncingScrollPhysics(),
-              ),
+              SizedBox(height: 53, child: _buildTabStrip(context)),
               Container(
                 height: 1,
                 color: Colors.grey.withValues(alpha: 0.15),
@@ -1514,11 +1810,166 @@ class _ManagementScreenState extends State<ManagementScreen>
       ),
     );
   }
+
+  // Custom horizontally-scrollable tab strip with click-to-page arrow
+  // buttons, driven by the same _tabController the native TabBar used —
+  // TabBarView/_getTabView/tabNameToIndex/deep-linking are all unaffected,
+  // only the visual rendering of the strip itself changes.
+  Widget _buildTabStrip(BuildContext context) {
+    final tabs = _getTabs();
+    return Row(
+      children: [
+        _pagerButton(isNext: false),
+        Expanded(
+          child: SingleChildScrollView(
+            controller: _tabStripScroll,
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: AnimatedBuilder(
+              animation: _tabController,
+              builder: (context, _) => Row(
+                children: List.generate(tabs.length, (i) => _tabPill(i, tabs[i])),
+              ),
+            ),
+          ),
+        ),
+        _pagerButton(isNext: true),
+      ],
+    );
+  }
+
+  // ScrollController.hasClients only means a ScrollPosition is attached — it
+  // does NOT mean that position has finished computing its scroll extents
+  // yet (that happens once the scrollable content is laid out). Reading
+  // .maxScrollExtent in that narrow window throws a null-check failure deep
+  // inside Flutter's ScrollPosition. hasContentDimensions is the real guard.
+  bool get _tabStripScrollReady =>
+      _tabStripScroll.hasClients && _tabStripScroll.position.hasContentDimensions;
+
+  void _scrollTabStrip(double delta) {
+    if (!_tabStripScrollReady) return;
+    final target = (_tabStripScroll.offset + delta)
+        .clamp(0.0, _tabStripScroll.position.maxScrollExtent);
+    _tabStripScroll.animateTo(
+      target,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+  }
+
+  Widget _pagerButton({required bool isNext}) {
+    return AnimatedBuilder(
+      animation: _tabStripScroll,
+      builder: (context, _) {
+        final ready = _tabStripScrollReady;
+        final atStart = !ready || _tabStripScroll.offset <= 0;
+        final atEnd = !ready || _tabStripScroll.offset >= _tabStripScroll.position.maxScrollExtent;
+        final disabled = isNext ? atEnd : atStart;
+        return SizedBox(
+          width: 32,
+          height: 40,
+          child: IconButton(
+            padding: EdgeInsets.zero,
+            iconSize: 18,
+            splashRadius: 16,
+            icon: Icon(isNext ? Icons.chevron_right : Icons.chevron_left),
+            color: disabled ? Colors.grey[300] : AppColors.secondary,
+            onPressed: disabled ? null : () => _scrollTabStrip(isNext ? 200 : -200),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _tabPill(int index, _MgmtTabSpec tab) {
+    final selected = _tabController.index == index;
+    return GestureDetector(
+      key: _tabKeys[index],
+      onTap: () => _tabController.animateTo(index),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: selected ? AppColors.primary : Colors.transparent,
+                width: 2.5,
+              ),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                tab.icon,
+                size: 18,
+                color: selected ? AppColors.primary : Colors.grey[500],
+              ),
+              const SizedBox(width: 6),
+              Text(
+                tab.label,
+                style: TextStyle(
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                  fontSize: 13,
+                  color: selected ? AppColors.primary : Colors.grey[500],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // ============================================================================
 // OPTIMIZED DEPARTMENTS MANAGEMENT
 // ============================================================================
+const kTicketTypeOptions = [
+  ('it_solution', 'IT Solution / حلول تقنية', Icons.computer, Colors.blue),
+  ('places_maintenance', 'Places Maintenance / صيانة المواقع', Icons.home_repair_service, Colors.green),
+  ('complaint', 'Complaint / شكوى جودة', Icons.report_problem, Colors.orange),
+  ('individuals_maintenance', 'Individuals Maintenance / صيانة أفراد', Icons.person_pin, Colors.purple),
+  ('requests', 'Requests / طلبات', Icons.request_page, Colors.teal),
+  ('trucks_maintenance', 'Truck Maintenance / صيانة الشاحنات', Icons.local_shipping, Colors.brown),
+];
+
+/// Fallback palette used to give a department a consistent, distinguishable
+/// color on ticket tags when no explicit color has been chosen for it yet.
+const kDepartmentColorPalette = [
+  Colors.blue,
+  Colors.green,
+  Colors.orange,
+  Colors.purple,
+  Colors.teal,
+  Colors.brown,
+  Colors.indigo,
+  Colors.pink,
+  Colors.cyan,
+  Colors.deepOrange,
+];
+
+/// Deterministic color for a department that has no explicit color set,
+/// derived from its id so the same department always gets the same color.
+Color departmentFallbackColor(String departmentId) {
+  final hash = departmentId.codeUnits.fold<int>(0, (sum, c) => sum + c);
+  return kDepartmentColorPalette[hash % kDepartmentColorPalette.length];
+}
+
+Color? _parseHexColor(String? hex) {
+  if (hex == null || hex.isEmpty) return null;
+  var v = hex.replaceAll('#', '');
+  if (v.length == 6) v = 'FF$v';
+  final parsed = int.tryParse(v, radix: 16);
+  return parsed == null ? null : Color(parsed);
+}
+
+String _colorToHex(Color color) {
+  return '#${color.value.toRadixString(16).substring(2).toUpperCase()}';
+}
+
 class DepartmentsManagement extends StatefulWidget {
   final UserModel currentUser;
 
@@ -1611,10 +2062,17 @@ class _DepartmentsManagementState extends State<DepartmentsManagement>
     final descriptionController =
         TextEditingController(text: department?.description ?? '');
     final isEditing = department != null;
+    final selectedTicketTypes = Set<String>.from(department?.allowedTicketTypes ?? const []);
+    final selectedAllowedDepartmentIds = Set<String>.from(department?.allowedDepartmentIds ?? const []);
+    final otherDepartments = _departments.where((d) => d.id != department?.id).toList();
+    Color selectedColor = _parseHexColor(department?.color) ?? AppColors.primary;
+    bool fleetAccessEnabled = department?.fleetAccessEnabled ?? false;
 
     showDialog(
       context: context,
       builder: (context) {
+        final isRtl = Localizations.localeOf(context).languageCode == 'ar';
+        return StatefulBuilder(builder: (context, setDialogState) {
         return AlertDialog(
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -1640,7 +2098,9 @@ class _DepartmentsManagementState extends State<DepartmentsManagement>
               ),
             ],
           ),
-          content: SingleChildScrollView(
+          content: SizedBox(
+            width: 480,
+            child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1688,7 +2148,169 @@ class _DepartmentsManagementState extends State<DepartmentsManagement>
                   ),
                   maxLines: 3,
                 ),
+                const SizedBox(height: 20),
+                Row(children: [
+                  Icon(Icons.palette_outlined, size: 16, color: AppColors.primary),
+                  const SizedBox(width: 6),
+                  Text(isRtl ? 'لون القسم' : 'Department Color',
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                  const SizedBox(width: 6),
+                  Text(isRtl ? '(يظهر على وسم التذكرة)' : '(shown on the ticket tag)',
+                      style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                ]),
+                const SizedBox(height: 8),
+                InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () async {
+                    final picked = await showColorPickerDialog(
+                      context,
+                      selectedColor,
+                      title: Text(isRtl ? 'اختر لون القسم' : 'Pick department color',
+                          style: const TextStyle(fontSize: 15)),
+                      width: 32,
+                      height: 32,
+                      spacing: 4,
+                      runSpacing: 4,
+                      borderRadius: 8,
+                      pickersEnabled: const {
+                        ColorPickerType.wheel: true,
+                        ColorPickerType.accent: false,
+                      },
+                    );
+                    setDialogState(() => selectedColor = picked);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(children: [
+                      Container(
+                        width: 22,
+                        height: 22,
+                        decoration: BoxDecoration(
+                          color: selectedColor,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.grey.shade300),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(_colorToHex(selectedColor), style: const TextStyle(fontSize: 13)),
+                      const Spacer(),
+                      Icon(Icons.edit_outlined, size: 16, color: Colors.grey[500]),
+                    ]),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Container(
+                  decoration: BoxDecoration(
+                    color: fleetAccessEnabled ? AppColors.primary.withValues(alpha: 0.05) : Colors.grey.shade50,
+                    border: Border.all(color: fleetAccessEnabled ? AppColors.primary.withValues(alpha: 0.3) : Colors.grey.shade200),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: SwitchListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                    dense: true,
+                    activeColor: AppColors.primary,
+                    value: fleetAccessEnabled,
+                    onChanged: (v) => setDialogState(() => fleetAccessEnabled = v),
+                    title: Row(children: [
+                      Icon(Icons.local_shipping_outlined, size: 16, color: AppColors.primary),
+                      const SizedBox(width: 6),
+                      Text(isRtl ? 'صلاحية الأسطول' : 'Fleet Access',
+                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                    ]),
+                    subtitle: Text(
+                      isRtl
+                          ? 'يمكّن المدراء العامون لهذا القسم من إدارة قسم المركبات (الأسطول)'
+                          : 'Lets super admins of this department manage the Fleet/Vehicles section',
+                      style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Row(children: [
+                  Icon(Icons.confirmation_number_outlined, size: 16, color: AppColors.primary),
+                  const SizedBox(width: 6),
+                  Text(isRtl ? 'أنواع التذاكر المسموح بها' : 'Allowed Ticket Types',
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                  const SizedBox(width: 6),
+                  Text(isRtl ? '(فارغ = الكل)' : '(empty = all)',
+                      style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                ]),
+                const SizedBox(height: 8),
+                Container(
+                  decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade200), borderRadius: BorderRadius.circular(10)),
+                  child: Column(
+                    children: kTicketTypeOptions.map((opt) {
+                      final (value, label, icon, color) = opt;
+                      final checked = selectedTicketTypes.contains(value);
+                      return CheckboxListTile(
+                        dense: true,
+                        value: checked,
+                        title: Row(children: [
+                          Icon(icon, size: 15, color: color),
+                          const SizedBox(width: 6),
+                          Expanded(child: Text(label, style: const TextStyle(fontSize: 12))),
+                        ]),
+                        activeColor: AppColors.primary,
+                        onChanged: (v) => setDialogState(() {
+                          if (v == true) {
+                            selectedTicketTypes.add(value);
+                          } else {
+                            selectedTicketTypes.remove(value);
+                          }
+                        }),
+                      );
+                    }).toList(),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Row(children: [
+                  Icon(Icons.business, size: 16, color: AppColors.primary),
+                  const SizedBox(width: 6),
+                  Text(isRtl ? 'الأقسام المسموح بالتحويل إليها' : 'Allowed Target Departments',
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                  const SizedBox(width: 6),
+                  Text(isRtl ? '(فارغ = الكل)' : '(empty = all)',
+                      style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                ]),
+                const SizedBox(height: 8),
+                Container(
+                  decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade200), borderRadius: BorderRadius.circular(10)),
+                  constraints: const BoxConstraints(maxHeight: 180),
+                  child: otherDepartments.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Text(isRtl ? 'لا توجد أقسام أخرى' : 'No other departments',
+                              style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+                        )
+                      : ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: otherDepartments.length,
+                          itemBuilder: (_, i) {
+                            final dept = otherDepartments[i];
+                            final name = isRtl && (dept.nameAr?.isNotEmpty ?? false) ? dept.nameAr! : dept.name;
+                            final checked = selectedAllowedDepartmentIds.contains(dept.id);
+                            return CheckboxListTile(
+                              dense: true,
+                              value: checked,
+                              title: Text(name, style: const TextStyle(fontSize: 13)),
+                              activeColor: AppColors.primary,
+                              onChanged: (v) => setDialogState(() {
+                                if (v == true) {
+                                  selectedAllowedDepartmentIds.add(dept.id);
+                                } else {
+                                  selectedAllowedDepartmentIds.remove(dept.id);
+                                }
+                              }),
+                            );
+                          },
+                        ),
+                ),
               ],
+            ),
             ),
           ),
           actions: [
@@ -1723,6 +2345,10 @@ class _DepartmentsManagementState extends State<DepartmentsManagement>
                       'description': descriptionController.text.trim().isEmpty
                           ? null
                           : descriptionController.text.trim(),
+                      'allowed_ticket_types': selectedTicketTypes.toList(),
+                      'allowed_department_ids': selectedAllowedDepartmentIds.toList(),
+                      'color': _colorToHex(selectedColor),
+                      'fleet_access_enabled': fleetAccessEnabled,
                     }).eq('id', department.id);
 
                     Navigator.pop(context);
@@ -1745,6 +2371,10 @@ class _DepartmentsManagementState extends State<DepartmentsManagement>
                       'description': descriptionController.text.trim().isEmpty
                           ? null
                           : descriptionController.text.trim(),
+                      'allowed_ticket_types': selectedTicketTypes.toList(),
+                      'allowed_department_ids': selectedAllowedDepartmentIds.toList(),
+                      'color': _colorToHex(selectedColor),
+                      'fleet_access_enabled': fleetAccessEnabled,
                     });
 
                     Navigator.pop(context);
@@ -1780,6 +2410,7 @@ class _DepartmentsManagementState extends State<DepartmentsManagement>
             ),
           ],
         );
+        });
       },
     );
   }
@@ -2655,15 +3286,6 @@ class _PlaceEditDialogState extends State<_PlaceEditDialog> {
   bool _loadingDepts = true;
   bool _saving = false;
 
-  static const _ticketTypeOptions = [
-    ('it_solution', 'IT Solution / حلول تقنية', Icons.computer, Colors.blue),
-    ('places_maintenance', 'Places Maintenance / صيانة المواقع', Icons.home_repair_service, Colors.green),
-    ('complaint', 'Complaint / شكوى جودة', Icons.report_problem, Colors.orange),
-    ('individuals_maintenance', 'Individuals Maintenance / صيانة أفراد', Icons.person_pin, Colors.purple),
-    ('requests', 'Requests / طلبات', Icons.request_page, Colors.teal),
-    ('trucks_maintenance', 'Truck Maintenance / صيانة الشاحنات', Icons.local_shipping, Colors.brown),
-  ];
-
   @override
   void initState() {
     super.initState();
@@ -2836,7 +3458,7 @@ class _PlaceEditDialogState extends State<_PlaceEditDialog> {
               Container(
                 decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade200), borderRadius: BorderRadius.circular(10)),
                 child: Column(
-                  children: _ticketTypeOptions.map((opt) {
+                  children: kTicketTypeOptions.map((opt) {
                     final (value, label, icon, color) = opt;
                     final checked = _selectedTicketTypes.contains(value);
                     return CheckboxListTile(
@@ -3217,14 +3839,53 @@ class _UsersManagementState extends State<UsersManagement>
   bool _selectMode = false;
   final Set<String> _selectedIds = {};
 
+  // ── Custom fields ─────────────────────────────────────────────────────────
+  List<UserFieldDefinition> _customFieldDefs = [];
+  Map<String, List<UserFieldValue>> _userFieldValues = {};
+
+  // ── Sorting ───────────────────────────────────────────────────────────────
+  String? _sortColumn;
+  bool _sortAscending = true;
+
+  // Departments this super admin is assigned to (multi-department support —
+  // a super admin may manage more than one department via admin_departments).
+  Set<String> _superAdminDepartmentIds = {};
+
   @override
   bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
-    _loadUsers();
     _loadFilterOptions();
+    // For a super admin, the user list itself is scoped by
+    // _superAdminDepartmentIds, so load that first — otherwise the initial
+    // fetch would fall back to just the legacy single department.
+    if (widget.currentUser.userType == UserType.superAdmin) {
+      _loadSuperAdminDepartments().then((_) => _loadUsers());
+    } else {
+      _loadUsers();
+    }
+  }
+
+  Future<void> _loadSuperAdminDepartments() async {
+    if (widget.currentUser.userType != UserType.superAdmin) return;
+    try {
+      final response = await supabase
+          .from('admin_departments')
+          .select('department_id')
+          .eq('admin_id', widget.currentUser.id);
+      final ids = response.map<String>((json) => json['department_id'] as String).toSet();
+      // Legacy single department field, kept as a safety net in case a
+      // super admin hasn't been migrated into admin_departments yet.
+      if (widget.currentUser.departmentId != null) {
+        ids.add(widget.currentUser.departmentId!);
+      }
+      if (!mounted) return;
+      setState(() => _superAdminDepartmentIds = ids);
+    } catch (e) {
+      debugPrint('⚠️ Could not load super admin departments: $e');
+    }
   }
 
   Future<void> _loadFilterOptions() async {
@@ -3257,25 +3918,42 @@ class _UsersManagementState extends State<UsersManagement>
 
     setState(() => _isLoading = true);
     try {
-      var query = supabase.from('users').select();
+      var query = supabase
+          .from('users')
+          .select('*, direct_manager:users!users_direct_manager_id_fkey(id, full_name)');
 
       if (widget.currentUser.userType == UserType.superUser &&
           widget.currentUser.placeId != null) {
         query = query.eq('place_id', widget.currentUser.placeId!);
-      } else if (widget.currentUser.userType == UserType.superAdmin &&
-          widget.currentUser.departmentId != null) {
-        query = query.eq('department_id', widget.currentUser.departmentId!);
+      } else if (widget.currentUser.userType == UserType.superAdmin) {
+        if (_superAdminDepartmentIds.isNotEmpty) {
+          query = query.inFilter('department_id', _superAdminDepartmentIds.toList());
+        } else if (widget.currentUser.departmentId != null) {
+          query = query.eq('department_id', widget.currentUser.departmentId!);
+        }
       }
 
       final response = await query.order('created_at', ascending: false);
 
       if (mounted) {
-        setState(() {
-          _users = response
-              .map<UserModel>((json) => UserModel.fromJson(json))
-              .toList();
-          _applyFilters();
-        });
+        final loadedUsers = response
+            .map<UserModel>((json) => UserModel.fromJson(json))
+            .toList();
+
+        // Load custom field definitions and values in parallel
+        final results = await Future.wait([
+          UserFieldService.getDefinitions(activeOnly: true),
+          UserFieldService.getValuesForUsers(loadedUsers.map((u) => u.id).toList()),
+        ]);
+
+        if (mounted) {
+          setState(() {
+            _users = loadedUsers;
+            _customFieldDefs = results[0] as List<UserFieldDefinition>;
+            _userFieldValues = results[1] as Map<String, List<UserFieldValue>>;
+            _applyFilters();
+          });
+        }
       }
     } catch (e) {
       print('Error loading users: $e');
@@ -3322,6 +4000,67 @@ class _UsersManagementState extends State<UsersManagement>
 
       return matchesSearch && matchesType && matchesPlace && matchesDept && matchesLoginType;
     }).toList();
+    _sortUsers();
+  }
+
+  void _sortUsers() {
+    final col = _sortColumn;
+    if (col == null) return;
+    _filteredUsers.sort((a, b) {
+      int cmp = 0;
+      switch (col) {
+        case 'name':
+          cmp = a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase());
+        case 'email':
+          final ea = a.email.endsWith('@phone.user') ? (a.phone ?? a.email) : a.email;
+          final eb = b.email.endsWith('@phone.user') ? (b.phone ?? b.email) : b.email;
+          cmp = ea.toLowerCase().compareTo(eb.toLowerCase());
+        case 'type':
+          cmp = a.userType.value.compareTo(b.userType.value);
+        case 'status':
+          cmp = (a.isActive ? 0 : 1).compareTo(b.isActive ? 0 : 1);
+        case 'dept':
+          final da = _availableDepts.firstWhere((d) => d['id'] == a.departmentId, orElse: () => {'name': ''})['name'] ?? '';
+          final db = _availableDepts.firstWhere((d) => d['id'] == b.departmentId, orElse: () => {'name': ''})['name'] ?? '';
+          cmp = da.toLowerCase().compareTo(db.toLowerCase());
+        default:
+          final aRaw = (_userFieldValues[a.id] ?? []).where((v) => v.fieldId == col).firstOrNull?.displayValue ?? '';
+          final bRaw = (_userFieldValues[b.id] ?? []).where((v) => v.fieldId == col).firstOrNull?.displayValue ?? '';
+          final aNum = double.tryParse(aRaw);
+          final bNum = double.tryParse(bRaw);
+          cmp = (aNum != null && bNum != null)
+              ? aNum.compareTo(bNum)
+              : aRaw.toLowerCase().compareTo(bRaw.toLowerCase());
+      }
+      return _sortAscending ? cmp : -cmp;
+    });
+  }
+
+  void _onSort(String key) {
+    setState(() {
+      if (_sortColumn == key) {
+        _sortAscending = !_sortAscending;
+      } else {
+        _sortColumn = key;
+        _sortAscending = true;
+      }
+      _sortUsers();
+    });
+  }
+
+  void _updateLocalFieldValue(String userId, String fieldId, dynamic value) {
+    final list = List<UserFieldValue>.from(_userFieldValues[userId] ?? []);
+    final idx = list.indexWhere((v) => v.fieldId == fieldId);
+    final entry = UserFieldValue(
+      id: idx >= 0 ? list[idx].id : 'local_${fieldId}_${DateTime.now().millisecondsSinceEpoch}',
+      userId: userId,
+      fieldId: fieldId,
+      value: value,
+      filledByUserId: widget.currentUser.id,
+      updatedAt: DateTime.now(),
+    );
+    if (idx >= 0) list[idx] = entry; else list.add(entry);
+    if (mounted) setState(() => _userFieldValues[userId] = list);
   }
 
   void _showError(String message) {
@@ -3357,6 +4096,7 @@ class _UsersManagementState extends State<UsersManagement>
   }
 
   void _toggleUserStatus(UserModel user) async {
+    if (!_canEditUser(user)) return; // defense in depth — UI already hides this action
     final l10n = AppLocalizations.safeOf(context);
     try {
       await supabase.from('users').update({
@@ -3373,6 +4113,7 @@ class _UsersManagementState extends State<UsersManagement>
   }
 
   void _removeUser(UserModel user) async {
+    if (!_canEditUser(user)) return; // defense in depth — UI already hides this action
     final l10n = AppLocalizations.safeOf(context);
     final confirmed = await showDialog<bool>(
       context: context,
@@ -3648,6 +4389,7 @@ class _UsersManagementState extends State<UsersManagement>
   }
 
   void _restoreUser(UserModel user) async {
+    if (!_canEditUser(user)) return; // defense in depth — UI already hides this action
     final l10n = AppLocalizations.safeOf(context);
     try {
       await supabase.from('users').update({
@@ -3662,6 +4404,7 @@ class _UsersManagementState extends State<UsersManagement>
   }
 
   void _resetUserPassword(UserModel user) async {
+    if (!_canEditUser(user)) return; // defense in depth — UI already hides this action
     final l10n = AppLocalizations.safeOf(context);
 
     final confirmed = await showDialog<bool>(
@@ -3811,7 +4554,8 @@ class _UsersManagementState extends State<UsersManagement>
 
     if (widget.currentUser.userType == UserType.superAdmin) {
       return user.userType == UserType.admin &&
-          user.departmentId == widget.currentUser.departmentId;
+          user.departmentId != null &&
+          _superAdminDepartmentIds.contains(user.departmentId);
     }
 
     if (widget.currentUser.userType == UserType.superUser) {
@@ -3823,12 +4567,21 @@ class _UsersManagementState extends State<UsersManagement>
   }
 
   void _showEditUserDialog(UserModel user) {
+    // A super admin may only reassign an admin to a department they
+    // themselves manage — never an arbitrary one. System admin sees
+    // every department, as before.
+    final scopedDepts = widget.currentUser.userType == UserType.superAdmin
+        ? _availableDepts.where((d) => _superAdminDepartmentIds.contains(d['id'])).toList()
+        : _availableDepts;
     showDialog(
       context: context,
-      builder: (context) => EditUserDialog(
+      builder: (context) => UserProfileDialog(
+        user: user,
         currentUser: widget.currentUser,
-        userToEdit: user,
-        onUserUpdated: _loadUsers,
+        customFieldDefs: _customFieldDefs,
+        departments: scopedDepts,
+        places: _availablePlaces,
+        onUpdated: _loadUsers,
       ),
     );
   }
@@ -3964,6 +4717,33 @@ class _UsersManagementState extends State<UsersManagement>
                         backgroundColor: AppColors.secondary,
                         foregroundColor: Colors.white,
                         elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: () => showDialog(
+                        context: context,
+                        builder: (_) => BulkEditUsersDialog(
+                          currentUser: widget.currentUser,
+                          users: _users,
+                          places: _availablePlaces,
+                          departments: _availableDepts,
+                          customFieldDefs: _customFieldDefs,
+                          userFieldValues: _userFieldValues,
+                          superAdminDepartmentIds: _superAdminDepartmentIds,
+                          onUsersUpdated: _loadUsers,
+                        ),
+                      ),
+                      icon: const Icon(Icons.edit_note_rounded, size: 16),
+                      label: Text(
+                        Localizations.localeOf(context).languageCode == 'ar' ? 'تعديل عبر Excel' : 'Edit via Excel',
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.primary,
+                        side: const BorderSide(color: AppColors.primary),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       ),
@@ -4148,245 +4928,179 @@ class _UsersManagementState extends State<UsersManagement>
                         ],
                       ),
                     )
-                  : ListView.builder(
-                      padding: EdgeInsets.fromLTRB(12, 10, 12, bottomNavBarHeight + 16),
-                      physics: const BouncingScrollPhysics(),
-                      itemCount: _filteredUsers.length,
-                      itemBuilder: (context, index) {
-                        final user = _filteredUsers[index];
-                        final typeColor = _getUserTypeColor(user.userType);
-                        final isInactive = !user.isActive;
-                        final isSelectable = _selectMode && _canEditUser(user) && !user.isDeleted;
-                        final isSelected = _selectedIds.contains(user.id);
+                  : LayoutBuilder(
+                      builder: (context, constraints) {
+                        final shownFields = _customFieldDefs
+                            .where((d) => d.isShownInProfile && d.isActive)
+                            .toList();
 
-                        return GestureDetector(
-                          onTap: isSelectable ? () => setState(() {
-                            if (isSelected) _selectedIds.remove(user.id);
-                            else _selectedIds.add(user.id);
-                          }) : null,
-                          child: Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          decoration: BoxDecoration(
-                            color: isSelected
-                                ? AppColors.primary.withValues(alpha: 0.06)
-                                : isInactive ? Colors.grey.shade50 : Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: isSelected
-                                  ? AppColors.primary.withValues(alpha: 0.4)
-                                  : isInactive
-                                      ? Colors.grey.withValues(alpha: 0.15)
-                                      : Colors.grey.withValues(alpha: 0.12),
-                            ),
-                            boxShadow: isInactive || isSelected
-                                ? null
-                                : [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 6, offset: const Offset(0, 2))],
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            child: Row(
+                        const double colCheck = 40;
+                        const double colName = 180;
+                        const double colEmail = 200;
+                        const double colType = 110;
+                        const double colStatus = 80;
+                        const double colDept = 140;
+                        const double colCustom = 130;
+                        const double colActions = 130;
+
+                        final totalWidth = (_selectMode ? colCheck : 0) +
+                            colName + colEmail + colType + colStatus + colDept +
+                            (shownFields.length * colCustom) + colActions;
+                        final tableWidth = totalWidth > constraints.maxWidth
+                            ? totalWidth
+                            : constraints.maxWidth;
+
+                        return SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: SizedBox(
+                            width: tableWidth,
+                            child: Column(
                               children: [
-                                if (_selectMode) ...[
-                                  Checkbox(
-                                    value: isSelected,
-                                    onChanged: isSelectable ? (v) => setState(() {
-                                      if (v == true) _selectedIds.add(user.id);
-                                      else _selectedIds.remove(user.id);
-                                    }) : null,
-                                    activeColor: AppColors.primary,
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                    visualDensity: VisualDensity.compact,
-                                  ),
-                                  const SizedBox(width: 4),
-                                ],
-                                // Avatar
+                                // Table header
                                 Container(
-                                  width: 42,
-                                  height: 42,
-                                  decoration: BoxDecoration(
-                                    color: isInactive ? Colors.grey.withValues(alpha: 0.1) : typeColor.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(
-                                      color: isInactive ? Colors.grey.withValues(alpha: 0.2) : typeColor.withValues(alpha: 0.25),
-                                      width: 1.5,
-                                    ),
-                                  ),
-                                  child: user.profileImageUrl != null && user.profileImageUrl!.isNotEmpty
-                                      ? ClipRRect(
-                                          borderRadius: BorderRadius.circular(8.5),
-                                          child: Image.network(
-                                            user.profileImageUrl!,
-                                            width: 42, height: 42, fit: BoxFit.cover,
-                                            errorBuilder: (_, __, ___) => Center(
-                                              child: Text(
-                                                user.fullName.substring(0, 1).toUpperCase(),
-                                                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: isInactive ? Colors.grey : typeColor),
-                                              ),
-                                            ),
-                                          ),
-                                        )
-                                      : Center(
-                                          child: Text(
-                                            user.fullName.substring(0, 1).toUpperCase(),
-                                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: isInactive ? Colors.grey : typeColor),
-                                          ),
-                                        ),
-                                ),
-                                const SizedBox(width: 10),
-                                // Info
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                  height: 38,
+                                  color: const Color(0xFFF8F9FA),
+                                  child: Row(
                                     children: [
-                                      Text(
-                                        user.fullName,
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 14,
-                                          color: isInactive ? Colors.grey[500] : Colors.black87,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        user.email,
-                                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      const SizedBox(height: 5),
-                                      Row(
-                                        children: [
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                                            decoration: BoxDecoration(
-                                              color: isInactive ? Colors.grey.withValues(alpha: 0.08) : typeColor.withValues(alpha: 0.1),
-                                              borderRadius: BorderRadius.circular(5),
-                                            ),
-                                            child: Text(
-                                              user.userType.value.replaceAll('_', ' ').toUpperCase(),
-                                              style: TextStyle(
-                                                color: isInactive ? Colors.grey : typeColor,
-                                                fontSize: 9,
-                                                fontWeight: FontWeight.bold,
-                                                letterSpacing: 0.3,
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 6),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                                            decoration: BoxDecoration(
-                                              color: user.isActive ? Colors.green.withValues(alpha: 0.08) : Colors.red.withValues(alpha: 0.08),
-                                              borderRadius: BorderRadius.circular(5),
-                                            ),
-                                            child: Text(
-                                              user.isActive ? l10n.active : l10n.inactive,
-                                              style: TextStyle(
-                                                color: user.isActive ? Colors.green[700] : Colors.red[400],
-                                                fontSize: 9,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
+                                      if (_selectMode) _UmColHeader('', colCheck),
+                                      _UmColHeader(l10n.name, colName, sortKey: 'name', currentSort: _sortColumn, sortAscending: _sortAscending, onSort: _onSort),
+                                      _UmColHeader('Email / Phone', colEmail, sortKey: 'email', currentSort: _sortColumn, sortAscending: _sortAscending, onSort: _onSort),
+                                      _UmColHeader(l10n.type, colType, sortKey: 'type', currentSort: _sortColumn, sortAscending: _sortAscending, onSort: _onSort),
+                                      _UmColHeader(l10n.status, colStatus, sortKey: 'status', currentSort: _sortColumn, sortAscending: _sortAscending, onSort: _onSort),
+                                      _UmColHeader('Dept / Place', colDept, sortKey: 'dept', currentSort: _sortColumn, sortAscending: _sortAscending, onSort: _onSort),
+                                      ...shownFields.map((f) => _UmColHeader(f.label, colCustom, sortKey: f.id, currentSort: _sortColumn, sortAscending: _sortAscending, onSort: f.isComputed ? null : _onSort)),
+                                      _UmColHeader('Actions', colActions, center: true),
                                     ],
                                   ),
                                 ),
-                                const SizedBox(width: 6),
-                                // Actions
-                                if (!_selectMode) Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (_canEditUser(user))
-                                      _ActionIconButton(
-                                        icon: Icons.edit_outlined,
-                                        color: AppColors.primary,
-                                        tooltip: l10n.edit,
-                                        onTap: () => _showEditUserDialog(user),
-                                      ),
-                                    if (_canEditUser(user) && !user.isDeleted) ...[
-                                      const SizedBox(width: 4),
-                                      _ActionIconButton(
-                                        icon: Icons.lock_reset_outlined,
-                                        color: Colors.deepPurple,
-                                        tooltip: l10n.resetToDefaultPassword,
-                                        onTap: () => _resetUserPassword(user),
-                                      ),
-                                      const SizedBox(width: 4),
-                                      _ActionIconButton(
-                                        icon: user.isActive
-                                            ? Icons.block_outlined
-                                            : Icons.check_circle_outline,
-                                        color: user.isActive
-                                            ? Colors.orange
-                                            : Colors.green,
-                                        tooltip: user.isActive
-                                            ? l10n.deactivate
-                                            : l10n.activate,
-                                        onTap: () => _toggleUserStatus(user),
-                                      ),
-                                    ],
-                                    const SizedBox(width: 4),
-                                    if (user.isDeleted)
-                                      _ActionIconButton(
-                                        icon: Icons.restore_outlined,
-                                        color: Colors.green,
-                                        tooltip: l10n.restoreUser,
-                                        onTap: () => _restoreUser(user),
-                                      )
-                                    else
-                                      _ActionIconButton(
-                                        icon: Icons.person_off_outlined,
-                                        color: Colors.red,
-                                        tooltip: l10n.removeUser,
-                                        onTap: () => _removeUser(user),
-                                      ),
-                                  ],
+                                Container(height: 1, color: Colors.grey.shade200),
+                                // Table rows
+                                Expanded(
+                                  child: ListView.builder(
+                                    padding: EdgeInsets.only(bottom: bottomNavBarHeight + 16),
+                                    physics: const BouncingScrollPhysics(),
+                                    itemCount: _filteredUsers.length,
+                                    itemBuilder: (context, index) {
+                                      final user = _filteredUsers[index];
+                                      final typeColor = _getUserTypeColor(user.userType);
+                                      final isInactive = !user.isActive;
+                                      final isSelectable = _selectMode && _canEditUser(user) && !user.isDeleted;
+                                      final isSelected = _selectedIds.contains(user.id);
+                                      final userValues = _userFieldValues[user.id] ?? [];
+                                      final deptName = user.departmentId != null
+                                          ? _availableDepts.firstWhere(
+                                              (d) => d['id'] == user.departmentId,
+                                              orElse: () => {'name': ''})['name']
+                                          : null;
+                                      final placeName = user.placeId != null
+                                          ? _availablePlaces.firstWhere(
+                                              (p) => p['id'] == user.placeId,
+                                              orElse: () => {'name': ''})['name']
+                                          : null;
+
+                                      return InkWell(
+                                        onTap: isSelectable ? () => setState(() {
+                                          if (isSelected) _selectedIds.remove(user.id);
+                                          else _selectedIds.add(user.id);
+                                        }) : null,
+                                        child: Container(
+                                          height: 44,
+                                          decoration: BoxDecoration(
+                                            color: isSelected
+                                                ? AppColors.primary.withValues(alpha: 0.06)
+                                                : isInactive
+                                                    ? Colors.grey.shade50
+                                                    : (index % 2 == 0 ? Colors.white : const Color(0xFFFAFAFA)),
+                                            border: Border(
+                                              bottom: BorderSide(color: Colors.grey.shade100),
+                                            ),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              if (_selectMode)
+                                                SizedBox(
+                                                  width: colCheck,
+                                                  child: Center(
+                                                    child: Checkbox(
+                                                      value: isSelected,
+                                                      onChanged: isSelectable
+                                                          ? (v) => setState(() {
+                                                                if (v == true) _selectedIds.add(user.id);
+                                                                else _selectedIds.remove(user.id);
+                                                              })
+                                                          : null,
+                                                      activeColor: AppColors.primary,
+                                                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                      visualDensity: VisualDensity.compact,
+                                                    ),
+                                                  ),
+                                                ),
+                                              _UmNameCell(user: user, width: colName, isInactive: isInactive, typeColor: typeColor),
+                                              _UmTextCell(user.email.endsWith('@phone.user') ? (user.phone ?? user.email) : user.email, width: colEmail, muted: isInactive),
+                                              _UmTypeCell(user: user, color: typeColor, width: colType, isInactive: isInactive),
+                                              _UmStatusCell(user: user, width: colStatus, l10n: l10n),
+                                              _UmDeptCell(deptName: deptName, placeName: placeName, width: colDept, isInactive: isInactive),
+                                              ...shownFields.map((f) {
+                                                final val = userValues.where((v) => v.fieldId == f.id).firstOrNull;
+                                                final isComp = f.isComputed && f.formula != null;
+                                                final String? computedVal = isComp
+                                                    ? UserFieldService.evaluateFormula(
+                                                        formula: f.formula!,
+                                                        user: user,
+                                                        allDefs: _customFieldDefs,
+                                                        userValues: userValues,
+                                                      )
+                                                    : null;
+                                                final canEdit = _canEditUser(user) &&
+                                                    !f.isComputed &&
+                                                    f.fillMode != UserFieldFillMode.userOnly &&
+                                                    !_selectMode;
+                                                return _UmCustomFieldCell(
+                                                  key: ValueKey('${user.id}_${f.id}'),
+                                                  def: f,
+                                                  current: isComp ? null : val,
+                                                  computedValue: computedVal,
+                                                  width: colCustom,
+                                                  canEdit: canEdit,
+                                                  onSave: canEdit
+                                                      ? (fieldId, value) async {
+                                                          _updateLocalFieldValue(user.id, fieldId, value);
+                                                          await UserFieldService.upsertValue(
+                                                            userId: user.id,
+                                                            fieldId: fieldId,
+                                                            value: value,
+                                                            filledByUserId: widget.currentUser.id,
+                                                          );
+                                                        }
+                                                      : null,
+                                                );
+                                              }),
+                                              _UmActionsCell(
+                                                user: user,
+                                                width: colActions,
+                                                canEdit: _canEditUser(user),
+                                                l10n: l10n,
+                                                onEdit: () => _showEditUserDialog(user),
+                                                onReset: () => _resetUserPassword(user),
+                                                onToggle: () => _toggleUserStatus(user),
+                                                onRemove: () => _removeUser(user),
+                                                onRestore: () => _restoreUser(user),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
                                 ),
                               ],
                             ),
                           ),
-                        ),
                         );
                       },
                     ),
         ),
       ],
-    );
-  }
-}
-
-class _ActionIconButton extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final String tooltip;
-  final VoidCallback onTap;
-
-  const _ActionIconButton({
-    required this.icon,
-    required this.color,
-    required this.tooltip,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          padding: const EdgeInsets.all(7),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(icon, color: color, size: 18),
-        ),
-      ),
     );
   }
 }
@@ -4508,6 +5222,637 @@ class _MultiSelectFilterButton extends StatelessWidget {
               child: Text(AppLocalizations.safeOf(ctx).save),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// USER TABLE HELPER WIDGETS
+// ============================================================================
+
+Widget _UmColHeader(
+  String text,
+  double width, {
+  bool center = false,
+  String? sortKey,
+  String? currentSort,
+  bool sortAscending = true,
+  void Function(String)? onSort,
+}) {
+  final active = sortKey != null && currentSort == sortKey;
+  final sortable = sortKey != null && onSort != null;
+  return GestureDetector(
+    onTap: sortable ? () => onSort!(sortKey!) : null,
+    child: SizedBox(
+      width: width,
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: center ? 4 : 10),
+        child: Row(
+          mainAxisAlignment: center ? MainAxisAlignment.center : MainAxisAlignment.start,
+          children: [
+            Flexible(
+              child: Text(
+                text,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: active ? AppColors.primary : const Color(0xFF555555),
+                ),
+                overflow: TextOverflow.ellipsis,
+                textAlign: center ? TextAlign.center : TextAlign.start,
+              ),
+            ),
+            if (sortable) ...[
+              const SizedBox(width: 2),
+              Icon(
+                active
+                    ? (sortAscending ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded)
+                    : Icons.unfold_more_rounded,
+                size: 11,
+                color: active ? AppColors.primary : const Color(0xFFAAAAAA),
+              ),
+            ],
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _UmNameCell extends StatelessWidget {
+  final UserModel user;
+  final double width;
+  final bool isInactive;
+  final Color typeColor;
+
+  const _UmNameCell({
+    required this.user,
+    required this.width,
+    required this.isInactive,
+    required this.typeColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final initial = user.fullName.isEmpty ? '?' : user.fullName.substring(0, 1).toUpperCase();
+    return SizedBox(
+      width: width,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Row(
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: isInactive
+                    ? Colors.grey.withValues(alpha: 0.1)
+                    : typeColor.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: isInactive
+                      ? Colors.grey.withValues(alpha: 0.2)
+                      : typeColor.withValues(alpha: 0.25),
+                ),
+              ),
+              child: user.profileImageUrl != null && user.profileImageUrl!.isNotEmpty
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(5),
+                      child: Image.network(
+                        user.profileImageUrl!,
+                        width: 28,
+                        height: 28,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Center(
+                          child: Text(initial,
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: isInactive ? Colors.grey : typeColor)),
+                        ),
+                      ),
+                    )
+                  : Center(
+                      child: Text(initial,
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: isInactive ? Colors.grey : typeColor)),
+                    ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                user.fullName,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isInactive ? Colors.grey[500] : Colors.black87,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _UmTextCell extends StatelessWidget {
+  final String text;
+  final double width;
+  final bool muted;
+
+  const _UmTextCell(this.text, {required this.width, this.muted = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Text(
+          text,
+          style: TextStyle(
+            fontSize: 12,
+            color: muted ? Colors.grey[400] : Colors.grey[700],
+          ),
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+    );
+  }
+}
+
+class _UmCustomFieldCell extends StatefulWidget {
+  final UserFieldDefinition def;
+  final UserFieldValue? current;
+  final String? computedValue;
+  final double width;
+  final bool canEdit;
+  final Future<void> Function(String fieldId, dynamic value)? onSave;
+
+  const _UmCustomFieldCell({
+    super.key,
+    required this.def,
+    this.current,
+    this.computedValue,
+    required this.width,
+    required this.canEdit,
+    this.onSave,
+  });
+
+  @override
+  State<_UmCustomFieldCell> createState() => _UmCustomFieldCellState();
+}
+
+class _UmCustomFieldCellState extends State<_UmCustomFieldCell> {
+  bool _editing = false;
+  late TextEditingController _ctrl;
+  late FocusNode _focusNode;
+  String? _localDisplay;
+  bool _boolLocal = false;
+  String? _dropLocal;
+  bool _committing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncFromWidget();
+    _ctrl = TextEditingController(text: _localDisplay ?? '');
+    _focusNode = FocusNode()..addListener(_onFocusChange);
+  }
+
+  void _syncFromWidget() {
+    _localDisplay = widget.current?.displayValue;
+    _boolLocal = widget.current?.value == true || widget.current?.value == 'true';
+    _dropLocal = widget.current?.displayValue;
+  }
+
+  @override
+  void didUpdateWidget(_UmCustomFieldCell old) {
+    super.didUpdateWidget(old);
+    if (!_editing) {
+      _syncFromWidget();
+      final t = _localDisplay ?? '';
+      if (_ctrl.text != t) _ctrl.text = t;
+    }
+  }
+
+  void _onFocusChange() {
+    if (!_focusNode.hasFocus && _editing && !_committing) {
+      _commit();
+    }
+  }
+
+  void _startEdit() {
+    if (!widget.canEdit || _editing) return;
+    if (widget.def.fieldType == UserFieldType.date) {
+      _pickDate();
+      return;
+    }
+    setState(() {
+      _editing = true;
+      _ctrl.text = _localDisplay ?? '';
+    });
+    if (widget.def.fieldType != UserFieldType.dropdown) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focusNode.requestFocus();
+      });
+    }
+  }
+
+  Future<void> _pickDate() async {
+    DateTime initial;
+    try {
+      initial = _localDisplay != null ? DateTime.parse(_localDisplay!) : DateTime.now();
+    } catch (_) {
+      initial = DateTime.now();
+    }
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(1900),
+      lastDate: DateTime(2100),
+    );
+    if (picked == null || !mounted) return;
+    final formatted =
+        '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+    setState(() => _localDisplay = formatted);
+    _doSave(widget.def.id, formatted);
+  }
+
+  Future<void> _commit() async {
+    if (_committing) return;
+    _committing = true;
+    dynamic newValue;
+    String? newDisplay;
+    if (widget.def.fieldType == UserFieldType.dropdown) {
+      newValue = _dropLocal;
+      newDisplay = _dropLocal;
+    } else {
+      final t = _ctrl.text.trim();
+      newValue = t.isEmpty ? null : t;
+      newDisplay = t.isEmpty ? null : t;
+    }
+    setState(() {
+      _editing = false;
+      _localDisplay = newDisplay;
+    });
+    await _doSave(widget.def.id, newValue);
+    _committing = false;
+  }
+
+  Future<void> _doSave(String fieldId, dynamic value) async {
+    try {
+      await widget.onSave?.call(fieldId, value);
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_onFocusChange);
+    _focusNode.dispose();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final def = widget.def;
+
+    // Computed field — read-only with indicator
+    if (widget.computedValue != null) {
+      final v = widget.computedValue!.isEmpty ? '—' : widget.computedValue!;
+      return SizedBox(
+        width: widget.width,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  v,
+                  style: TextStyle(fontSize: 12, color: v == '—' ? Colors.grey[400] : Colors.grey[700]),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Icon(Icons.auto_awesome, size: 10, color: Colors.amber[400]),
+            ],
+          ),
+        ),
+      );
+    }
+
+    Widget cellContent;
+
+    if (def.fieldType == UserFieldType.boolean) {
+      // Boolean: always-visible switch, no double-tap needed
+      cellContent = Transform.scale(
+        scale: 0.72,
+        alignment: Alignment.centerLeft,
+        child: Switch(
+          value: _boolLocal,
+          onChanged: widget.canEdit
+              ? (v) {
+                  setState(() => _boolLocal = v);
+                  _doSave(def.id, v);
+                }
+              : null,
+          activeColor: AppColors.primary,
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+      );
+    } else if (_editing) {
+      if (def.fieldType == UserFieldType.dropdown) {
+        final opts = def.fieldOptions;
+        final validDrop = opts.any((o) => o.value == _dropLocal) ? _dropLocal : null;
+        cellContent = DropdownButton<String?>(
+          value: validDrop,
+          isDense: true,
+          underline: const SizedBox(),
+          isExpanded: true,
+          items: [
+            const DropdownMenuItem<String?>(
+              value: null,
+              child: Text('—', style: TextStyle(fontSize: 12, color: Colors.grey)),
+            ),
+            ...opts.map((o) => DropdownMenuItem<String?>(
+                  value: o.value,
+                  child: Text(o.label, style: const TextStyle(fontSize: 12)),
+                )),
+          ],
+          onChanged: (v) {
+            _dropLocal = v;
+            _commit();
+          },
+        );
+      } else {
+        cellContent = TextField(
+          controller: _ctrl,
+          focusNode: _focusNode,
+          style: const TextStyle(fontSize: 12),
+          maxLines: 1,
+          decoration: InputDecoration(
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(4),
+              borderSide: const BorderSide(color: AppColors.primary),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(4),
+              borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+            ),
+          ),
+          keyboardType: def.fieldType == UserFieldType.number ? TextInputType.number : TextInputType.text,
+          onSubmitted: (_) => _commit(),
+        );
+      }
+    } else {
+      // Display mode
+      final rawDisplay = _localDisplay?.isNotEmpty == true ? _localDisplay : null;
+      final fallback = widget.def.defaultValue?.isNotEmpty == true ? widget.def.defaultValue : null;
+      final display = rawDisplay ?? fallback;
+      final isDefault = rawDisplay == null && fallback != null;
+      final displayText = display ?? '—';
+
+      cellContent = Row(
+        children: [
+          Expanded(
+            child: Text(
+              displayText,
+              style: TextStyle(
+                fontSize: 12,
+                color: displayText == '—' ? Colors.grey[400] : (isDefault ? Colors.grey[500] : Colors.grey[700]),
+                fontStyle: isDefault ? FontStyle.italic : FontStyle.normal,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (widget.canEdit) Icon(Icons.edit_outlined, size: 10, color: Colors.grey[350]),
+        ],
+      );
+    }
+
+    return GestureDetector(
+      onDoubleTap: def.fieldType != UserFieldType.boolean ? _startEdit : null,
+      child: SizedBox(
+        width: widget.width,
+        height: double.infinity,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: cellContent,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UmTypeCell extends StatelessWidget {
+  final UserModel user;
+  final Color color;
+  final double width;
+  final bool isInactive;
+
+  const _UmTypeCell({
+    required this.user,
+    required this.color,
+    required this.width,
+    required this.isInactive,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: isInactive ? Colors.grey.withValues(alpha: 0.08) : color.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            user.userType.value.replaceAll('_', ' ').toUpperCase(),
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.bold,
+              color: isInactive ? Colors.grey : color,
+              letterSpacing: 0.3,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UmStatusCell extends StatelessWidget {
+  final UserModel user;
+  final double width;
+  final AppLocalizations l10n;
+
+  const _UmStatusCell({required this.user, required this.width, required this.l10n});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: user.isActive
+                ? Colors.green.withValues(alpha: 0.08)
+                : Colors.red.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            user.isActive ? l10n.active : l10n.inactive,
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.bold,
+              color: user.isActive ? Colors.green[700] : Colors.red[400],
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UmDeptCell extends StatelessWidget {
+  final String? deptName;
+  final String? placeName;
+  final double width;
+  final bool isInactive;
+
+  const _UmDeptCell({
+    required this.deptName,
+    required this.placeName,
+    required this.width,
+    required this.isInactive,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = [
+      if (deptName != null && deptName!.isNotEmpty) deptName!,
+      if (placeName != null && placeName!.isNotEmpty) placeName!,
+    ];
+    final text = parts.isEmpty ? '—' : parts.join(' / ');
+
+    return SizedBox(
+      width: width,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Text(
+          text,
+          style: TextStyle(
+            fontSize: 12,
+            color: isInactive ? Colors.grey[400] : Colors.grey[600],
+          ),
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+    );
+  }
+}
+
+class _UmActionsCell extends StatelessWidget {
+  final UserModel user;
+  final double width;
+  final bool canEdit;
+  final AppLocalizations l10n;
+  final VoidCallback onEdit;
+  final VoidCallback onReset;
+  final VoidCallback onToggle;
+  final VoidCallback onRemove;
+  final VoidCallback onRestore;
+
+  const _UmActionsCell({
+    required this.user,
+    required this.width,
+    required this.canEdit,
+    required this.l10n,
+    required this.onEdit,
+    required this.onReset,
+    required this.onToggle,
+    required this.onRemove,
+    required this.onRestore,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      child: Center(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (canEdit)
+              _SmallAction(icon: Icons.edit_outlined, color: AppColors.primary, tooltip: l10n.edit, onTap: onEdit),
+            if (canEdit && !user.isDeleted) ...[
+              _SmallAction(icon: Icons.lock_reset_outlined, color: Colors.deepPurple, tooltip: l10n.resetToDefaultPassword, onTap: onReset),
+              _SmallAction(
+                icon: user.isActive ? Icons.block_outlined : Icons.check_circle_outline,
+                color: user.isActive ? Colors.orange : Colors.green,
+                tooltip: user.isActive ? l10n.deactivate : l10n.activate,
+                onTap: onToggle,
+              ),
+            ],
+            if (canEdit) ...[
+              if (user.isDeleted)
+                _SmallAction(icon: Icons.restore_outlined, color: Colors.green, tooltip: l10n.restoreUser, onTap: onRestore)
+              else
+                _SmallAction(icon: Icons.person_off_outlined, color: Colors.red, tooltip: l10n.removeUser, onTap: onRemove),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SmallAction extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _SmallAction({
+    required this.icon,
+    required this.color,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.all(5),
+          margin: const EdgeInsets.symmetric(horizontal: 2),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Icon(icon, color: color, size: 15),
         ),
       ),
     );

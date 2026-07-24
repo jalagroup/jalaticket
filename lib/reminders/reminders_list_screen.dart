@@ -254,6 +254,11 @@ class _SmartRemindersScreenState extends State<SmartRemindersScreen> {
                           '${r.runCount} ${_isAr ? "تشغيل" : "run(s)"}',
                           style: const TextStyle(fontSize: 11, color: Colors.grey),
                         ),
+                        if (r.ownerName != null)
+                          Text(
+                            _isAr ? 'بواسطة ${r.ownerName}' : 'by ${r.ownerName}',
+                            style: TextStyle(fontSize: 11, color: AppColors.secondary.withValues(alpha: 0.7), fontWeight: FontWeight.w600),
+                          ),
                       ],
                     ),
                   ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../email_templates/email_template_models.dart';
 
 // ── Enums ─────────────────────────────────────────────────────
 
@@ -168,6 +169,9 @@ class ReminderCondition {
 class SmartReminder {
   final String id;
   final String ownerUserId;
+  // Populated only when the reminder was fetched with an owner join (e.g.
+  // a System Admin viewing every reminder in the system) — null otherwise.
+  final String? ownerName;
   String title;
   String? description;
   bool isActive;
@@ -187,6 +191,11 @@ class SmartReminder {
   String msgBodyTemplate;
   Map<String, dynamic> recipientConfig;
 
+  String emailTemplateSource; // 'main' | 'custom'
+  EmailTemplateMode? emailTemplateMode;
+  List<EmailTemplateBlock> emailTemplateBlocks;
+  String? emailTemplateHtmlSource;
+
   DateTime? lastRunAt;
   DateTime? nextRunAt;
   int runCount;
@@ -197,6 +206,7 @@ class SmartReminder {
   SmartReminder({
     required this.id,
     required this.ownerUserId,
+    this.ownerName,
     required this.title,
     this.description,
     this.isActive = true,
@@ -211,6 +221,10 @@ class SmartReminder {
     this.msgTitleTemplate = '',
     this.msgBodyTemplate = '',
     Map<String, dynamic>? recipientConfig,
+    this.emailTemplateSource = 'main',
+    this.emailTemplateMode,
+    List<EmailTemplateBlock>? emailTemplateBlocks,
+    this.emailTemplateHtmlSource,
     this.lastRunAt,
     this.nextRunAt,
     this.runCount = 0,
@@ -220,11 +234,13 @@ class SmartReminder {
         scheduleConfig = scheduleConfig ?? {'every_minutes': 60},
         conditions = conditions ?? [],
         channels = channels ?? ['app'],
-        recipientConfig = recipientConfig ?? {'type': 'creator'};
+        recipientConfig = recipientConfig ?? {'type': 'creator'},
+        emailTemplateBlocks = emailTemplateBlocks ?? [];
 
   factory SmartReminder.fromJson(Map<String, dynamic> j) => SmartReminder(
     id: j['id'] as String,
     ownerUserId: j['owner_user_id'] as String,
+    ownerName: (j['owner'] as Map?)?['full_name'] as String?,
     title: j['title'] as String? ?? '',
     description: j['description'] as String?,
     isActive: j['is_active'] as bool? ?? true,
@@ -241,6 +257,14 @@ class SmartReminder {
     msgTitleTemplate: j['msg_title_template'] as String? ?? '',
     msgBodyTemplate: j['msg_body_template'] as String? ?? '',
     recipientConfig: Map<String, dynamic>.from(j['recipient_config'] as Map? ?? {'type': 'creator'}),
+    emailTemplateSource: j['email_template_source'] as String? ?? 'main',
+    emailTemplateMode: j['email_template_mode'] != null
+        ? EmailTemplateMode.fromString(j['email_template_mode'] as String)
+        : null,
+    emailTemplateBlocks: (j['email_template_blocks'] as List? ?? [])
+        .map((b) => EmailTemplateBlock.fromJson(Map<String, dynamic>.from(b as Map)))
+        .toList(),
+    emailTemplateHtmlSource: j['email_template_html_source'] as String?,
     lastRunAt: j['last_run_at'] != null ? DateTime.parse(j['last_run_at'] as String) : null,
     nextRunAt: j['next_run_at'] != null ? DateTime.parse(j['next_run_at'] as String) : null,
     runCount: j['run_count'] as int? ?? 0,
@@ -264,6 +288,10 @@ class SmartReminder {
     'msg_title_template': msgTitleTemplate,
     'msg_body_template': msgBodyTemplate,
     'recipient_config': recipientConfig,
+    'email_template_source': emailTemplateSource,
+    'email_template_mode': emailTemplateMode?.value,
+    'email_template_blocks': emailTemplateBlocks.map((b) => b.toJson()).toList(),
+    'email_template_html_source': emailTemplateHtmlSource,
   };
 
   String get scheduleLabel {

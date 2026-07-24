@@ -711,7 +711,9 @@ class CcService {
         '${hex(10)}${hex(11)}${hex(12)}${hex(13)}${hex(14)}${hex(15)}';
   }
 
-  static Future<void> notifyFormSubmission({
+  /// Returns `true` if the edge function call succeeded, `false` otherwise
+  /// (the caller can surface this to the user instead of failing silently).
+  static Future<bool> notifyFormSubmission({
     required String formId,
     required String submissionId,
     required String formTitle,
@@ -721,7 +723,7 @@ class CcService {
     String? customMessage,
   }) async {
     try {
-      await _supabase.functions.invoke('notify-form-submission', body: {
+      final res = await _supabase.functions.invoke('notify-form-submission', body: {
         'form_id': formId,
         'submission_id': submissionId,
         'form_title': formTitle,
@@ -730,8 +732,14 @@ class CcService {
         if (additionalUserIds.isNotEmpty) 'additional_user_ids': additionalUserIds,
         if (customMessage != null && customMessage.isNotEmpty) 'custom_message': customMessage,
       });
+      if (res.status != 200) {
+        debugPrint('[CC] notify failed: status ${res.status}, body ${res.data}');
+        return false;
+      }
+      return true;
     } catch (e) {
       debugPrint('[CC] notify failed: $e');
+      return false;
     }
   }
 }

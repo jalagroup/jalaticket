@@ -158,6 +158,41 @@ function interpolate(template: string, record: Record<string, unknown>): string 
   });
 }
 
+// ── Per-reminder custom email template ──────────────────────────────────────────
+// A reminder can either use the one global email_templates row (default), or
+// bring its own template (email_template_source = 'custom'). When custom, its
+// blocks/html use the SAME {{field}}/{{days_until.X}}/{{days_since.X}} token
+// vocabulary as msg_title_template/msg_body_template, so we resolve them here
+// with the same interpolate() function before handing off to send-email — which
+// already supports a caller-supplied override via preview_mode/preview_blocks/
+// preview_html_source (the same mechanism the designer's "send test" uses).
+function buildEmailTemplateOverride(
+  reminder: Record<string, unknown>,
+  record: Record<string, unknown>
+): Record<string, unknown> {
+  if (reminder.email_template_source !== "custom") return {};
+
+  const mode = reminder.email_template_mode as string | null;
+
+  if (mode === "html" && typeof reminder.email_template_html_source === "string") {
+    return {
+      preview_mode: "html",
+      preview_html_source: interpolate(reminder.email_template_html_source, record),
+    };
+  }
+
+  if (mode === "visual") {
+    const blocks = (reminder.email_template_blocks ?? []) as Array<Record<string, unknown>>;
+    const interpolatedBlocks = blocks.map((b) => ({
+      ...b,
+      text: typeof b.text === "string" ? interpolate(b.text, record) : b.text,
+    }));
+    return { preview_mode: "visual", preview_blocks: interpolatedBlocks };
+  }
+
+  return {};
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
@@ -170,7 +205,6 @@ Deno.serve(async (req) => {
   );
   const edgeBase = Deno.env.get("SUPABASE_URL")! + "/functions/v1";
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const RESEND_KEY = Deno.env.get("RESEND_API_KEY");
 
   let reminderId: string;
   try {
@@ -304,6 +338,24 @@ Deno.serve(async (req) => {
           const uid = record[field] as string | undefined;
           if (uid) targetUserIds.add(uid);
 
+        } else if (recipientType === "mapped_user_ids_from_join") {
+          // Generic many-to-many recipient resolution: look up every user
+          // linked to this record via a join table (e.g. fleet vehicles can
+          // now have multiple drivers via fleet_vehicle_drivers).
+          const joinTable = recipientConfig.join_table as string;
+          const joinFkColumn = recipientConfig.join_fk_column as string;
+          const joinUserColumn = recipientConfig.join_user_column as string;
+          if (joinTable && joinFkColumn && joinUserColumn && record.id != null) {
+            const { data: joinRows } = await supabase
+              .from(joinTable)
+              .select(joinUserColumn)
+              .eq(joinFkColumn, record.id);
+            for (const row of joinRows ?? []) {
+              const uid = (row as Record<string, unknown>)[joinUserColumn] as string | undefined;
+              if (uid) targetUserIds.add(uid);
+            }
+          }
+
         } else if (recipientType === "mapped_email") {
           const field = recipientConfig.email_field as string;
           const email = record[field] as string | undefined;
@@ -330,15 +382,58 @@ Deno.serve(async (req) => {
           targetUserIds.add(reminder.owner_user_id);
         }
 
+        // Generic: also notify each already-resolved recipient's own direct
+        // manager (users.direct_manager_id) — not tied to any specific
+        // recipient type above, so it composes with all of them.
+        if (recipientConfig.also_notify_managers === true && targetUserIds.size > 0) {
+          const { data: managerRows } = await supabase
+            .from("users")
+            .select("direct_manager_id")
+            .in("id", [...targetUserIds])
+            .not("direct_manager_id", "is", null);
+          for (const row of managerRows ?? []) {
+            const managerId = (row as Record<string, unknown>).direct_manager_id as string | undefined;
+            if (managerId) targetUserIds.add(managerId);
+          }
+        }
+
+        // Generic extra context for internal-table reminders, passed through
+        // to both the in-app notification row and the push payload so the
+        // client can look up the live record on tap (e.g. fleet vehicles
+        // opening a WhatsApp deep link to the driver).
+        const sourceTable = dsType === "internal" ? (dsConfig.table as string) : null;
+        const recordId = sourceTable && record.id != null ? String(record.id) : null;
+
         // 5. Fetch user tokens / emails for target users
         if (targetUserIds.size > 0) {
           const { data: users } = await supabase
             .from("users")
-            .select("id, fcm_token, fcm_token_web, email")
+            .select("id, fcm_token, fcm_token_web, email, full_name")
             .in("id", [...targetUserIds]);
 
           for (const u of users ?? []) {
             if (channels.includes("app")) {
+              // In-app bell/list row — same shape NotificationService uses
+              // client-side, so reminder alerts show up exactly like every
+              // other in-app notification, not just as push/email.
+              try {
+                await supabase.from("notifications").insert({
+                  user_id: u.id,
+                  type: "reminder",
+                  title: msgTitle,
+                  message: msgBody,
+                  ticket_id: null,
+                  chat_room_id: null,
+                  sender_id: null,
+                  action_data: sourceTable
+                    ? JSON.stringify({ source_table: sourceTable, record_id: recordId })
+                    : null,
+                  priority: "normal",
+                  is_read: false,
+                  created_at: new Date().toISOString(),
+                });
+              } catch (_) { /* in-app row failure is non-fatal */ }
+
               const tokens = [u.fcm_token, u.fcm_token_web].filter(Boolean) as string[];
               for (const token of tokens) {
                 try {
@@ -352,7 +447,11 @@ Deno.serve(async (req) => {
                       token,
                       title: msgTitle,
                       body: msgBody,
-                      data: { type: "reminder", reminder_id: reminderId },
+                      data: {
+                        type: "reminder",
+                        reminder_id: reminderId,
+                        ...(sourceTable ? { source_table: sourceTable, record_id: recordId } : {}),
+                      },
                     }),
                   });
                   notificationsSent++;
@@ -360,19 +459,21 @@ Deno.serve(async (req) => {
               }
             }
 
-            if (channels.includes("email") && u.email && RESEND_KEY) {
+            if (channels.includes("email") && u.email) {
               try {
-                await fetch("https://api.resend.com/emails", {
+                await fetch(`${edgeBase}/send-email`, {
                   method: "POST",
                   headers: {
-                    Authorization: `Bearer ${RESEND_KEY}`,
+                    Authorization: `Bearer ${serviceKey}`,
                     "Content-Type": "application/json",
                   },
                   body: JSON.stringify({
-                    from: "noreply@jalasupport.com",
                     to: u.email,
                     subject: msgTitle,
-                    html: `<p>${msgBody}</p><p><small>Reminder: ${reminder.title}</small></p>`,
+                    title: msgTitle,
+                    message: msgBody,
+                    recipient_name: u.full_name,
+                    ...buildEmailTemplateOverride(reminder, record),
                   }),
                 });
                 notificationsSent++;
@@ -382,20 +483,21 @@ Deno.serve(async (req) => {
         }
 
         // broadcast_email targets (no FCM, email only)
-        if (broadcastEmails.size > 0 && channels.includes("email") && RESEND_KEY) {
+        if (broadcastEmails.size > 0 && channels.includes("email")) {
           for (const email of broadcastEmails) {
             try {
-              await fetch("https://api.resend.com/emails", {
+              await fetch(`${edgeBase}/send-email`, {
                 method: "POST",
                 headers: {
-                  Authorization: `Bearer ${RESEND_KEY}`,
+                  Authorization: `Bearer ${serviceKey}`,
                   "Content-Type": "application/json",
                 },
                 body: JSON.stringify({
-                  from: "noreply@jalasupport.com",
                   to: email,
                   subject: msgTitle,
-                  html: `<p>${msgBody}</p><p><small>Reminder: ${reminder.title}</small></p>`,
+                  title: msgTitle,
+                  message: msgBody,
+                  ...buildEmailTemplateOverride(reminder, record),
                 }),
               });
               notificationsSent++;

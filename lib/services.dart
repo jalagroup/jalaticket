@@ -2231,19 +2231,37 @@ class NotificationService {
     }
   }
 
-  // Send email batch
+  // Send email batch via the send-email edge function (Resend) — one
+  // request per email, run in parallel. A failure in one doesn't block the
+  // others; failed ones are surfaced via the return value so callers can
+  // decide whether to re-queue them.
   static Future<void> _sendEmailBatch(
       String type, List<Map<String, dynamic>> emails) async {
-    try {
-      // Use your email service (e.g., SendGrid, AWS SES, etc.)
-      // This is a placeholder implementation
-      print('📧 Sending ${emails.length} emails of type: $type');
+    print('📧 Sending ${emails.length} emails of type: $type');
+    final results = await Future.wait(emails.map((email) async {
+      final to = email['to'] as String?;
+      if (to == null || to.isEmpty || to.endsWith('@phone.user')) {
+        return true; // nothing to send to — not a failure worth retrying
+      }
+      try {
+        final res = await supabase.functions.invoke('send-email', body: {
+          'to': to,
+          'subject': email['subject'] ?? 'Notification',
+          'title': email['subject'] ?? 'Notification',
+          'message': email['message'] ?? '',
+          'recipient_name': email['to_name'],
+        });
+        final ok = res.data is Map && res.data['ok'] == true;
+        if (!ok) print('❌ send-email returned failure for $to: ${res.data}');
+        return ok;
+      } catch (e) {
+        print('❌ Error sending email to $to: $e');
+        return false;
+      }
+    }));
 
-      // You would implement actual email sending here
-      // Example: await emailProvider.sendBatch(emails);
-    } catch (e) {
-      print('❌ Error sending email batch: $e');
-    }
+    final sent = results.where((ok) => ok).length;
+    print('📧 Sent $sent/${emails.length} emails of type: $type');
   }
 
   // Get user notification info with caching
@@ -4485,6 +4503,10 @@ class NotificationService {
       'ticket_approved',
       'ticket_rejected',
       'subticket_created',
+      // Fleet vehicle warnings (expired documents, service due) — the
+      // driver and their direct manager must always be emailed, not just
+      // as a fallback when there's no push token.
+      'fleet_alert',
     ].contains(type);
   }
 

@@ -9,52 +9,52 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
+  
   # State Management
   get: ^4.6.6
 
   # Routing
-  go_router: ^13.2.0
-
+  go_router: ^14.0.0
+  
   # Supabase
   supabase_flutter: ^2.3.4
-
+  
   # HTTP requests
   http: ^1.1.0
-
+  
   # Notifications
-  flutter_local_notifications: ^16.3.3
-
+  flutter_local_notifications: ^17.2.3
+  
   # Internationalization
-  intl: any
-
+  intl: ^0.20.2
+  
   # UI Components
   cached_network_image: ^3.3.1
   flutter_svg: ^2.0.9
-
+  
   # Utils
   uuid: ^4.2.1
   path_provider: ^2.1.1
   flutter_localizations:
     sdk: flutter
   image_picker: ^1.2.0
-  file_picker: ^8.1.6
-  permission_handler: ^11.3.1
-
+  file_picker: ^10.3.3
+  permission_handler: ^12.0.1
+  
   # Firebase - Updated to compatible versions
   firebase_core: ^3.6.0
   firebase_messaging: ^15.1.3
-
+  
   # Crypto for FCM
   pointycastle: ^3.7.3
   crypto: ^3.0.3
   googleapis_auth: ^1.0.0
   photo_view: ^0.15.0
-  fl_chart: ^0.69.0
+  fl_chart: ^1.1.1
   pdf: ^3.11.3
   printing: ^5.14.2
-  share_plus: ^10.0.0
-  connectivity_plus: ^6.0.3
+  share_plus: ^12.0.1
+  connectivity_plus: ^7.0.0
   audioplayers: ^6.1.0
   url_launcher: ^6.3.0
   shared_preferences: ^2.3.2
@@ -71,7 +71,9 @@ dependencies:
   # Custom Complaints module
   qr_flutter: ^4.1.0
   flex_color_picker: ^3.7.0
+  flutter_quill: ^11.0.0
   signature: ^5.5.0
+  crop_your_image: ^2.0.0
 
 dev_dependencies:
   flutter_test:
@@ -81,7 +83,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-
+  
   assets:
     - assets/images/
     - assets/fonts/

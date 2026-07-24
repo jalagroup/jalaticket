@@ -7,21 +7,22 @@ import 'reminder_models.dart';
 final _sb = Supabase.instance.client;
 
 class ReminderService {
-  static Future<String?> _currentUserId() async {
-    final authId = _sb.auth.currentUser?.id;
-    if (authId == null) return null;
-    final row = await _sb.from('users').select('id').eq('auth_id', authId).maybeSingle();
-    return row?['id'] as String?;
-  }
-
+  /// System Admins see and manage every reminder in the system (RLS backs
+  /// this up server-side too); everyone else only sees their own.
   static Future<List<SmartReminder>> getAll() async {
-    final uid = await _currentUserId();
-    if (uid == null) return [];
-    final rows = await _sb
-        .from('reminders')
-        .select('*')
-        .eq('owner_user_id', uid)
-        .order('created_at', ascending: false);
+    final authId = _sb.auth.currentUser?.id;
+    if (authId == null) return [];
+    final userRow = await _sb.from('users').select('id, user_type').eq('auth_id', authId).maybeSingle();
+    if (userRow == null) return [];
+    final uid = userRow['id'] as String;
+    final isSystemAdmin = userRow['user_type'] == 'system_admin';
+
+    var query = _sb.from('reminders').select(
+        isSystemAdmin ? '*, owner:users!reminders_owner_user_id_fkey(full_name)' : '*');
+    if (!isSystemAdmin) {
+      query = query.eq('owner_user_id', uid);
+    }
+    final rows = await query.order('created_at', ascending: false);
     return rows.map((r) => SmartReminder.fromJson(r)).toList();
   }
 
@@ -111,8 +112,12 @@ class ReminderService {
 
   static Future<List<String>> getAvailableTables() async {
     try {
-      final rows = await _sb.rpc('get_public_tables');
-      return List<String>.from(rows as List? ?? []);
+      // get_public_tables() is `RETURNS TABLE(table_name text)`, so PostgREST
+      // hands back a list of {table_name: ...} row maps, not a flat list of
+      // strings — casting straight to List<String> throws and silently falls
+      // through to the (stale, incomplete) fallback below.
+      final rows = await _sb.rpc('get_public_tables') as List;
+      return rows.map((r) => (r as Map)['table_name'] as String).toList();
     } catch (_) {
       return ['users', 'tickets', 'cc_submissions', 'cc_forms'];
     }

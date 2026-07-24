@@ -107,24 +107,19 @@ Deno.serve(async (req) => {
       )
     );
 
-    // Send emails to all email targets
-    const RESEND_KEY = Deno.env.get("RESEND_API_KEY");
+    // Send emails to all email targets, routed through send-email so they
+    // get the System-Admin-designed template like every other email.
     let emailsSent = 0;
-    if (RESEND_KEY && emailTargets.length > 0) {
+    if (emailTargets.length > 0) {
       const emailResults = await Promise.allSettled(
         emailTargets.map((emailTarget) =>
-          fetch("https://api.resend.com/emails", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${RESEND_KEY}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              from: "noreply@jalasupport.com",
+          supabase.functions.invoke("send-email", {
+            body: {
               to: emailTarget,
-              subject: `📋 ${bodyEn}`,
-              html: `<p>${bodyEn}</p><p>Submission ID: <b>${submission_id}</b></p>`,
-            }),
+              subject: `📋 ${title}`,
+              title: `📋 ${title}`,
+              message: `${bodyEn}\n\nSubmission ID: ${submission_id}`,
+            },
           })
         )
       );

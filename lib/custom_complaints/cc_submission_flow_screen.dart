@@ -4,15 +4,105 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart' show GestureBinding, PointerScrollEvent;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show FilteringTextInputFormatter;
+import 'package:flutter/services.dart' show Clipboard, ClipboardData, FilteringTextInputFormatter;
 import 'package:intl/intl.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 import 'cc_web_file_picker_stub.dart'
     if (dart.library.html) 'cc_web_file_picker_impl.dart';
-import '../main.dart' show AppColors;
+import '../main.dart' show AppColors, supabase;
 import '../models.dart' show UserModel;
 import 'cc_models.dart';
 import 'cc_service.dart';
 import 'cc_screen_designer.dart' show ccIconCatalog;
+
+/// Builds the full diagnostic text (timestamp, breadcrumb log, error and
+/// stack trace) shown in the details dialog and copied to the clipboard.
+String _ccBuildDiagnosticText(Object error, StackTrace? stackTrace, List<String>? log) {
+  final buf = StringBuffer();
+  buf.writeln('Reported at: ${DateTime.now().toIso8601String()}');
+  if (log != null && log.isNotEmpty) {
+    buf.writeln();
+    buf.writeln('--- Steps leading up to the error ---');
+    for (final line in log) {
+      buf.writeln(line);
+    }
+  }
+  buf.writeln();
+  buf.writeln('--- Error ---');
+  buf.writeln('$error');
+  if (stackTrace != null) {
+    buf.writeln();
+    buf.writeln('--- Stack trace ---');
+    buf.writeln('$stackTrace');
+  }
+  return buf.toString();
+}
+
+void _showCcErrorDetailsDialog(
+  BuildContext context,
+  bool isAr,
+  Object error, [
+  StackTrace? stackTrace,
+  List<String>? log,
+]) {
+  final fullText = _ccBuildDiagnosticText(error, stackTrace, log);
+  showDialog(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(isAr ? 'تفاصيل الخطأ' : 'Error details'),
+      content: SizedBox(
+        width: 480,
+        child: SingleChildScrollView(
+          child: SelectableText(
+            fullText,
+            style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton.icon(
+          onPressed: () async {
+            await Clipboard.setData(ClipboardData(text: fullText));
+            if (dialogContext.mounted) {
+              ScaffoldMessenger.of(dialogContext).showSnackBar(SnackBar(
+                content: Text(isAr ? 'تم نسخ التفاصيل' : 'Details copied'),
+                duration: const Duration(seconds: 2),
+              ));
+            }
+          },
+          icon: const Icon(Icons.copy_rounded, size: 16),
+          label: Text(isAr ? 'نسخ الكل' : 'Copy all'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(isAr ? 'إغلاق' : 'Close'),
+        ),
+      ],
+    ),
+  );
+}
+
+/// Shows [shortMessage] with a "Details" action that reveals the full [error]
+/// (and optional [stackTrace] and breadcrumb [log]) in a selectable,
+/// copyable dialog, so failures can be diagnosed instead of just retried
+/// blindly.
+void showCcErrorSnackbar(
+  BuildContext context, {
+  required bool isAr,
+  required String shortMessage,
+  required Object error,
+  StackTrace? stackTrace,
+  List<String>? log,
+}) {
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    content: Text(shortMessage),
+    duration: const Duration(seconds: 6),
+    action: SnackBarAction(
+      label: isAr ? 'التفاصيل' : 'Details',
+      onPressed: () => _showCcErrorDetailsDialog(context, isAr, error, stackTrace, log),
+    ),
+  ));
+}
 
 /// Authenticated entry point: loads the form then hands off to [CcFormFillView].
 class CcSubmissionFlowScreen extends StatefulWidget {
@@ -36,16 +126,26 @@ class _CcSubmissionFlowScreenState extends State<CcSubmissionFlowScreen> {
     _load();
   }
 
+  final List<String> _log = [];
+  void _logEvent(String message) {
+    final ts = DateTime.now().toIso8601String().substring(11, 19);
+    _log.add('[$ts] $message');
+    debugPrint('[CC] $message');
+  }
+
   Future<void> _load() async {
     setState(() => _loading = true);
+    _logEvent('Loading form: formId=${widget.formId}, userId=${widget.currentUser.id}');
     try {
       final form = await CcService.getFullForm(widget.formId);
+      _logEvent(form == null ? 'Form not found' : 'Form loaded: ${form.id}');
       setState(() {
         _form = form;
         _loading = false;
         _error = form == null ? 'not_found' : null;
       });
     } catch (e) {
+      _logEvent('Load FAILED: $e');
       setState(() {
         _loading = false;
         _error = e.toString();
@@ -63,7 +163,19 @@ class _CcSubmissionFlowScreenState extends State<CcSubmissionFlowScreen> {
       return Scaffold(
         appBar: AppBar(backgroundColor: Colors.white, foregroundColor: Colors.black87, elevation: 0),
         body: Center(
-          child: Text(isAr ? 'تعذر تحميل النموذج' : 'Could not load this form'),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(isAr ? 'تعذر تحميل النموذج' : 'Could not load this form'),
+              if (_error != null && _error != 'not_found') ...[
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () => _showCcErrorDetailsDialog(context, isAr, _error!, null, List.of(_log)),
+                  child: Text(isAr ? 'عرض التفاصيل' : 'Show more'),
+                ),
+              ],
+            ],
+          ),
         ),
       );
     }
@@ -112,6 +224,17 @@ class _CcFormFillViewState extends State<CcFormFillView> {
   String? _stepError;
   Set<String> _errorFieldIds = {};
   Map<String, String> _typeErrors = {};
+
+  // Rolling breadcrumb log of what happened during this submission attempt,
+  // so a failure can be diagnosed from the "Details" dialog instead of
+  // reproduced. Capped to avoid unbounded growth over a long-lived session.
+  final List<String> _log = [];
+  void _logEvent(String message) {
+    final ts = DateTime.now().toIso8601String().substring(11, 19);
+    _log.add('[$ts] $message');
+    if (_log.length > 200) _log.removeAt(0);
+    debugPrint('[CC] $message');
+  }
 
   // Action-computed runtime state
   Map<String, bool> _actionHiddenFields = {};
@@ -461,6 +584,54 @@ class _CcFormFillViewState extends State<CcFormFillView> {
     }
   }
 
+  /// Mobile browsers can silently lose/expire the Supabase auth session
+  /// while the tab is backgrounded (e.g. during a native camera capture
+  /// for an image-attachment field). If that happens, the insert is
+  /// rejected by RLS even though the app still shows the user as logged
+  /// in. Refresh the session once and retry before giving up.
+  Future<CcSubmission> _createSubmissionWithSessionRetry({
+    required String formId,
+    required String? submittedByUserId,
+    required bool isAnonymous,
+    required String? deviceMac,
+    required String? deviceType,
+  }) async {
+    final session = supabase.auth.currentSession;
+    final nowSec = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
+    _logEvent('Auth session check: hasSession=${session != null}, '
+        'userId=${session?.user.id}, expiresAt=${session?.expiresAt}, '
+        'now=$nowSec, expired=${session != null && session.expiresAt != null && session.expiresAt! < nowSec}');
+    try {
+      _logEvent('Creating submission (attempt 1)...');
+      final result = await CcService.createSubmission(
+        formId: formId,
+        submittedByUserId: submittedByUserId,
+        isAnonymous: isAnonymous,
+        deviceMac: deviceMac,
+        deviceType: deviceType,
+      );
+      _logEvent('Submission created: id=${result.id}');
+      return result;
+    } on PostgrestException catch (e) {
+      _logEvent('Submission insert failed: code=${e.code}, message=${e.message}');
+      if (e.code != '42501') rethrow;
+      _logEvent('RLS error (42501) — attempting session refresh...');
+      await supabase.auth.refreshSession();
+      final refreshed = supabase.auth.currentSession;
+      _logEvent('Session refreshed: userId=${refreshed?.user.id}, expiresAt=${refreshed?.expiresAt}');
+      _logEvent('Creating submission (attempt 2, after refresh)...');
+      final result = await CcService.createSubmission(
+        formId: formId,
+        submittedByUserId: submittedByUserId,
+        isAnonymous: isAnonymous,
+        deviceMac: deviceMac,
+        deviceType: deviceType,
+      );
+      _logEvent('Submission created on retry: id=${result.id}');
+      return result;
+    }
+  }
+
   Future<void> _submit() async {
     if (widget.isPreview) {
       final isAr = Localizations.localeOf(context).languageCode == 'ar';
@@ -476,12 +647,16 @@ class _CcFormFillViewState extends State<CcFormFillView> {
       return;
     }
     setState(() => _stage = _Stage.submitting);
+    _log.clear();
+    _logEvent('Submit started: formId=${widget.form.id}, userId=${widget.currentUserId}, '
+        'pendingFiles=${_pendingFiles.values.fold<int>(0, (n, l) => n + l.length)}');
     try {
       final deviceType = widget.deviceType ??
           CcService.detectDeviceType(MediaQuery.of(context).size.width);
       final mac = await CcService.tryGetMacAddress();
+      _logEvent('Device info resolved: deviceType=$deviceType, mac=$mac');
 
-      final submission = await CcService.createSubmission(
+      final submission = await _createSubmissionWithSessionRetry(
         formId: widget.form.id,
         submittedByUserId: widget.currentUserId,
         isAnonymous: _identityIsAnonymous ?? (widget.form.identityMode == CcIdentityMode.anonymous),
@@ -504,8 +679,12 @@ class _CcFormFillViewState extends State<CcFormFillView> {
           value: v,
         ));
       }
+      _logEvent('Saving ${values.length} field values...');
       await CcService.saveSubmissionValues(submission.id, values);
+      _logEvent('Field values saved');
 
+      final attachmentCount = _pendingFiles.values.fold<int>(0, (n, l) => n + l.length);
+      if (attachmentCount > 0) _logEvent('Uploading $attachmentCount attachment(s)...');
       await Future.wait([
         for (final entry in _pendingFiles.entries)
           for (final file in entry.value)
@@ -522,8 +701,10 @@ class _CcFormFillViewState extends State<CcFormFillView> {
                     fileType: file.mimeType,
                     fileSize: file.bytes.length,
                   );
+                  _logEvent('Attachment uploaded: ${file.name} (field=${entry.key})');
                 }
               } catch (uploadErr) {
+                _logEvent('Attachment upload FAILED: ${file.name} (field=${entry.key}) — $uploadErr');
                 debugPrint('Attachment upload failed for ${file.name}: $uploadErr');
               }
             }),
@@ -532,6 +713,7 @@ class _CcFormFillViewState extends State<CcFormFillView> {
       if (widget.form.notifyCreatorOnSubmit ||
           widget.form.notifyAdditionalEmails.isNotEmpty ||
           widget.form.notifyAdditionalUserIds.isNotEmpty) {
+        _logEvent('Sending owner notification...');
         CcService.notifyFormSubmission(
           formId: widget.form.id,
           submissionId: submission.id,
@@ -540,21 +722,42 @@ class _CcFormFillViewState extends State<CcFormFillView> {
           additionalEmails: widget.form.notifyAdditionalEmails,
           additionalUserIds: widget.form.notifyAdditionalUserIds,
           customMessage: widget.form.notifyCustomMessage,
-        );
+        ).then((ok) {
+          _logEvent('Notification result: ${ok ? 'sent' : 'FAILED'}');
+          if (!ok && mounted) {
+            final isAr = Localizations.localeOf(context).languageCode == 'ar';
+            showCcErrorSnackbar(
+              context,
+              isAr: isAr,
+              shortMessage: isAr
+                  ? 'تم إرسال الشكوى، لكن تعذر إرسال إشعار المالك'
+                  : 'Submission sent, but the owner notification failed',
+              error: 'notifyFormSubmission returned false for form ${widget.form.id}',
+              log: List.of(_log),
+            );
+          }
+        });
       }
 
+      _logEvent('Submit completed successfully: submissionId=${submission.id}');
       if (!mounted) return;
       if (widget.form.showClosing && widget.form.closingConfig != null) {
         setState(() => _stage = _Stage.closing);
       } else {
         widget.onCompleted();
       }
-    } catch (e) {
+    } catch (e, st) {
+      _logEvent('Submit FAILED: $e');
       if (!mounted) return;
       final isAr = Localizations.localeOf(context).languageCode == 'ar';
       setState(() => _stage = _Stage.step);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(isAr ? 'تعذر إرسال النموذج، حاول مرة أخرى' : 'Could not submit, please try again')),
+      showCcErrorSnackbar(
+        context,
+        log: List.of(_log),
+        isAr: isAr,
+        shortMessage: isAr ? 'تعذر إرسال النموذج، حاول مرة أخرى' : 'Could not submit, please try again',
+        error: e,
+        stackTrace: st,
       );
     }
   }
@@ -673,10 +876,12 @@ class _ScreenStage extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    ...config.items.map((item) => Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 6),
-                          child: _renderItem(item),
-                        )),
+                    ...(config.items.where((item) => item.visible).toList()
+                          ..sort((a, b) => a.y.compareTo(b.y)))
+                        .map((item) => Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              child: _renderItem(item),
+                            )),
                     const SizedBox(height: 28),
                     ElevatedButton(
                       onPressed: onPrimary,
@@ -1628,6 +1833,20 @@ class _FieldInputState extends State<_FieldInput> with SingleTickerProviderState
     }
   }
 
+  /// Returns [name] unchanged if it doesn't collide with [used], otherwise
+  /// appends " (2)", " (3)", ... before the extension until it's unique.
+  String _uniqueFileName(String name, Set<String> used) {
+    if (!used.contains(name)) return name;
+    final dot = name.lastIndexOf('.');
+    final base = dot > 0 ? name.substring(0, dot) : name;
+    final ext = dot > 0 ? name.substring(dot) : '';
+    var i = 2;
+    while (used.contains('$base ($i)$ext')) {
+      i++;
+    }
+    return '$base ($i)$ext';
+  }
+
   Future<void> _pickFiles() async {
     if (_isPickingFile) return;
     final c = widget.field.config;
@@ -1669,8 +1888,11 @@ class _FieldInputState extends State<_FieldInput> with SingleTickerProviderState
 
       final typeErrors = <String>[];
       final sizeErrors = <String>[];
-      int duplicates = 0;
       final valid = <_PendingFile>[];
+      // Mobile camera captures often share one generic filename (e.g.
+      // "image.jpg") across shots — a same-name file is not necessarily
+      // the same file, so collisions are disambiguated, not rejected.
+      final usedNames = Set<String>.from(existingNames);
 
       for (final f in rawFiles) {
         if (f.bytes.length > maxBytes) { sizeErrors.add(f.name); continue; }
@@ -1686,8 +1908,9 @@ class _FieldInputState extends State<_FieldInput> with SingleTickerProviderState
         } else {
           debugPrint('[TYPE-CHECK] no ext restriction — file="${f.name}" ACCEPTED (allowedExts empty)');
         }
-        if (existingNames.contains(f.name)) { duplicates++; continue; }
-        valid.add(_PendingFile(name: f.name, bytes: f.bytes, mimeType: f.mimeType.isEmpty ? null : f.mimeType));
+        final uniqueName = _uniqueFileName(f.name, usedNames);
+        usedNames.add(uniqueName);
+        valid.add(_PendingFile(name: uniqueName, bytes: f.bytes, mimeType: f.mimeType.isEmpty ? null : f.mimeType));
       }
 
       String? err;
@@ -1696,8 +1919,6 @@ class _FieldInputState extends State<_FieldInput> with SingleTickerProviderState
         err = isAr ? 'نوع الملف غير مدعوم. الأنواع المسموحة: $exts' : 'Wrong file type. Allowed: $exts';
       } else if (sizeErrors.isNotEmpty) {
         err = isAr ? 'الملف أكبر من الحد المسموح (${c.maxFileSizeMb.round()} MB)' : 'File exceeds size limit (${c.maxFileSizeMb.round()} MB)';
-      } else if (duplicates > 0 && valid.isEmpty) {
-        err = isAr ? 'هذا الملف موجود بالفعل في القائمة' : 'File already in the list';
       }
       if (err != null) setState(() => _fileTypeError = err);
       if (valid.isEmpty) return;
@@ -1750,20 +1971,22 @@ class _FieldInputState extends State<_FieldInput> with SingleTickerProviderState
       }
 
       final sizeErrors = <String>[];
-      int duplicates = 0;
       final valid = <_PendingFile>[];
+      // Mobile camera captures often share one generic filename (e.g.
+      // "image.jpg") across shots — a same-name file is not necessarily
+      // the same file, so collisions are disambiguated, not rejected.
+      final usedNames = Set<String>.from(existingNames);
 
       for (final f in rawFiles) {
         if (f.bytes.length > maxBytes) { sizeErrors.add(f.name); continue; }
-        if (existingNames.contains(f.name)) { duplicates++; continue; }
-        valid.add(_PendingFile(name: f.name, bytes: f.bytes, mimeType: f.mimeType));
+        final uniqueName = _uniqueFileName(f.name, usedNames);
+        usedNames.add(uniqueName);
+        valid.add(_PendingFile(name: uniqueName, bytes: f.bytes, mimeType: f.mimeType));
       }
 
       String? err;
       if (sizeErrors.isNotEmpty) {
         err = isAr ? 'الصورة أكبر من الحد المسموح (${c.maxFileSizeMb.round()} MB)' : 'Image exceeds size limit (${c.maxFileSizeMb.round()} MB)';
-      } else if (duplicates > 0 && valid.isEmpty) {
-        err = isAr ? 'هذه الصورة موجودة بالفعل في القائمة' : 'Image already in the list';
       }
       if (err != null) setState(() => _fileTypeError = err);
       if (valid.isEmpty) return;

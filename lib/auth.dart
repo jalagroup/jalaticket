@@ -2,6 +2,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:jalasupport/l10n/app_localizations.dart';
 import 'package:jalasupport/main.dart';
+import 'package:jalasupport/user_fields/user_field_values_widget.dart';
 import 'package:jalasupport/main_mobile.dart';
 import 'package:jalasupport/report_problem_screen.dart';
 import 'package:jalasupport/models.dart';
@@ -1620,7 +1621,7 @@ class _TestPushDialogState extends State<_TestPushDialog> {
       _log('Inserting in-app notification...');
       await supabase.from('notifications').insert({
         'user_id': userId,
-        'type': 'test',
+        'type': 'system_announcement',
         'title': '🔔 Test Notification',
         'message': 'This is a test notification sent from the profile screen.',
         'is_read': false,
@@ -1768,12 +1769,14 @@ class _TestPushDialogState extends State<_TestPushDialog> {
 
 class ProfileScreen extends StatefulWidget {
   final UserModel currentUser;
-  final VoidCallback? onProfileImageUpdated; // ✨ Added callback
+  final VoidCallback? onProfileImageUpdated;
+  final VoidCallback? onFieldsUpdated;
 
   const ProfileScreen({
     super.key,
     required this.currentUser,
-    this.onProfileImageUpdated, // ✨ Added callback
+    this.onProfileImageUpdated,
+    this.onFieldsUpdated,
   });
 
   @override
@@ -2262,7 +2265,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             fontWeight: FontWeight.bold,
           ),
         ),
-        automaticallyImplyLeading: !isWeb,
+        // ProfileScreen is always reached via Navigator.push now (see
+        // main.dart's _navigateToProfile), on both web and mobile — let the
+        // default automaticallyImplyLeading (true) show the back button
+        // whenever the route can actually be popped.
         actions: [
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -2401,7 +2407,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       children: [
                         Expanded(
                           flex: 2,
-                          child: _buildEditableSection(),
+                          child: Column(
+                            children: [
+                              _buildEditableSection(),
+                              const SizedBox(height: 24),
+                              _buildCustomFieldsSection(),
+                            ],
+                          ),
                         ),
                         const SizedBox(width: 24),
                         Expanded(
@@ -2424,6 +2436,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         _buildAccountInfoSection(),
                         const SizedBox(height: 24),
                         _buildSecuritySection(),
+                        const SizedBox(height: 24),
+                        _buildCustomFieldsSection(),
                       ],
                     ),
                 ],
@@ -2431,6 +2445,53 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildCustomFieldsSection() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.1),
+            spreadRadius: 1,
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(Icons.extension_rounded, color: AppColors.primary, size: 20),
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                'Additional Information',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          UserFieldValuesWidget(
+            targetUserId: widget.currentUser.id,
+            currentUserId: widget.currentUser.id,
+            isAdmin: false,
+            onSaved: widget.onFieldsUpdated,
+          ),
+        ],
       ),
     );
   }

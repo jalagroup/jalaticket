@@ -1,9 +1,11 @@
+import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HardwareKeyboard, KeyDownEvent, LogicalKeyboardKey;
 import 'package:uuid/uuid.dart';
 import '../main.dart' show AppColors;
+import 'cc_image_crop_screen.dart';
 import 'cc_models.dart';
 import 'cc_service.dart';
 
@@ -395,13 +397,23 @@ class _CcScreenDesignerState extends State<CcScreenDesigner> {
     if (result != null) _applyTemplate(result.items, result.bgColor);
   }
 
+  Future<Uint8List?> _cropImage(Uint8List bytes) async {
+    if (!mounted) return bytes;
+    return showDialog<Uint8List>(
+      context: context,
+      builder: (_) => CcImageCropScreen(bytes: bytes),
+    );
+  }
+
   Future<void> _pickImage(int index) async {
     final result = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
     if (result == null || result.files.isEmpty) return;
     final file = result.files.first;
     final bytes = file.bytes;
     if (bytes == null) return;
-    final url = await CcService.uploadScreenImage(widget.formId, bytes, file.name);
+    final cropped = await _cropImage(bytes);
+    if (cropped == null) return;
+    final url = await CcService.uploadScreenImage(widget.formId, cropped, file.name);
     if (url != null) {
       setState(() => _config.items[index].imageUrl = url);
     }
@@ -413,7 +425,9 @@ class _CcScreenDesignerState extends State<CcScreenDesigner> {
     final file = result.files.first;
     final bytes = file.bytes;
     if (bytes == null) return;
-    final url = await CcService.uploadScreenImage(widget.formId, bytes, 'bg_${file.name}');
+    final cropped = await _cropImage(bytes);
+    if (cropped == null) return;
+    final url = await CcService.uploadScreenImage(widget.formId, cropped, 'bg_${file.name}');
     if (url != null) {
       setState(() => _config.backgroundImageUrl = url);
     }
@@ -580,15 +594,19 @@ class _CcScreenDesignerState extends State<CcScreenDesigner> {
                                                 _focusNode.requestFocus();
                                               },
                                               onPickImage: () => _pickImage(idx),
-                                              onMoved: (dx, dy) => setState(() {
+                                              // Mutate the model directly (no setState) so a drag/resize
+                                              // only repaints the single item being dragged, not the whole
+                                              // canvas — setState below fires once, when the gesture ends.
+                                              onMoved: (dx, dy) {
                                                 item.x = (item.x + dx / scale).clamp(0, _designWidth - 40);
                                                 item.y = (item.y + dy / scale).clamp(0, _canvasHeight / scale - 20);
                                                 _isDirty = true;
-                                              }),
-                                              onResized: (handle, dx, dy) => setState(() {
+                                              },
+                                              onResized: (handle, dx, dy) {
                                                 _applyResize(item, handle, dx / scale, dy / scale);
                                                 _isDirty = true;
-                                              }),
+                                              },
+                                              onDragEnd: () => setState(() {}),
                                               onDuplicate: () => _duplicateItem(idx),
                                               onDelete: () => _deleteItem(idx),
                                               onTextChanged: () => setState(() { _isDirty = true; }),
@@ -1158,6 +1176,7 @@ class _CanvasItemView extends StatefulWidget {
   final VoidCallback onPickImage;
   final void Function(double dx, double dy) onMoved;
   final void Function(_ResizeHandle handle, double dx, double dy) onResized;
+  final VoidCallback? onDragEnd;
   final VoidCallback? onDuplicate;
   final VoidCallback? onDelete;
   final VoidCallback? onTextChanged;
@@ -1173,6 +1192,7 @@ class _CanvasItemView extends StatefulWidget {
     required this.onPickImage,
     required this.onMoved,
     required this.onResized,
+    this.onDragEnd,
     this.onDuplicate,
     this.onDelete,
     this.onTextChanged,
@@ -1469,8 +1489,20 @@ class _CanvasItemViewState extends State<_CanvasItemView> {
                 setState(() => _isDragging = true);
                 widget.onTap();
               },
-        onPanUpdate: isLocked ? null : (d) => widget.onMoved(d.delta.dx, d.delta.dy),
-        onPanEnd: isLocked ? null : (_) => setState(() => _isDragging = false),
+        onPanUpdate: isLocked
+            ? null
+            : (d) {
+                widget.onMoved(d.delta.dx, d.delta.dy);
+                // Local setState only — repaints just this item, not the
+                // whole canvas, so dragging stays smooth at 60fps.
+                setState(() {});
+              },
+        onPanEnd: isLocked
+            ? null
+            : (_) {
+                setState(() => _isDragging = false);
+                widget.onDragEnd?.call();
+              },
         child: Stack(
           clipBehavior: Clip.none,
           children: [
@@ -1559,7 +1591,12 @@ class _CanvasItemViewState extends State<_CanvasItemView> {
       child: MouseRegion(
         cursor: cursor,
         child: GestureDetector(
-          onPanUpdate: (d) => widget.onResized(h, d.delta.dx, d.delta.dy),
+          onPanUpdate: (d) {
+            widget.onResized(h, d.delta.dx, d.delta.dy);
+            // Local setState only — same rationale as the move handler.
+            setState(() {});
+          },
+          onPanEnd: (_) => widget.onDragEnd?.call(),
           child: Container(
             decoration: BoxDecoration(
               color: AppColors.primary,

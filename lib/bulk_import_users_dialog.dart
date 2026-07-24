@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 
 import 'main.dart' show AppColors, supabase;
 import 'models.dart';
+import 'user_fields/user_field_models.dart';
+import 'user_fields/user_field_service.dart';
 import 'web_download.dart';
 
 // ── Permission helpers ────────────────────────────────────────────────────────
@@ -79,6 +81,9 @@ class _ImportRow {
   bool failed   = false;
   String? importError;
 
+  // fieldId → raw string value from Excel
+  Map<String, String> customFieldValues = {};
+
   _ImportRow({
     required this.excelRow,
     required this.fullName,
@@ -116,6 +121,7 @@ class _BulkImportUsersDialogState extends State<BulkImportUsersDialog> {
 
   List<PlaceModel>      _places      = [];
   List<DepartmentModel> _departments = [];
+  List<UserFieldDefinition> _customFieldDefs = [];
   bool _loadingRefs = true;
 
   List<_ImportRow> _rows = [];
@@ -132,12 +138,16 @@ class _BulkImportUsersDialogState extends State<BulkImportUsersDialog> {
 
   Future<void> _loadRefs() async {
     try {
-      final ps = await supabase.from('places').select().order('name');
-      final ds = await supabase.from('departments').select().order('name');
+      final dbResults = await Future.wait([
+        supabase.from('places').select().order('name'),
+        supabase.from('departments').select().order('name'),
+      ]);
+      final defs = await UserFieldService.getDefinitions(activeOnly: true);
       if (mounted) {
         setState(() {
-          _places      = ps.map<PlaceModel>((j) => PlaceModel.fromJson(j)).toList();
-          _departments = ds.map<DepartmentModel>((j) => DepartmentModel.fromJson(j)).toList();
+          _places          = (dbResults[0] as List).map<PlaceModel>((j) => PlaceModel.fromJson(j)).toList();
+          _departments     = (dbResults[1] as List).map<DepartmentModel>((j) => DepartmentModel.fromJson(j)).toList();
+          _customFieldDefs = defs.where((d) => !d.isComputed).toList();
           _loadingRefs = false;
         });
       }
@@ -258,8 +268,8 @@ class _BulkImportUsersDialogState extends State<BulkImportUsersDialog> {
       putCell(sheet, i + 2, 13, _departments[i].name, sideDataStyle);
     }
 
-    // ── Main import table headers (columns A-H = 0-7) ────────────────────────
-    const headers = [
+    // ── Main import table headers (columns A-H = 0-7, then custom fields) ────
+    const coreHeaders = [
       'Full Name *',
       'Email',
       'Phone',
@@ -269,10 +279,24 @@ class _BulkImportUsersDialogState extends State<BulkImportUsersDialog> {
       'Department Name',
       'Branch Places (comma-separated)',
     ];
-    for (int c = 0; c < headers.length; c++) {
+    for (int c = 0; c < coreHeaders.length; c++) {
       final cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: 0));
-      cell.value = TextCellValue(headers[c]);
+      cell.value = TextCellValue(coreHeaders[c]);
       cell.cellStyle = hdStyle;
+    }
+    // Custom field columns starting at column 8
+    final customFieldHdStyle = CellStyle(
+      bold: true,
+      backgroundColorHex: ExcelColor.fromHexString('FF1A6B45'),
+      fontColorHex: ExcelColor.fromHexString('FFFFFFFF'),
+      horizontalAlign: HorizontalAlign.Center,
+    );
+    for (int i = 0; i < _customFieldDefs.length; i++) {
+      final def = _customFieldDefs[i];
+      final suffix = def.blocksUserUntilFilled ? ' *' : '';
+      final cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: 8 + i, rowIndex: 0));
+      cell.value = TextCellValue('${def.label}$suffix');
+      cell.cellStyle = customFieldHdStyle;
     }
 
     // ── Example rows ─────────────────────────────────────────────────────────
@@ -328,12 +352,13 @@ class _BulkImportUsersDialogState extends State<BulkImportUsersDialog> {
     }
 
     // ── Auto-fit all used columns ─────────────────────────────────────────────
-    // Main data columns A-H (0-7)
-    for (int c = 0; c <= 7; c++) {
+    // Core data columns A-H (0-7) + custom field columns
+    for (int c = 0; c <= 7 + _customFieldDefs.length; c++) {
       sheet.setColumnAutoFit(c);
     }
-    // Side reference table columns J(9), L(11), N(13) + their label columns
-    for (final c in [9, 10, 11, 12, 13, 14]) {
+    // Side reference table columns (offset by custom field count)
+    final sideOffset = _customFieldDefs.length;
+    for (final c in [9 + sideOffset, 10 + sideOffset, 11 + sideOffset, 12 + sideOffset, 13 + sideOffset, 14 + sideOffset]) {
       sheet.setColumnAutoFit(c);
     }
 
@@ -385,7 +410,14 @@ class _BulkImportUsersDialogState extends State<BulkImportUsersDialog> {
         // Skip example rows (#) and rows where col A is empty (side reference tables only have data in cols J+)
         if (name.isEmpty || name.startsWith('#')) continue;
 
-        parsed.add(_ImportRow(
+        // Parse custom field values from columns 8+
+        final customVals = <String, String>{};
+        for (int fi = 0; fi < _customFieldDefs.length; fi++) {
+          final val = _cellOrNull(row, 8 + fi);
+          if (val != null) customVals[_customFieldDefs[fi].id] = val;
+        }
+
+        final importRow = _ImportRow(
           excelRow:        i + 1,
           fullName:        name,
           email:           _cellOrNull(row, 1),
@@ -399,7 +431,9 @@ class _BulkImportUsersDialogState extends State<BulkImportUsersDialog> {
               .map((s) => s.trim())
               .where((s) => s.isNotEmpty)
               .toList(),
-        ));
+        );
+        importRow.customFieldValues = customVals;
+        parsed.add(importRow);
       }
 
       _validateRows(parsed);
@@ -542,6 +576,7 @@ class _BulkImportUsersDialogState extends State<BulkImportUsersDialog> {
   Future<void> _createOne(_ImportRow row) async {
     final userData = {
       'full_name':      row.fullName.trim(),
+      'phone':          row.phone,
       'user_type':      row.userType!.value,
       'department_id':  row.departmentId,
       'place_id':       row.placeId,
@@ -564,18 +599,30 @@ class _BulkImportUsersDialogState extends State<BulkImportUsersDialog> {
       throw Exception(data?['message'] ?? 'Failed to create user');
     }
 
+    final newUserId = (data['user'] as Map<String, dynamic>?)?['id'] as String?;
+
     // Assign branch places for branch admin users
-    if (row.userType == UserType.branchAdmin && row.branchPlaceIds.isNotEmpty) {
-      final newId = (data['user'] as Map<String, dynamic>?)?['id'] as String?;
-      if (newId != null) {
-        for (final pid in row.branchPlaceIds) {
-          await supabase.from('branch_admin_places').upsert({
-            'admin_id':   newId,
-            'place_id':   pid,
-            'created_by': supabase.auth.currentUser?.id,
-          });
-        }
+    if (row.userType == UserType.branchAdmin && row.branchPlaceIds.isNotEmpty && newUserId != null) {
+      for (final pid in row.branchPlaceIds) {
+        await supabase.from('branch_admin_places').upsert({
+          'admin_id':   newUserId,
+          'place_id':   pid,
+          'created_by': supabase.auth.currentUser?.id,
+        });
       }
+    }
+
+    // Save custom field values
+    if (newUserId != null && row.customFieldValues.isNotEmpty) {
+      final adminId = widget.currentUser.id;
+      await Future.wait(row.customFieldValues.entries.map((e) =>
+        UserFieldService.upsertValue(
+          userId: newUserId,
+          fieldId: e.key,
+          value: e.value,
+          filledByUserId: adminId,
+        ),
+      ));
     }
   }
 

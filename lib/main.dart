@@ -14,6 +14,10 @@ import 'api/firebase_api.dart';
 import 'package:jalasupport/auth.dart';
 import 'package:jalasupport/chat.dart';
 import 'package:jalasupport/dashboard.dart';
+import 'package:jalasupport/fleet/fleet_management_screen.dart';
+import 'package:jalasupport/fleet/fleet_service.dart';
+import 'package:jalasupport/fleet/fleet_vehicle_detail_screen.dart';
+import 'package:jalasupport/fleet/my_vehicles_screen.dart';
 import 'package:jalasupport/managment.dart';
 import 'package:jalasupport/models.dart';
 import 'package:jalasupport/services.dart';
@@ -36,6 +40,7 @@ import 'package:jalasupport/sound_service.dart';
 import 'package:jalasupport/ai_dashboard_onboarding.dart';
 import 'package:jalasupport/ai_dashboard_screen.dart';
 import 'package:jalasupport/custom_complaints/cc_home_screen.dart';
+import 'package:jalasupport/user_fields/user_field_service.dart';
 import 'package:flutter_web_plugins/flutter_web_plugins.dart' show usePathUrlStrategy;
 import 'package:go_router/go_router.dart';
 import 'package:jalasupport/app_router.dart';
@@ -91,6 +96,11 @@ void main() async {
 
   // Pre-generate tones so first play is instant.
   SoundService.init();
+
+  // Starts the periodic batch processor that flushes queued email
+  // notifications (see NotificationService._queueEmailNotification) — without
+  // this, emails queued anywhere in the app are never actually sent.
+  await NotificationService.initialize();
 
   // Platform-specific initialization
   if (kIsWeb) {
@@ -324,6 +334,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   bool _isLoading = true;
   int _currentIndex = 0;
   bool _hasComplaintPermission = false;
+  bool _hasFleetAccess = false;
+  // Shown instead of the full Fleet tab for users who drive at least one
+  // vehicle but don't have Fleet Access (System Admin / fleet-enabled Super
+  // Admin) — mutually exclusive with _hasFleetAccess, since admins already
+  // see everything (including their own vehicles) via the full tab.
+  bool _hasMyVehicles = false;
   Locale _locale = const Locale('en');
 
   int _unreadChatRoomsCount = 0;
@@ -355,6 +371,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   int _unreadCount = 0;
   StreamSubscription? _notificationsSubscription;
   Timer? _notificationCheckTimer;
+
+  bool _mandatoryFieldsMissing = false;
 
   /// Setup FCM navigation callbacks
   void _setupFCMNavigationCallbacks() {
@@ -503,7 +521,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void _setupNavigationItems() {
     final l10n = AppLocalizations.safeOf(context);
 
-    // Mobile navigation items (8 items)
+    // Mobile navigation items
     _mobileNavItems = [
       NavigationItem(icon: Icons.dashboard, label: l10n.dashboard),
       NavigationItem(icon: Icons.confirmation_number, label: l10n.tickets),
@@ -513,10 +531,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       NavigationItem(icon: Icons.report_problem, label: l10n.complaints),
       NavigationItem(icon: Icons.dynamic_form_outlined, label: l10n.customComplaints),
       NavigationItem(icon: Icons.settings, label: l10n.management),
-      NavigationItem(icon: Icons.person, label: l10n.profile),
+      NavigationItem(icon: Icons.local_shipping_outlined, label: _locale.languageCode == 'ar' ? 'الأسطول' : 'Fleet'),
     ];
 
-    // Web navigation items (7 items)
+    // Web navigation items
     _webNavItems = [
       NavigationItem(icon: Icons.dashboard, label: l10n.dashboard),
       NavigationItem(icon: Icons.confirmation_number, label: l10n.tickets),
@@ -524,7 +542,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       NavigationItem(icon: Icons.report_problem, label: l10n.complaints),
       NavigationItem(icon: Icons.dynamic_form_outlined, label: l10n.customComplaints),
       NavigationItem(icon: Icons.settings, label: l10n.management),
-      NavigationItem(icon: Icons.person, label: l10n.profile),
+      NavigationItem(icon: Icons.local_shipping_outlined, label: _locale.languageCode == 'ar' ? 'الأسطول' : 'Fleet'),
     ];
 
     if (mounted) {
@@ -614,6 +632,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         await Future.wait([
           _setupConnectivityMonitoring(),
           _checkComplaintPermission(),
+          _checkFleetAccess(),
+          _checkMyVehicles(),
           _loadUnreadChatRoomsCount(),
         ]);
 
@@ -622,6 +642,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         await _setupFCMForUser(_currentUser!);
         _setupFCMHandlers();
         _setupFCMNavigationCallbacks();
+        await _checkMandatoryUserFields();
       }
     } catch (e) {
       print('❌ Error during screen initialization: $e');
@@ -629,6 +650,21 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         setState(() => _isLoading = false);
       }
     }
+  }
+
+  Future<void> _checkMandatoryUserFields() async {
+    if (_currentUser == null) return;
+    try {
+      final missing = await UserFieldService.getMissingBlockingFields(_currentUser!.id);
+      if (!mounted) return;
+      final wasMissing = _mandatoryFieldsMissing;
+      setState(() => _mandatoryFieldsMissing = missing.isNotEmpty);
+      if (missing.isNotEmpty && !wasMissing) {
+        final screenWidth = MediaQuery.of(context).size.width;
+        final isMobile = screenWidth < 768;
+        setState(() => _currentIndex = isMobile ? 7 : 6);
+      }
+    } catch (_) {}
   }
 
   void navigateToNotification() {}
@@ -892,6 +928,42 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       }
     } else {
       if (mounted) setState(() => _hasComplaintPermission = false);
+    }
+  }
+
+  Future<void> _checkFleetAccess() async {
+    if (_currentUser == null) {
+      if (mounted) setState(() => _hasFleetAccess = false);
+      return;
+    }
+    if (_currentUser!.userType == UserType.systemAdmin) {
+      if (mounted) setState(() => _hasFleetAccess = true);
+      return;
+    }
+    if (_currentUser!.userType == UserType.superAdmin) {
+      try {
+        final hasAccess = await FleetService.superAdminHasFleetAccess(_currentUser!.id);
+        if (mounted) setState(() => _hasFleetAccess = hasAccess);
+      } catch (e) {
+        print('Error checking fleet access: $e');
+        if (mounted) setState(() => _hasFleetAccess = false);
+      }
+    } else {
+      if (mounted) setState(() => _hasFleetAccess = false);
+    }
+  }
+
+  Future<void> _checkMyVehicles() async {
+    if (_currentUser == null) {
+      if (mounted) setState(() => _hasMyVehicles = false);
+      return;
+    }
+    try {
+      final vehicles = await FleetService.getVehiclesForUser(_currentUser!.id);
+      if (mounted) setState(() => _hasMyVehicles = vehicles.isNotEmpty);
+    } catch (e) {
+      print('Error checking driven vehicles: $e');
+      if (mounted) setState(() => _hasMyVehicles = false);
     }
   }
 
@@ -1174,8 +1246,14 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     final ticketId = message.data['ticket_id'];
     final type = message.data['type'];
     final chatRoomId = message.data['chat_room_id'];
+    final sourceTable = message.data['source_table'];
+    final recordId = message.data['record_id'];
 
-    if (type == 'new_message' || type == 'chat_mention') {
+    if (sourceTable == 'fleet_vehicles' && recordId != null) {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => FleetVehicleDetailScreen(vehicleId: recordId as String, currentUser: _currentUser!),
+      ));
+    } else if (type == 'new_message' || type == 'chat_mention') {
       _navigateToChat(ticketId, chatRoomId);
     } else {
       _navigateToTicket(ticketId, type: type);
@@ -1287,6 +1365,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                 {element['title'] = l10n.chatMention}
               else if (element['type'] == 'subticket_created')
                 {element['title'] = l10n.subticketCreated}
+              else if (element['type'] == 'reminder')
+                {} // Reminders already carry a specific title from creation — keep it.
               else
                 {
                   {element['title'] = ''}
@@ -1393,7 +1473,21 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       _markNotificationAsRead(notification['id']);
     }
 
-    if (type == 'new_message' || type == 'chat_mention') {
+    Map<String, dynamic>? actionData;
+    final rawActionData = notification['action_data'];
+    if (rawActionData is String && rawActionData.isNotEmpty) {
+      try {
+        actionData = json.decode(rawActionData) as Map<String, dynamic>;
+      } catch (_) {}
+    } else if (rawActionData is Map) {
+      actionData = Map<String, dynamic>.from(rawActionData);
+    }
+
+    if (actionData != null && actionData['source_table'] == 'fleet_vehicles' && actionData['record_id'] != null) {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => FleetVehicleDetailScreen(vehicleId: actionData!['record_id'] as String, currentUser: _currentUser!),
+      ));
+    } else if (type == 'new_message' || type == 'chat_mention') {
       _navigateToChat(ticketId, chatRoomId);
     } else if (ticketId != null) {
       _navigateToTicket(ticketId, type: type);
@@ -1410,6 +1504,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         children: _webNavItems.asMap().entries.where((entry) {
           if (entry.value.icon == Icons.report_problem &&
               !_hasComplaintPermission) return false;
+          if (entry.value.icon == Icons.local_shipping_outlined &&
+              !_hasFleetAccess && !_hasMyVehicles) return false;
           return true;
         }).map((entry) {
           final index = entry.key;
@@ -1521,7 +1617,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       case 3: return l10n.complaints;
       case 4: return l10n.customComplaints;
       case 5: return l10n.management;
-      case 6: return l10n.profile;
+      case 6: return Localizations.localeOf(context).languageCode == 'ar' ? 'الأسطول' : 'Fleet';
       default: return '';
     }
   }
@@ -1537,9 +1633,51 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       case 4: return l10n.complaints;
       case 5: return l10n.customComplaints;
       case 6: return l10n.management;
-      case 7: return l10n.profile;
+      case 7: return Localizations.localeOf(context).languageCode == 'ar' ? 'الأسطول' : 'Fleet';
       default: return '';
     }
+  }
+
+  Widget _buildMandatoryFieldsLockScreen() {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: Center(
+        child: Card(
+          margin: const EdgeInsets.all(24),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.assignment_late_rounded, size: 56, color: Colors.orange),
+                const SizedBox(height: 16),
+                const Text(
+                  'Profile Incomplete',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Your profile has required fields that must be filled before you can use the system.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  icon: const Icon(Icons.person_outline),
+                  label: const Text('Complete My Profile'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  ),
+                  onPressed: _navigateToProfile,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildCurrentScreen() {
@@ -1555,6 +1693,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 768;
+
+    if (_mandatoryFieldsMissing) {
+      return _buildMandatoryFieldsLockScreen();
+    }
 
     if (isMobile) {
       switch (_currentIndex) {
@@ -1588,11 +1730,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         case 6:
           return ManagementScreen(currentUser: _currentUser!);
         case 7:
-          return ProfileScreen(
-            currentUser: _currentUser!,
-            onProfileImageUpdated:
-                _handleProfileImageUpdate, // ✨ Added callback
-          );
+          return _hasFleetAccess
+              ? FleetManagementScreen(currentUser: _currentUser!)
+              : MyVehiclesScreen(currentUser: _currentUser!);
         default:
           return _buildDashboardTab(isMobile, navigateToTickets);
       }
@@ -1629,10 +1769,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             initialTab: DeepLinkState.consumeManagementTab(),
           );
         case 6:
-          return ProfileScreen(
-            currentUser: _currentUser!,
-            onProfileImageUpdated: _handleProfileImageUpdate,
-          );
+          return _hasFleetAccess
+              ? FleetManagementScreen(currentUser: _currentUser!)
+              : MyVehiclesScreen(currentUser: _currentUser!);
         default:
           return _buildDashboardTab(isMobile, navigateToTickets);
       }
@@ -1810,17 +1949,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }
 
   void _navigateToProfile() {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile = screenWidth < 768;
-
-    if (isMobile) {
-      // Mobile: Navigate to profile tab (index 7)
-      setState(() => _currentIndex = 7);
-    } else {
-      // Web: Navigate to profile tab (index 6) and update URL.
-      GoRouter.of(context).go('/profile');
-      setState(() => _currentIndex = 6);
-    }
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => ProfileScreen(
+        currentUser: _currentUser!,
+        onProfileImageUpdated: _handleProfileImageUpdate,
+        onFieldsUpdated: _checkMandatoryUserFields,
+      ),
+    ));
   }
 
   Widget _buildLogoLeading({required bool isMobile, required AppLocalizations l10n}) {
@@ -2471,6 +2606,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                 title = l10n.chatMention;
                               case 'subticket_created':
                                 title = l10n.subticketCreated;
+                              case 'reminder':
+                                // Reminders carry a specific title from creation — keep it.
+                                title = (_notifications[index]['title'] as String?) ?? '';
                               default:
                                 title = '';
                             }
@@ -3052,6 +3190,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               return const SizedBox.shrink();
             }
 
+            if (item.icon == Icons.local_shipping_outlined && !_hasFleetAccess && !_hasMyVehicles) {
+              return const SizedBox.shrink();
+            }
+
             if (!isWidthNotGood && item.label == 'Notifications') {
               return const SizedBox.shrink();
             }
@@ -3247,6 +3389,8 @@ class NotificationDropdownTile extends StatelessWidget {
         return Icons.alternate_email;
       case 'subticket_created':
         return Icons.account_tree_outlined;
+      case 'reminder':
+        return Icons.notifications_active_outlined;
       default:
         return Icons.notifications_outlined;
     }
@@ -3273,6 +3417,8 @@ class NotificationDropdownTile extends StatelessWidget {
         return AppColors.secondary;
       case 'subticket_created':
         return Colors.teal;
+      case 'reminder':
+        return Colors.amber.shade800;
       default:
         return Colors.grey;
     }
@@ -3641,6 +3787,8 @@ class NotificationTile extends StatelessWidget {
         return Icons.alternate_email;
       case 'subticket_created':
         return Icons.account_tree_outlined;
+      case 'reminder':
+        return Icons.notifications_active_outlined;
       default:
         return Icons.notifications_outlined;
     }
@@ -3707,6 +3855,8 @@ class NotificationTile extends StatelessWidget {
         return AppColors.secondary;
       case 'subticket_created':
         return Colors.teal;
+      case 'reminder':
+        return Colors.amber.shade800;
       default:
         return Colors.grey;
     }

@@ -217,6 +217,42 @@ class BranchAdminPlace {
   }
 }
 
+class AdminDepartment {
+  final String id;
+  final String adminId;
+  final String departmentId;
+  final String? createdBy;
+  final DateTime createdAt;
+
+  AdminDepartment({
+    required this.id,
+    required this.adminId,
+    required this.departmentId,
+    this.createdBy,
+    required this.createdAt,
+  });
+
+  factory AdminDepartment.fromJson(Map<String, dynamic> json) {
+    return AdminDepartment(
+      id: json['id'],
+      adminId: json['admin_id'],
+      departmentId: json['department_id'],
+      createdBy: json['created_by'],
+      createdAt: DateTime.parse(json['created_at']),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'admin_id': adminId,
+      'department_id': departmentId,
+      'created_by': createdBy,
+      'created_at': createdAt.toIso8601String(),
+    };
+  }
+}
+
 enum TicketStatus {
   pending('pending'),
   inprogress('inprogress'),
@@ -253,6 +289,9 @@ class UserModel {
   final bool isDeleted;
   final String language;
   final String? profileImageUrl; // Add this field
+  final String? directManagerId;
+  // Denormalized manager name, populated via an embedded join when loading.
+  final String? directManagerName;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -270,11 +309,14 @@ class UserModel {
     this.isDeleted = false,
     required this.language,
     this.profileImageUrl, // Add this parameter
+    this.directManagerId,
+    this.directManagerName,
     required this.createdAt,
     required this.updatedAt,
   });
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
+    final directManager = json['direct_manager'] as Map<String, dynamic>?;
     return UserModel(
       id: json['id'],
       authId: json['auth_id'],
@@ -289,6 +331,8 @@ class UserModel {
       isDeleted: json['is_deleted'] ?? false,
       language: json['language'] ?? 'en',
       profileImageUrl: json['profile_image_url'],
+      directManagerId: json['direct_manager_id'],
+      directManagerName: directManager?['full_name'],
       createdAt: DateTime.parse(json['created_at']),
       updatedAt: DateTime.parse(json['updated_at']),
     );
@@ -309,6 +353,7 @@ class UserModel {
       'is_deleted': isDeleted,
       'language': language,
       'profile_image_url': profileImageUrl,
+      'direct_manager_id': directManagerId,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
     };
@@ -335,6 +380,8 @@ class UserModel {
       isDeleted: isDeleted ?? this.isDeleted,
       language: language ?? this.language,
       profileImageUrl: profileImageUrl ?? this.profileImageUrl,
+      directManagerId: directManagerId,
+      directManagerName: directManagerName,
       createdAt: createdAt,
       updatedAt: DateTime.now(),
     );
@@ -350,6 +397,10 @@ class DepartmentModel {
   final bool isActive;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final List<String> allowedTicketTypes;
+  final List<String> allowedDepartmentIds;
+  final String? color;
+  final bool fleetAccessEnabled;
 
   DepartmentModel({
     required this.id,
@@ -360,6 +411,10 @@ class DepartmentModel {
     required this.isActive,
     required this.createdAt,
     required this.updatedAt,
+    this.allowedTicketTypes = const [],
+    this.allowedDepartmentIds = const [],
+    this.color,
+    this.fleetAccessEnabled = false,
   });
 
   String localizedName(String languageCode) {
@@ -373,6 +428,11 @@ class DepartmentModel {
   }
 
   factory DepartmentModel.fromJson(Map<String, dynamic> json) {
+    List<String> parseList(dynamic v) {
+      if (v is List) return v.map((e) => e.toString()).toList();
+      return [];
+    }
+
     return DepartmentModel(
       id: json['id'],
       name: json['name'],
@@ -382,6 +442,10 @@ class DepartmentModel {
       isActive: json['is_active'],
       createdAt: DateTime.parse(json['created_at']),
       updatedAt: DateTime.parse(json['updated_at']),
+      allowedTicketTypes: parseList(json['allowed_ticket_types']),
+      allowedDepartmentIds: parseList(json['allowed_department_ids']),
+      color: json['color'],
+      fleetAccessEnabled: json['fleet_access_enabled'] ?? false,
     );
   }
 }
