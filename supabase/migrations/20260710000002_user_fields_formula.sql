@@ -1,0 +1,3 @@
+ALTER TABLE user_field_definitions
+  ADD COLUMN IF NOT EXISTS is_computed BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS formula     TEXT;

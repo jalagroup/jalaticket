@@ -1,0 +1,3 @@
+ALTER TABLE user_field_definitions
+  ADD COLUMN IF NOT EXISTS is_nullable   BOOLEAN NOT NULL DEFAULT TRUE,
+  ADD COLUMN IF NOT EXISTS default_value TEXT;
