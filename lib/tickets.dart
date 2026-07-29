@@ -30,7 +30,8 @@ import 'package:url_launcher/url_launcher.dart';
 /// "no restriction" at that level, matching the place/department permission
 /// model used across the app.
 Future<List<DepartmentModel>> filterDeptsByPlaceId(
-    List<DepartmentModel> all, String? placeId, [String? departmentId]) async {
+    List<DepartmentModel> all, String? placeId,
+    [String? departmentId, String languageCode = 'en']) async {
   Set<String>? placeAllowed;
   if (placeId != null) {
     try {
@@ -61,12 +62,15 @@ Future<List<DepartmentModel>> filterDeptsByPlaceId(
     } catch (_) {}
   }
 
-  if (placeAllowed == null && deptAllowed == null) return all;
-  return all.where((d) {
-    if (placeAllowed != null && !placeAllowed.contains(d.id)) return false;
-    if (deptAllowed != null && !deptAllowed.contains(d.id)) return false;
-    return true;
-  }).toList();
+  final filtered = (placeAllowed == null && deptAllowed == null)
+      ? List<DepartmentModel>.from(all)
+      : all.where((d) {
+          if (placeAllowed != null && !placeAllowed.contains(d.id)) return false;
+          if (deptAllowed != null && !deptAllowed.contains(d.id)) return false;
+          return true;
+        }).toList();
+  return filtered
+    ..sort((a, b) => a.localizedName(languageCode).compareTo(b.localizedName(languageCode)));
 }
 
 /// Fallback palette so a department without an explicit color still shows
@@ -1571,6 +1575,15 @@ class _TicketsScreenState extends State<TicketsScreen>
       // now that the department set is known, instead of waiting for the
       // next unrelated realtime event to happen to correct it.
       _setupRealTimeTicketCounts();
+      // Same race applies to the per-status ticket LIST streams (tabs are
+      // loaded lazily as visited): whichever tab was already open when this
+      // resolved has its _ticketsByStatus entry filtered against the same
+      // stale empty department set, so the badge count and the visible list
+      // permanently disagree until the user happens to switch tabs. Restart
+      // every status that's already subscribed so they get reprocessed too.
+      for (final status in _subscriptionsByStatus.keys.toList()) {
+        _setupRealTimeTicketsForStatus(status);
+      }
     } catch (e) {
       debugPrint('⚠️ Could not load super admin departments: $e');
     }
@@ -13923,7 +13936,7 @@ class _PlacesMaintenanceTicketScreenState
           .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
           .toList();
       departments = await filterDeptsByPlaceId(
-          departments, widget.currentUser.placeId, widget.currentUser.departmentId);
+          departments, widget.currentUser.placeId, widget.currentUser.departmentId, widget.currentUser.language);
 
       setState(() {
         _departments = departments;
@@ -15287,7 +15300,7 @@ class _IndividualsMaintenanceTicketScreenState
           .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
           .toList();
       departments = await filterDeptsByPlaceId(
-          departments, widget.currentUser.placeId, widget.currentUser.departmentId);
+          departments, widget.currentUser.placeId, widget.currentUser.departmentId, widget.currentUser.language);
 
       setState(() {
         _departments = departments;
@@ -16575,7 +16588,7 @@ class _RequestsTicketScreenState extends State<RequestsTicketScreen> {
           .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
           .toList();
       departments = await filterDeptsByPlaceId(
-          departments, widget.currentUser.placeId, widget.currentUser.departmentId);
+          departments, widget.currentUser.placeId, widget.currentUser.departmentId, widget.currentUser.language);
 
       setState(() {
         _departments = departments;
@@ -17756,7 +17769,7 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
           .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
           .toList();
       departments = await filterDeptsByPlaceId(
-          departments, widget.currentUser.placeId, widget.currentUser.departmentId);
+          departments, widget.currentUser.placeId, widget.currentUser.departmentId, widget.currentUser.language);
 
       setState(() {
         _departments = departments;
@@ -19057,7 +19070,7 @@ class _CreateSubticketDialogState extends State<CreateSubticketDialog> {
           .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
           .toList();
       departments = await filterDeptsByPlaceId(
-          departments, widget.currentUser.placeId, widget.currentUser.departmentId);
+          departments, widget.currentUser.placeId, widget.currentUser.departmentId, widget.currentUser.language);
 
       setState(() {
         _departments = departments;
@@ -20035,7 +20048,7 @@ class _CreateSubticketScreenState extends State<CreateSubticketScreen> {
           .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
           .toList();
       departments = await filterDeptsByPlaceId(
-          departments, widget.currentUser.placeId, widget.currentUser.departmentId);
+          departments, widget.currentUser.placeId, widget.currentUser.departmentId, widget.currentUser.language);
 
       setState(() {
         _departments = departments;

@@ -1998,16 +1998,16 @@ class _DepartmentsManagementState extends State<DepartmentsManagement>
 
     setState(() => _isLoading = true);
     try {
-      final response = await supabase
-          .from('departments')
-          .select()
-          .order('created_at', ascending: false);
+      final response = await supabase.from('departments').select();
 
       if (mounted) {
+        final lang = widget.currentUser.language;
+        final departments = response
+            .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
+            .toList()
+          ..sort((a, b) => a.localizedName(lang).compareTo(b.localizedName(lang)));
         setState(() {
-          _departments = response
-              .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
-              .toList();
+          _departments = departments;
         });
       }
     } catch (e) {

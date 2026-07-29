@@ -63,7 +63,7 @@ class _IndividualsMaintenanceTicketDialogState
           .toList();
 
       departments = await filterDeptsByPlaceId(
-          departments, widget.currentUser.placeId, widget.currentUser.departmentId);
+          departments, widget.currentUser.placeId, widget.currentUser.departmentId, widget.currentUser.language);
 
       setState(() {
         _departments = departments;
@@ -981,7 +981,7 @@ class _PlacesMaintenanceTicketDialogState
       }
 
       departments = await filterDeptsByPlaceId(
-          departments, widget.currentUser.placeId, widget.currentUser.departmentId);
+          departments, widget.currentUser.placeId, widget.currentUser.departmentId, widget.currentUser.language);
 
       setState(() {
         _departments = departments;
@@ -1575,7 +1575,7 @@ class _RequestsTicketDialogState extends State<RequestsTicketDialog> {
           .map<DepartmentModel>((json) => DepartmentModel.fromJson(json))
           .toList();
       departments = await filterDeptsByPlaceId(
-          departments, widget.currentUser.placeId, widget.currentUser.departmentId);
+          departments, widget.currentUser.placeId, widget.currentUser.departmentId, widget.currentUser.language);
       setState(() {
         _departments = departments;
       });
