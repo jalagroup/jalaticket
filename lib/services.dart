@@ -1884,6 +1884,33 @@ class ChatService {
     }
   }
 
+  // Multi-department-aware: a super admin can be scoped to a department via
+  // admin_departments (many-to-many) or, for not-yet-migrated accounts, the
+  // legacy single users.department_id column.
+  static Future<Set<String>> _superAdminIdsForDepartment(String departmentId) async {
+    final ids = <String>{};
+    final viaAdminDepartments = await supabase
+        .from('admin_departments')
+        .select('admin_id, users!admin_id(id, is_active, user_type)')
+        .eq('department_id', departmentId);
+    for (final row in viaAdminDepartments) {
+      final user = row['users'];
+      if (user != null && user['is_active'] == true && user['user_type'] == 'super_admin') {
+        ids.add(user['id']);
+      }
+    }
+    final viaLegacyColumn = await supabase
+        .from('users')
+        .select('id')
+        .eq('department_id', departmentId)
+        .eq('user_type', 'super_admin')
+        .eq('is_active', true);
+    for (final admin in viaLegacyColumn) {
+      ids.add(admin['id']);
+    }
+    return ids;
+  }
+
   // In ChatService class, UPDATE _getChatParticipants method:
 
   static Future<List<UserNotificationInfo>> _getChatParticipants(
@@ -1906,15 +1933,25 @@ class ChatService {
       }
 
       if (ticket['target_department_id'] != null) {
-        final superAdmins = await supabase
-            .from('users')
-            .select('id')
-            .eq('department_id', ticket['target_department_id'])
-            .eq('user_type', 'super_admin')
-            .eq('is_active', true);
+        for (final id in await _superAdminIdsForDepartment(ticket['target_department_id'])) {
+          participantIds.add(id);
+        }
+      }
 
-        for (final admin in superAdmins) {
-          participantIds.add(admin['id']);
+      // The creator's OWN department's super admin(s) — separate from the
+      // target department's, since an admin can create a ticket targeting
+      // a different department than their own.
+      if (ticket['created_by'] != null) {
+        final creator = await supabase
+            .from('users')
+            .select('department_id')
+            .eq('id', ticket['created_by'])
+            .maybeSingle();
+        final creatorDeptId = creator?['department_id'] as String?;
+        if (creatorDeptId != null) {
+          for (final id in await _superAdminIdsForDepartment(creatorDeptId)) {
+            participantIds.add(id);
+          }
         }
       }
 
@@ -4288,6 +4325,33 @@ class NotificationService {
     }
   }
 
+  // Multi-department-aware: a super admin can be scoped to a department via
+  // admin_departments (many-to-many) or, for not-yet-migrated accounts, the
+  // legacy single users.department_id column.
+  static Future<Set<String>> _superAdminIdsForDepartment(String departmentId) async {
+    final ids = <String>{};
+    final viaAdminDepartments = await supabase
+        .from('admin_departments')
+        .select('admin_id, users!admin_id(id, is_active, user_type)')
+        .eq('department_id', departmentId);
+    for (final row in viaAdminDepartments) {
+      final user = row['users'];
+      if (user != null && user['is_active'] == true && user['user_type'] == 'super_admin') {
+        ids.add(user['id']);
+      }
+    }
+    final viaLegacyColumn = await supabase
+        .from('users')
+        .select('id')
+        .eq('department_id', departmentId)
+        .eq('user_type', 'super_admin')
+        .eq('is_active', true);
+    for (final admin in viaLegacyColumn) {
+      ids.add(admin['id']);
+    }
+    return ids;
+  }
+
   // Get chat participants efficiently
   static Future<List<UserNotificationInfo>> _getChatParticipants(
       String chatRoomId, String ticketId) async {
@@ -4313,15 +4377,25 @@ class NotificationService {
 
       // Add department super admins
       if (ticket['target_department_id'] != null) {
-        final superAdmins = await supabase
-            .from('users')
-            .select('id')
-            .eq('department_id', ticket['target_department_id'])
-            .eq('user_type', 'super_admin')
-            .eq('is_active', true);
+        for (final id in await _superAdminIdsForDepartment(ticket['target_department_id'])) {
+          participantIds.add(id);
+        }
+      }
 
-        for (final admin in superAdmins) {
-          participantIds.add(admin['id']);
+      // The creator's OWN department's super admin(s) — separate from the
+      // target department's, since an admin can create a ticket targeting
+      // a different department than their own.
+      if (ticket['created_by'] != null) {
+        final creator = await supabase
+            .from('users')
+            .select('department_id')
+            .eq('id', ticket['created_by'])
+            .maybeSingle();
+        final creatorDeptId = creator?['department_id'] as String?;
+        if (creatorDeptId != null) {
+          for (final id in await _superAdminIdsForDepartment(creatorDeptId)) {
+            participantIds.add(id);
+          }
         }
       }
 
