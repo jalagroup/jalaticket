@@ -73,6 +73,57 @@ Future<List<DepartmentModel>> filterDeptsByPlaceId(
     ..sort((a, b) => a.localizedName(languageCode).compareTo(b.localizedName(languageCode)));
 }
 
+/// Shared expected-due-date picker used by every ticket/sub-ticket creation
+/// form and by the "working admin" due-date field on an in-progress ticket,
+/// so the date field looks and behaves the same everywhere.
+class ExpectedDueDateField extends StatelessWidget {
+  final String label;
+  final DateTime? value;
+  final ValueChanged<DateTime?> onChanged;
+  final bool isRequired;
+  final String? errorText;
+
+  const ExpectedDueDateField({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.onChanged,
+    this.isRequired = false,
+    this.errorText,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () async {
+        final now = DateTime.now();
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: value ?? now.add(const Duration(days: 3)),
+          firstDate: DateTime(now.year - 1),
+          lastDate: DateTime(now.year + 5),
+        );
+        if (picked != null) onChanged(picked);
+      },
+      child: InputDecorator(
+        decoration: InputDecoration(
+          labelText: isRequired ? '$label *' : label,
+          border: const OutlineInputBorder(),
+          suffixIcon: const Icon(Icons.calendar_today_outlined, size: 18),
+          errorText: errorText,
+        ),
+        child: Text(
+          value != null
+              ? '${value!.year}-${value!.month.toString().padLeft(2, '0')}-${value!.day.toString().padLeft(2, '0')}'
+              : (isRequired ? 'Select expected due date' : 'Not set'),
+          style: TextStyle(color: value != null ? null : Colors.grey[600]),
+        ),
+      ),
+    );
+  }
+}
+
 /// Fallback palette so a department without an explicit color still shows
 /// a consistent, distinguishable color on its ticket tag.
 const _kDepartmentColorPalette = [
@@ -6251,6 +6302,23 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
         ),
       if (widget.ticket.assignedTo != null)
         _buildDetailItem(l10n.assignedTo, _assignedToName ?? l10n.loading),
+      _buildDetailItem(
+        l10n.creatorDueDate,
+        widget.ticket.creatorDueDate != null
+            ? DateFormat('dd/MM/yyyy').format(widget.ticket.creatorDueDate!)
+            : l10n.notSet,
+      ),
+      widget.currentUser.id == widget.ticket.assignedTo
+          ? Container(
+              constraints: const BoxConstraints(minWidth: 150),
+              child: _buildEditableAssigneeDueDate(l10n),
+            )
+          : _buildDetailItem(
+              l10n.assigneeDueDate,
+              widget.ticket.assigneeDueDate != null
+                  ? DateFormat('dd/MM/yyyy').format(widget.ticket.assigneeDueDate!)
+                  : l10n.notSet,
+            ),
       _buildDetailItem(l10n.place, _localizedEntityName(_placeName, _placeNameEn, _placeNameAr, l10n.loading)),
       if (widget.ticket.otherPlace != null)
         _buildDetailItem(l10n.otherPlace, widget.ticket.otherPlace!),
@@ -6423,6 +6491,32 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
           ),
         ],
 
+        const SizedBox(height: 12),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _buildLabeledGridItem(
+                l10n.creatorDueDate,
+                widget.ticket.creatorDueDate != null
+                    ? DateFormat('dd/MM/yyyy').format(widget.ticket.creatorDueDate!)
+                    : l10n.notSet,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: widget.currentUser.id == widget.ticket.assignedTo
+                  ? _buildEditableAssigneeDueDate(l10n)
+                  : _buildLabeledGridItem(
+                      l10n.assigneeDueDate,
+                      widget.ticket.assigneeDueDate != null
+                          ? DateFormat('dd/MM/yyyy').format(widget.ticket.assigneeDueDate!)
+                          : l10n.notSet,
+                    ),
+            ),
+          ],
+        ),
+
         if (widget.ticket.location?.isNotEmpty == true) ...[
           const SizedBox(height: 12),
           Row(
@@ -6515,6 +6609,67 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
           ),
         ),
       ],
+    );
+  }
+
+  // The assigned admin can set/update their own expected due date directly
+  // from the ticket info grid — separate from the creator's due date above.
+  Widget _buildEditableAssigneeDueDate(AppLocalizations l10n) {
+    final hasDate = widget.ticket.assigneeDueDate != null;
+    return InkWell(
+      onTap: () async {
+        final now = DateTime.now();
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: widget.ticket.assigneeDueDate ?? now.add(const Duration(days: 3)),
+          firstDate: DateTime(now.year - 1),
+          lastDate: DateTime(now.year + 5),
+        );
+        if (picked == null) return;
+        try {
+          await supabase
+              .from('tickets')
+              .update({'assignee_due_date': picked.toIso8601String()}).eq('id', widget.ticket.id);
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('${l10n.error}: $e')),
+            );
+          }
+        }
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            l10n.assigneeDueDate,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey[600],
+            ),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Flexible(
+                child: Text(
+                  hasDate
+                      ? DateFormat('dd/MM/yyyy').format(widget.ticket.assigneeDueDate!)
+                      : l10n.setYourDueDate,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: hasDate ? Colors.black87 : AppColors.primary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(Icons.edit_calendar_outlined, size: 14, color: AppColors.primary),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -11213,6 +11368,7 @@ class _CreateTicketDialogState extends State<CreateTicketDialog> {
   String? _selectedModelNumberId;
   String? _selectedNatureOfWorkId;
   PriorityType _selectedPriority = PriorityType.medium;
+  DateTime? _dueDate;
 
   List<DepartmentModel> _departments = [];
   List<PlaceModel> _places = [];
@@ -11538,6 +11694,13 @@ class _CreateTicketDialogState extends State<CreateTicketDialog> {
       return;
     }
 
+    if (_dueDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${l10n.pleaseFillAllRequired} - ${l10n.expectedDueDate}')),
+      );
+      return;
+    }
+
     final noProblemTitleGiven = _useOtherProblemTitle
         ? _otherProblemTitleController.text.trim().isEmpty
         : _selectedProblemTitleId == null;
@@ -11578,6 +11741,7 @@ class _CreateTicketDialogState extends State<CreateTicketDialog> {
         'custom_model_number': null,
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
+        'creator_due_date': _dueDate!.toIso8601String(),
       };
 
       final success = await TicketService.createTicket(ticketData);
@@ -12238,6 +12402,15 @@ class _CreateTicketDialogState extends State<CreateTicketDialog> {
                 setState(() => _selectedPriority = value);
               }
             },
+          ),
+          const SizedBox(height: 16),
+
+          // Expected due date (required — the creator must set one)
+          ExpectedDueDateField(
+            label: l10n.expectedDueDate,
+            value: _dueDate,
+            isRequired: true,
+            onChanged: (value) => setState(() => _dueDate = value),
           ),
           const SizedBox(height: 16),
 
@@ -13026,6 +13199,7 @@ class _ITSolutionTicketScreenState extends State<ITSolutionTicketScreen> {
   final _phoneController = TextEditingController();
 
   PriorityType _selectedPriority = PriorityType.medium;
+  DateTime? _dueDate;
   List<PlatformFile> _selectedFiles = [];
   final ImagePicker _imagePicker = ImagePicker();
   bool _isLoading = false;
@@ -13086,9 +13260,13 @@ class _ITSolutionTicketScreenState extends State<ITSolutionTicketScreen> {
                 highPriorityController: _highPriorityController,
                 phoneController: _phoneController,
                 selectedPriority: _selectedPriority,
+                selectedDueDate: _dueDate,
                 selectedFiles: _selectedFiles,
                 onPriorityChanged: (value) {
                   setState(() => _selectedPriority = value);
+                },
+                onDueDateChanged: (value) {
+                  setState(() => _dueDate = value);
                 },
                 onPickImages: _pickImages,
                 onPickFiles: _pickFiles,
@@ -13365,6 +13543,16 @@ class _ITSolutionTicketScreenState extends State<ITSolutionTicketScreen> {
       return;
     }
 
+    if (_dueDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${l10n.pleaseFillAllRequired} - ${l10n.expectedDueDate}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -13384,6 +13572,7 @@ class _ITSolutionTicketScreenState extends State<ITSolutionTicketScreen> {
         'other_model_number': 'Other',
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
+        'creator_due_date': _dueDate!.toIso8601String(),
       };
 
       print('📋 Creating IT ticket with data: $ticketData');
@@ -13478,8 +13667,10 @@ class ITSolutionTicketDialogContent extends StatelessWidget {
   final TextEditingController highPriorityController;
   final TextEditingController phoneController;
   final PriorityType selectedPriority;
+  final DateTime? selectedDueDate;
   final List<PlatformFile> selectedFiles;
   final Function(PriorityType) onPriorityChanged;
+  final ValueChanged<DateTime?> onDueDateChanged;
   final VoidCallback onPickImages;
   final VoidCallback onPickFiles;
   final Function(int) onRemoveFile;
@@ -13491,8 +13682,10 @@ class ITSolutionTicketDialogContent extends StatelessWidget {
     required this.highPriorityController,
     required this.phoneController,
     required this.selectedPriority,
+    required this.selectedDueDate,
     required this.selectedFiles,
     required this.onPriorityChanged,
+    required this.onDueDateChanged,
     required this.onPickImages,
     required this.onPickFiles,
     required this.onRemoveFile,
@@ -13594,6 +13787,15 @@ class ITSolutionTicketDialogContent extends StatelessWidget {
               onPriorityChanged(value);
             }
           },
+        ),
+        const SizedBox(height: 10),
+
+        // Expected due date (required — the creator must set one)
+        ExpectedDueDateField(
+          label: l10n.expectedDueDate,
+          value: selectedDueDate,
+          isRequired: true,
+          onChanged: onDueDateChanged,
         ),
         const SizedBox(height: 10),
 
@@ -13893,6 +14095,7 @@ class _PlacesMaintenanceTicketScreenState
   String? _selectedProblemTitleId;
   String? _selectedModelNumberId;
   PriorityType _selectedPriority = PriorityType.medium;
+  DateTime? _dueDate;
 
   List<DepartmentModel> _departments = [];
   List<PlaceModel> _places = [];
@@ -14049,6 +14252,7 @@ class _PlacesMaintenanceTicketScreenState
                 selectedProblemTitleId: _selectedProblemTitleId,
                 selectedModelNumberId: _selectedModelNumberId,
                 selectedPriority: _selectedPriority,
+                selectedDueDate: _dueDate,
                 departments: _departments,
                 places: _places,
                 natureOfWorkList: _natureOfWorkList,
@@ -14088,6 +14292,9 @@ class _PlacesMaintenanceTicketScreenState
                 },
                 onPriorityChanged: (value) {
                   setState(() => _selectedPriority = value);
+                },
+                onDueDateChanged: (value) {
+                  setState(() => _dueDate = value);
                 },
                 onUseCustomProblemChanged: (value) {
                   setState(() {
@@ -14405,6 +14612,16 @@ class _PlacesMaintenanceTicketScreenState
       return;
     }
 
+    if (_dueDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${l10n.pleaseFillAllRequired} - ${l10n.expectedDueDate}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -14447,6 +14664,7 @@ class _PlacesMaintenanceTicketScreenState
             : (_useCustomModel ? _customModelController.text.trim() : null),
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
+        'creator_due_date': _dueDate!.toIso8601String(),
       };
 
       print('📋 Creating place ticket with data: $ticketData');
@@ -14552,6 +14770,7 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
   final String? selectedProblemTitleId;
   final String? selectedModelNumberId;
   final PriorityType selectedPriority;
+  final DateTime? selectedDueDate;
   final List<DepartmentModel> departments;
   final List<PlaceModel> places;
   final List<NatureOfWorkModel> natureOfWorkList;
@@ -14567,6 +14786,7 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
   final Function(String?) onProblemTitleChanged;
   final Function(String?) onModelNumberChanged;
   final Function(PriorityType) onPriorityChanged;
+  final ValueChanged<DateTime?> onDueDateChanged;
   final Function(bool) onUseCustomProblemChanged;
   final Function(bool) onUseCustomModelChanged;
   final VoidCallback onPickImages;
@@ -14588,6 +14808,7 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
     required this.selectedProblemTitleId,
     required this.selectedModelNumberId,
     required this.selectedPriority,
+    required this.selectedDueDate,
     required this.departments,
     required this.places,
     required this.natureOfWorkList,
@@ -14603,6 +14824,7 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
     required this.onProblemTitleChanged,
     required this.onModelNumberChanged,
     required this.onPriorityChanged,
+    required this.onDueDateChanged,
     required this.onUseCustomProblemChanged,
     required this.onUseCustomModelChanged,
     required this.onPickImages,
@@ -14910,6 +15132,15 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
               onPriorityChanged(value);
             }
           },
+        ),
+        const SizedBox(height: 10),
+
+        // Expected due date (required — the creator must set one)
+        ExpectedDueDateField(
+          label: l10n.expectedDueDate,
+          value: selectedDueDate,
+          isRequired: true,
+          onChanged: onDueDateChanged,
         ),
         const SizedBox(height: 10),
 
@@ -15273,6 +15504,7 @@ class _IndividualsMaintenanceTicketScreenState
   String? _selectedProblemTitleId;
   String? _selectedModelNumberId;
   PriorityType _selectedPriority = PriorityType.medium;
+  DateTime? _dueDate;
 
   List<DepartmentModel> _departments = [];
   List<NatureOfWorkModel> _natureOfWorkList = [];
@@ -15400,6 +15632,7 @@ class _IndividualsMaintenanceTicketScreenState
                 selectedProblemTitleId: _selectedProblemTitleId,
                 selectedModelNumberId: _selectedModelNumberId,
                 selectedPriority: _selectedPriority,
+                selectedDueDate: _dueDate,
                 departments: _departments,
                 natureOfWorkList: _natureOfWorkList,
                 problemTitles: _problemTitles,
@@ -15434,6 +15667,9 @@ class _IndividualsMaintenanceTicketScreenState
                 },
                 onPriorityChanged: (value) {
                   setState(() => _selectedPriority = value);
+                },
+                onDueDateChanged: (value) {
+                  setState(() => _dueDate = value);
                 },
                 onUseCustomProblemChanged: (value) {
                   setState(() {
@@ -15741,6 +15977,16 @@ class _IndividualsMaintenanceTicketScreenState
       return;
     }
 
+    if (_dueDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${l10n.pleaseFillAllRequired} - ${l10n.expectedDueDate}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -15783,6 +16029,7 @@ class _IndividualsMaintenanceTicketScreenState
             : (_useCustomModel ? _customModelController.text.trim() : null),
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
+        'creator_due_date': _dueDate!.toIso8601String(),
       };
 
       print('📋 Creating individuals ticket with data: $ticketData');
@@ -15887,6 +16134,7 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
   final String? selectedProblemTitleId;
   final String? selectedModelNumberId;
   final PriorityType selectedPriority;
+  final DateTime? selectedDueDate;
   final List<DepartmentModel> departments;
   final List<NatureOfWorkModel> natureOfWorkList;
   final List<Map<String, dynamic>> problemTitles;
@@ -15899,6 +16147,7 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
   final Function(String?) onProblemTitleChanged;
   final Function(String?) onModelNumberChanged;
   final Function(PriorityType) onPriorityChanged;
+  final ValueChanged<DateTime?> onDueDateChanged;
   final Function(bool) onUseCustomProblemChanged;
   final Function(bool) onUseCustomModelChanged;
   final VoidCallback onPickImages;
@@ -15919,6 +16168,7 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
     required this.selectedProblemTitleId,
     required this.selectedModelNumberId,
     required this.selectedPriority,
+    required this.selectedDueDate,
     required this.departments,
     required this.natureOfWorkList,
     required this.problemTitles,
@@ -15931,6 +16181,7 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
     required this.onProblemTitleChanged,
     required this.onModelNumberChanged,
     required this.onPriorityChanged,
+    required this.onDueDateChanged,
     required this.onUseCustomProblemChanged,
     required this.onUseCustomModelChanged,
     required this.onPickImages,
@@ -16204,6 +16455,15 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
               onPriorityChanged(value);
             }
           },
+        ),
+        const SizedBox(height: 10),
+
+        // Expected due date (required — the creator must set one)
+        ExpectedDueDateField(
+          label: l10n.expectedDueDate,
+          value: selectedDueDate,
+          isRequired: true,
+          onChanged: onDueDateChanged,
         ),
         const SizedBox(height: 10),
 
@@ -16563,6 +16823,7 @@ class _RequestsTicketScreenState extends State<RequestsTicketScreen> {
   String? _selectedNatureOfWorkId;
   String? _selectedModelNumberId;
   PriorityType _selectedPriority = PriorityType.medium;
+  DateTime? _dueDate;
 
   List<DepartmentModel> _departments = [];
   List<NatureOfWorkModel> _natureOfWorkList = [];
@@ -16671,6 +16932,7 @@ class _RequestsTicketScreenState extends State<RequestsTicketScreen> {
                 selectedNatureOfWorkId: _selectedNatureOfWorkId,
                 selectedModelNumberId: _selectedModelNumberId,
                 selectedPriority: _selectedPriority,
+                selectedDueDate: _dueDate,
                 departments: _departments,
                 natureOfWorkList: _natureOfWorkList,
                 parts: _parts,
@@ -16697,6 +16959,9 @@ class _RequestsTicketScreenState extends State<RequestsTicketScreen> {
                 },
                 onPriorityChanged: (value) {
                   setState(() => _selectedPriority = value);
+                },
+                onDueDateChanged: (value) {
+                  setState(() => _dueDate = value);
                 },
                 onUseCustomModelChanged: (value) {
                   setState(() {
@@ -16994,6 +17259,16 @@ class _RequestsTicketScreenState extends State<RequestsTicketScreen> {
       return;
     }
 
+    if (_dueDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${l10n.pleaseFillAllRequired} - ${l10n.expectedDueDate}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -17028,6 +17303,7 @@ class _RequestsTicketScreenState extends State<RequestsTicketScreen> {
 
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
+        'creator_due_date': _dueDate!.toIso8601String(),
       };
 
       print('📋 Creating request ticket with data: $ticketData');
@@ -17129,6 +17405,7 @@ class RequestsTicketContent extends StatelessWidget {
   final String? selectedNatureOfWorkId;
   final String? selectedModelNumberId;
   final PriorityType selectedPriority;
+  final DateTime? selectedDueDate;
   final List<DepartmentModel> departments;
   final List<NatureOfWorkModel> natureOfWorkList;
   final List<Map<String, dynamic>> parts;
@@ -17138,6 +17415,7 @@ class RequestsTicketContent extends StatelessWidget {
   final Function(String?) onNatureOfWorkChanged;
   final Function(String?) onModelNumberChanged;
   final Function(PriorityType) onPriorityChanged;
+  final ValueChanged<DateTime?> onDueDateChanged;
   final Function(bool) onUseCustomModelChanged;
   final VoidCallback onPickImages;
   final VoidCallback onPickFiles;
@@ -17155,6 +17433,7 @@ class RequestsTicketContent extends StatelessWidget {
     required this.selectedNatureOfWorkId,
     required this.selectedModelNumberId,
     required this.selectedPriority,
+    required this.selectedDueDate,
     required this.departments,
     required this.natureOfWorkList,
     required this.parts,
@@ -17164,6 +17443,7 @@ class RequestsTicketContent extends StatelessWidget {
     required this.onNatureOfWorkChanged,
     required this.onModelNumberChanged,
     required this.onPriorityChanged,
+    required this.onDueDateChanged,
     required this.onUseCustomModelChanged,
     required this.onPickImages,
     required this.onPickFiles,
@@ -17358,6 +17638,15 @@ class RequestsTicketContent extends StatelessWidget {
               onPriorityChanged(value);
             }
           },
+        ),
+        const SizedBox(height: 10),
+
+        // Expected due date (required — the creator must set one)
+        ExpectedDueDateField(
+          label: l10n.expectedDueDate,
+          value: selectedDueDate,
+          isRequired: true,
+          onChanged: onDueDateChanged,
         ),
         const SizedBox(height: 10),
 
@@ -17724,6 +18013,7 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
   String? _selectedModelNumberId;
   String? _selectedNatureOfWorkId;
   PriorityType _selectedPriority = PriorityType.medium;
+  DateTime? _dueDate;
 
   List<DepartmentModel> _departments = [];
   List<PlaceModel> _places = [];
@@ -18041,6 +18331,13 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
       return;
     }
 
+    if (_dueDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${l10n.pleaseFillAllRequired} - ${l10n.expectedDueDate}')),
+      );
+      return;
+    }
+
     final noProblemTitleGiven = _useOtherProblemTitle
         ? _otherProblemTitleController.text.trim().isEmpty
         : _selectedProblemTitleId == null;
@@ -18081,6 +18378,7 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
         'custom_model_number': null,
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
+        'creator_due_date': _dueDate!.toIso8601String(),
       };
 
       final success = await TicketService.createTicket(ticketData);
@@ -18777,6 +19075,15 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
                   ),
                   const SizedBox(height: 16),
 
+                  // Expected due date (required — the creator must set one)
+                  ExpectedDueDateField(
+                    label: l10n.expectedDueDate,
+                    value: _dueDate,
+                    isRequired: true,
+                    onChanged: (value) => setState(() => _dueDate = value),
+                  ),
+                  const SizedBox(height: 16),
+
                   // High Priority Explanation
                   if (_selectedPriority == PriorityType.high ||
                       _selectedPriority == PriorityType.urgent) ...[
@@ -19047,6 +19354,7 @@ class _CreateSubticketDialogState extends State<CreateSubticketDialog> {
   String? _selectedDepartmentId;
   String? _selectedNatureOfWorkId;
   PriorityType _selectedPriority = PriorityType.medium;
+  DateTime? _dueDate;
 
   List<DepartmentModel> _departments = [];
   List<NatureOfWorkModel> _natureOfWorkList = [];
@@ -19256,6 +19564,13 @@ class _CreateSubticketDialogState extends State<CreateSubticketDialog> {
       return;
     }
 
+    if (_dueDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${l10n.pleaseFillAllRequired} - ${l10n.expectedDueDate}')),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -19277,6 +19592,7 @@ class _CreateSubticketDialogState extends State<CreateSubticketDialog> {
         'other_model_number': 'Other',
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
+        'creator_due_date': _dueDate!.toIso8601String(),
       };
 
       final success = await TicketService.createTicket(ticketData);
@@ -19386,6 +19702,7 @@ class _CreateSubticketDialogState extends State<CreateSubticketDialog> {
         selectedDepartmentId: _selectedDepartmentId,
         selectedNatureOfWorkId: _selectedNatureOfWorkId,
         selectedPriority: _selectedPriority,
+        selectedDueDate: _dueDate,
         departments: _departments,
         natureOfWorkList: _natureOfWorkList,
         selectedFiles: _selectedFiles,
@@ -19405,6 +19722,9 @@ class _CreateSubticketDialogState extends State<CreateSubticketDialog> {
         },
         onPriorityChanged: (value) {
           setState(() => _selectedPriority = value);
+        },
+        onDueDateChanged: (value) {
+          setState(() => _dueDate = value);
         },
         onPickImages: _pickImages,
         onPickFiles: _pickFiles,
@@ -19492,6 +19812,7 @@ class CreateSubticketContent extends StatelessWidget {
   final String? selectedDepartmentId;
   final String? selectedNatureOfWorkId;
   final PriorityType selectedPriority;
+  final DateTime? selectedDueDate;
   final List<DepartmentModel> departments;
   final List<NatureOfWorkModel> natureOfWorkList;
   final List<PlatformFile> selectedFiles;
@@ -19499,6 +19820,7 @@ class CreateSubticketContent extends StatelessWidget {
   final Function(String?) onDepartmentChanged;
   final Function(String?) onNatureOfWorkChanged;
   final Function(PriorityType) onPriorityChanged;
+  final ValueChanged<DateTime?> onDueDateChanged;
   final VoidCallback onPickImages;
   final VoidCallback onPickFiles;
   final Function(int) onRemoveFile;
@@ -19512,6 +19834,7 @@ class CreateSubticketContent extends StatelessWidget {
     required this.selectedDepartmentId,
     required this.selectedNatureOfWorkId,
     required this.selectedPriority,
+    required this.selectedDueDate,
     required this.departments,
     required this.natureOfWorkList,
     required this.selectedFiles,
@@ -19519,6 +19842,7 @@ class CreateSubticketContent extends StatelessWidget {
     required this.onDepartmentChanged,
     required this.onNatureOfWorkChanged,
     required this.onPriorityChanged,
+    required this.onDueDateChanged,
     required this.onPickImages,
     required this.onPickFiles,
     required this.onRemoveFile,
@@ -19729,6 +20053,15 @@ class CreateSubticketContent extends StatelessWidget {
               onPriorityChanged(value);
             }
           },
+        ),
+        const SizedBox(height: 10),
+
+        // Expected due date (required — the creator must set one)
+        ExpectedDueDateField(
+          label: l10n.expectedDueDate,
+          value: selectedDueDate,
+          isRequired: true,
+          onChanged: onDueDateChanged,
         ),
         const SizedBox(height: 10),
 
@@ -20025,6 +20358,7 @@ class _CreateSubticketScreenState extends State<CreateSubticketScreen> {
   String? _selectedDepartmentId;
   String? _selectedNatureOfWorkId;
   PriorityType _selectedPriority = PriorityType.medium;
+  DateTime? _dueDate;
 
   List<DepartmentModel> _departments = [];
   List<NatureOfWorkModel> _natureOfWorkList = [];
@@ -20114,6 +20448,7 @@ class _CreateSubticketScreenState extends State<CreateSubticketScreen> {
                 selectedDepartmentId: _selectedDepartmentId,
                 selectedNatureOfWorkId: _selectedNatureOfWorkId,
                 selectedPriority: _selectedPriority,
+                selectedDueDate: _dueDate,
                 departments: _departments,
                 natureOfWorkList: _natureOfWorkList,
                 selectedFiles: _selectedFiles,
@@ -20133,6 +20468,9 @@ class _CreateSubticketScreenState extends State<CreateSubticketScreen> {
                 },
                 onPriorityChanged: (value) {
                   setState(() => _selectedPriority = value);
+                },
+                onDueDateChanged: (value) {
+                  setState(() => _dueDate = value);
                 },
                 onPickImages: _pickImages,
                 onPickFiles: _pickFiles,
@@ -20308,6 +20646,13 @@ class _CreateSubticketScreenState extends State<CreateSubticketScreen> {
       return;
     }
 
+    if (_dueDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${l10n.pleaseFillAllRequired} - ${l10n.expectedDueDate}')),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -20329,6 +20674,7 @@ class _CreateSubticketScreenState extends State<CreateSubticketScreen> {
         'other_model_number': 'Other',
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
+        'creator_due_date': _dueDate!.toIso8601String(),
       };
 
       final success = await TicketService.createTicket(ticketData);

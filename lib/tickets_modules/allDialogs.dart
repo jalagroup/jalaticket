@@ -38,6 +38,7 @@ class _IndividualsMaintenanceTicketDialogState
   String? _selectedProblemTitleId;
   String? _selectedModelNumberId;
   PriorityType _selectedPriority = PriorityType.medium;
+  DateTime? _dueDate;
   List<DepartmentModel> _departments = [];
   List<NatureOfWorkModel> _natureOfWorkList = [];
   List<Map<String, dynamic>> _problemTitles = [];
@@ -270,6 +271,13 @@ class _IndividualsMaintenanceTicketDialogState
       return;
     }
 
+    if (_dueDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${l10n.pleaseFillAllRequired} - ${l10n.expectedDueDate}')),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -305,6 +313,7 @@ class _IndividualsMaintenanceTicketDialogState
             _useCustomModel ? _customModelController.text.trim() : null,
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
+        'creator_due_date': _dueDate!.toIso8601String(),
       };
 
       final success = await TicketService.createTicket(ticketData);
@@ -400,6 +409,7 @@ class _IndividualsMaintenanceTicketDialogState
         selectedProblemTitleId: _selectedProblemTitleId,
         selectedModelNumberId: _selectedModelNumberId,
         selectedPriority: _selectedPriority,
+        selectedDueDate: _dueDate,
         departments: _departments,
         natureOfWorkList: _natureOfWorkList,
         problemTitles: _problemTitles,
@@ -434,6 +444,9 @@ class _IndividualsMaintenanceTicketDialogState
         },
         onPriorityChanged: (value) {
           setState(() => _selectedPriority = value);
+        },
+        onDueDateChanged: (value) {
+          setState(() => _dueDate = value);
         },
         onUseCustomProblemChanged: (value) {
           setState(() {
@@ -555,6 +568,7 @@ class _ITSolutionTicketDialogState extends State<ITSolutionTicketDialog> {
   final _phoneController = TextEditingController();
 
   PriorityType _selectedPriority = PriorityType.medium;
+  DateTime? _dueDate;
   List<PlatformFile> _selectedFiles = [];
   final ImagePicker _imagePicker = ImagePicker();
   bool _isLoading = false;
@@ -724,6 +738,13 @@ class _ITSolutionTicketDialogState extends State<ITSolutionTicketDialog> {
       return;
     }
 
+    if (_dueDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${l10n.pleaseFillAllRequired} - ${l10n.expectedDueDate}')),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -743,6 +764,7 @@ class _ITSolutionTicketDialogState extends State<ITSolutionTicketDialog> {
         'other_model_number': 'Other',
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
+        'creator_due_date': _dueDate!.toIso8601String(),
       };
 
       final success = await TicketService.createTicket(ticketData);
@@ -832,9 +854,13 @@ class _ITSolutionTicketDialogState extends State<ITSolutionTicketDialog> {
         highPriorityController: _highPriorityController,
         phoneController: _phoneController,
         selectedPriority: _selectedPriority,
+        selectedDueDate: _dueDate,
         selectedFiles: _selectedFiles,
         onPriorityChanged: (value) {
           setState(() => _selectedPriority = value);
+        },
+        onDueDateChanged: (value) {
+          setState(() => _dueDate = value);
         },
         onPickImages: _pickImages,
         onPickFiles: _pickFiles,
@@ -940,6 +966,7 @@ class _PlacesMaintenanceTicketDialogState
   String? _selectedProblemTitleId;
   String? _selectedModelNumberId;
   PriorityType _selectedPriority = PriorityType.medium;
+  DateTime? _dueDate;
   List<DepartmentModel> _departments = [];
   List<PlaceModel> _places = [];
   List<NatureOfWorkModel> _natureOfWorkList = [];
@@ -1245,6 +1272,16 @@ class _PlacesMaintenanceTicketDialogState
       return;
     }
 
+    if (_dueDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${l10n.pleaseFillAllRequired} - ${l10n.expectedDueDate}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -1287,6 +1324,7 @@ class _PlacesMaintenanceTicketDialogState
             : (_useCustomModel ? _customModelController.text.trim() : null),
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
+        'creator_due_date': _dueDate!.toIso8601String(),
       };
 
       print('📋 Creating place ticket with data: $ticketData');
@@ -1391,6 +1429,7 @@ class _PlacesMaintenanceTicketDialogState
         selectedProblemTitleId: _selectedProblemTitleId,
         selectedModelNumberId: _selectedModelNumberId,
         selectedPriority: _selectedPriority,
+        selectedDueDate: _dueDate,
         departments: _departments,
         places: _places,
         natureOfWorkList: _natureOfWorkList,
@@ -1430,6 +1469,9 @@ class _PlacesMaintenanceTicketDialogState
         },
         onPriorityChanged: (value) {
           setState(() => _selectedPriority = value);
+        },
+        onDueDateChanged: (value) {
+          setState(() => _dueDate = value);
         },
         onUseCustomProblemChanged: (value) {
           setState(() {
@@ -1553,6 +1595,7 @@ class _RequestsTicketDialogState extends State<RequestsTicketDialog> {
   String? _selectedNatureOfWorkId;
   String? _selectedModelNumberId;
   PriorityType _selectedPriority = PriorityType.medium;
+  DateTime? _dueDate;
   List<DepartmentModel> _departments = [];
   List<NatureOfWorkModel> _natureOfWorkList = [];
   List<Map<String, dynamic>> _parts = [];
@@ -1777,6 +1820,13 @@ class _RequestsTicketDialogState extends State<RequestsTicketDialog> {
       return;
     }
 
+    if (_dueDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${l10n.pleaseFillAllRequired} - ${l10n.expectedDueDate}')),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -1811,6 +1861,7 @@ class _RequestsTicketDialogState extends State<RequestsTicketDialog> {
 
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
+        'creator_due_date': _dueDate!.toIso8601String(),
       };
 
       print('Creating request ticket with data: $ticketData');
@@ -1901,6 +1952,7 @@ class _RequestsTicketDialogState extends State<RequestsTicketDialog> {
         selectedNatureOfWorkId: _selectedNatureOfWorkId,
         selectedModelNumberId: _selectedModelNumberId,
         selectedPriority: _selectedPriority,
+        selectedDueDate: _dueDate,
         departments: _departments,
         natureOfWorkList: _natureOfWorkList,
         parts: _parts,
@@ -1927,6 +1979,9 @@ class _RequestsTicketDialogState extends State<RequestsTicketDialog> {
         },
         onPriorityChanged: (value) {
           setState(() => _selectedPriority = value);
+        },
+        onDueDateChanged: (value) {
+          setState(() => _dueDate = value);
         },
         onUseCustomModelChanged: (value) {
           setState(() {

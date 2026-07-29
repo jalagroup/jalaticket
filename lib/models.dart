@@ -532,6 +532,8 @@ class TicketModel {
   final String? assignedTo;
   final String? parentTicketId;
   final bool underSupervision; // NEW FIELD
+  final DateTime? creatorDueDate;
+  final DateTime? assigneeDueDate;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -561,6 +563,8 @@ class TicketModel {
     this.assignedTo,
     this.parentTicketId,
     this.underSupervision = false, // NEW FIELD WITH DEFAULT
+    this.creatorDueDate,
+    this.assigneeDueDate,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -593,6 +597,12 @@ class TicketModel {
       assignedTo: json['assigned_to'],
       parentTicketId: json['parent_ticket_id'],
       underSupervision: json['under_supervision'] ?? false, // NEW FIELD
+      creatorDueDate: json['creator_due_date'] != null
+          ? DateTime.parse(json['creator_due_date'])
+          : null,
+      assigneeDueDate: json['assignee_due_date'] != null
+          ? DateTime.parse(json['assignee_due_date'])
+          : null,
       createdAt: DateTime.parse(json['created_at']),
       updatedAt: DateTime.parse(json['updated_at']),
     );

@@ -1158,6 +1158,11 @@ class AppLocalizations {
   String get reminders => translate('reminders');
   String get customFields => translate('custom_fields');
   String get emailTemplates => translate('email_templates');
+  String get expectedDueDate => translate('expected_due_date');
+  String get creatorDueDate => translate('creator_due_date');
+  String get assigneeDueDate => translate('assignee_due_date');
+  String get setYourDueDate => translate('set_your_due_date');
+  String get notSet => translate('not_set');
   String get reports => translate('reports');
   String get invalidTab => translate('invalid_tab');
   String get noManagementOptionsAvailable =>
@@ -2256,6 +2261,11 @@ const Map<String, String> _enValues = {
   'reminders': 'Reminders',
   'custom_fields': 'Custom Fields',
   'email_templates': 'Email Templates',
+  'expected_due_date': 'Expected Due Date',
+  'creator_due_date': 'Expected Due Date (by creator)',
+  'assignee_due_date': 'Expected Due Date (by assignee)',
+  'set_your_due_date': 'Set your expected due date',
+  'not_set': 'Not set',
   'reports': 'Reports',
   'invalid_tab': 'Invalid tab',
   'no_management_options_available': 'No management options available',
@@ -3365,6 +3375,11 @@ const Map<String, String> _arValues = {
   'reminders': 'التذكيرات',
   'custom_fields': 'الحقول المخصصة',
   'email_templates': 'قوالب البريد الإلكتروني',
+  'expected_due_date': 'تاريخ الاستحقاق المتوقع',
+  'creator_due_date': 'تاريخ الاستحقاق المتوقع (من المنشئ)',
+  'assignee_due_date': 'تاريخ الاستحقاق المتوقع (من المسؤول)',
+  'set_your_due_date': 'حدد تاريخ الاستحقاق المتوقع الخاص بك',
+  'not_set': 'غير محدد',
   'reports': 'التقارير',
   'invalid_tab': 'علامة تبويب غير صالحة',
   'no_management_options_available': 'لا توجد خيارات إدارة متاحة',
