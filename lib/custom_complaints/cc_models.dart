@@ -1185,12 +1185,20 @@ class CcScreenConfig {
   String backgroundColor;
   String? backgroundImageUrl;
   List<CcCanvasItem> items;
+  // 'visual' (default, the drag-drop canvas) or 'html' (raw HTML source
+  // rendered directly, for admins who want full control over the layout).
+  String mode;
+  String htmlSource;
 
   CcScreenConfig({
     this.backgroundColor = '#FFFFFF',
     this.backgroundImageUrl,
     List<CcCanvasItem>? items,
+    this.mode = 'visual',
+    this.htmlSource = '',
   }) : items = items ?? [];
+
+  bool get isHtmlMode => mode == 'html';
 
   factory CcScreenConfig.fromJson(Map<String, dynamic>? j) {
     if (j == null) return CcScreenConfig();
@@ -1200,6 +1208,8 @@ class CcScreenConfig {
       items: (j['items'] as List? ?? [])
           .map((i) => CcCanvasItem.fromJson(i as Map<String, dynamic>))
           .toList(),
+      mode: j['mode'] as String? ?? 'visual',
+      htmlSource: j['html_source'] as String? ?? '',
     );
   }
 
@@ -1207,5 +1217,7 @@ class CcScreenConfig {
         'background_color': backgroundColor,
         if (backgroundImageUrl != null) 'background_image_url': backgroundImageUrl,
         'items': items.map((i) => i.toJson()).toList(),
+        'mode': mode,
+        'html_source': htmlSource,
       };
 }

@@ -11,6 +11,7 @@ import 'cc_web_file_picker_stub.dart'
     if (dart.library.html) 'cc_web_file_picker_impl.dart';
 import '../main.dart' show AppColors, supabase;
 import '../models.dart' show UserModel;
+import '../widgets/html_iframe_preview.dart';
 import 'cc_models.dart';
 import 'cc_service.dart';
 import 'cc_screen_designer.dart' show ccIconCatalog;
@@ -862,6 +863,36 @@ class _ScreenStage extends StatelessWidget {
   Widget build(BuildContext context) {
     final isAr = Localizations.localeOf(context).languageCode == 'ar';
     final hasImage = (config.backgroundImageUrl ?? '').isNotEmpty;
+
+    if (config.isHtmlMode) {
+      return Scaffold(
+        backgroundColor: _hex(config.backgroundColor),
+        body: SafeArea(
+          child: Column(
+            children: [
+              Expanded(child: buildHtmlIframePreview(config.htmlSource)),
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: ElevatedButton(
+                  onPressed: onPrimary,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: themeColor,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: Text(
+                    isPrimaryStage ? (isAr ? 'ابدأ' : 'Start') : (isAr ? 'تم' : 'Done'),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: _hex(config.backgroundColor),
       body: Stack(

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'email_template_iframe.dart';
+import '../widgets/html_iframe_preview.dart';
 import 'email_template_models.dart';
 
 class EmailTemplatePreview extends StatelessWidget {

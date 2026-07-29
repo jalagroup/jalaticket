@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HardwareKeyboard, KeyDownEvent, LogicalKeyboardKey;
 import 'package:uuid/uuid.dart';
 import '../main.dart' show AppColors;
+import '../widgets/html_iframe_preview.dart';
 import 'cc_image_crop_screen.dart';
 import 'cc_models.dart';
 import 'cc_service.dart';
@@ -100,6 +101,7 @@ class _CcScreenDesignerState extends State<CcScreenDesigner> {
   int _leftTab = 0;
   CcCanvasItem? _clipboard;
   late final FocusNode _focusNode;
+  late final TextEditingController _htmlController;
 
   @override
   void initState() {
@@ -113,11 +115,17 @@ class _CcScreenDesignerState extends State<CcScreenDesigner> {
         if (mounted) _applyDefaultTemplate();
       });
     }
+    _htmlController = TextEditingController(text: _config.htmlSource);
+    _htmlController.addListener(() {
+      _config.htmlSource = _htmlController.text;
+      _isDirty = true;
+    });
   }
 
   @override
   void dispose() {
     _focusNode.dispose();
+    _htmlController.dispose();
     super.dispose();
   }
 
@@ -452,6 +460,15 @@ class _CcScreenDesignerState extends State<CcScreenDesigner> {
             onPressed: _handleBack,
           ),
           actions: [
+            _ModeSwitcher(
+              isHtml: _config.isHtmlMode,
+              isAr: isAr,
+              onChanged: (isHtml) => setState(() {
+                _config.mode = isHtml ? 'html' : 'visual';
+                _isDirty = true;
+              }),
+            ),
+            const SizedBox(width: 12),
             TextButton(
               onPressed: () {
                 setState(() => _isDirty = false);
@@ -465,7 +482,7 @@ class _CcScreenDesignerState extends State<CcScreenDesigner> {
             const SizedBox(width: 8),
           ],
         ),
-        body: Row(
+        body: _config.isHtmlMode ? _buildHtmlModeBody(isAr) : Row(
           children: [
             _LeftPanel(
               leftTab: _leftTab,
@@ -648,6 +665,58 @@ class _CcScreenDesignerState extends State<CcScreenDesigner> {
     );
   }
 
+  // HTML mode: a raw-code editor beside a live preview, mirroring the email
+  // template designer's visual/HTML split so admins who want full layout
+  // control aren't limited to the drag-drop canvas.
+  Widget _buildHtmlModeBody(bool isAr) {
+    return Row(
+      children: [
+        Expanded(
+          child: Container(
+            color: const Color(0xFF1E1E2E),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isAr ? 'كود HTML' : 'HTML source',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _htmlController,
+                    maxLines: null,
+                    expands: true,
+                    style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontSize: 13),
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: const Color(0xFF14141F),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                      hintText: '<div>...</div>',
+                      hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                      contentPadding: const EdgeInsets.all(12),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const VerticalDivider(width: 1),
+        Expanded(
+          child: Container(
+            color: Colors.white,
+            child: ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _htmlController,
+              builder: (context, value, _) => buildHtmlIframePreview(value.text),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   void _applyResize(CcCanvasItem item, _ResizeHandle handle, double dx, double dy) {
     const minW = 40.0;
     const minH = 20.0;
@@ -730,6 +799,63 @@ Color _hexToColor(String hex) {
   return Color(int.parse(h, radix: 16));
 }
 
+
+// ── Designer / HTML code mode switcher ────────────────────────
+
+class _ModeSwitcher extends StatelessWidget {
+  final bool isHtml;
+  final bool isAr;
+  final ValueChanged<bool> onChanged;
+  const _ModeSwitcher({required this.isHtml, required this.isAr, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      padding: const EdgeInsets.all(3),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _btn(isAr ? 'المصمم' : 'Designer', Icons.dashboard_customize_outlined, false),
+          _btn(isAr ? 'كود HTML' : 'HTML Code', Icons.code_rounded, true),
+        ],
+      ),
+    );
+  }
+
+  Widget _btn(String label, IconData icon, bool value) {
+    final selected = value == isHtml;
+    return InkWell(
+      onTap: () => onChanged(value),
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: selected ? AppColors.secondary : Colors.white),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: selected ? AppColors.secondary : Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 // ── Device switcher ───────────────────────────────────────────
 

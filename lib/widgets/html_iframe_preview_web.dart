@@ -22,7 +22,7 @@ class _HtmlIframePreviewState extends State<_HtmlIframePreview> {
   @override
   void initState() {
     super.initState();
-    _viewType = 'email-template-iframe-${identityHashCode(this)}';
+    _viewType = 'html-iframe-preview-${identityHashCode(this)}';
     ui_web.platformViewRegistry.registerViewFactory(_viewType, (int viewId) {
       final iframe = web.HTMLIFrameElement()
         ..setAttribute('style', 'width:100%;height:100%;border:none;display:block;background:#ffffff;')
