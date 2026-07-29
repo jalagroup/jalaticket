@@ -41,7 +41,7 @@ import 'package:jalasupport/ai_dashboard_onboarding.dart';
 import 'package:jalasupport/ai_dashboard_screen.dart';
 import 'package:jalasupport/custom_complaints/cc_home_screen.dart';
 import 'package:jalasupport/user_fields/user_field_service.dart';
-import 'package:flutter_web_plugins/flutter_web_plugins.dart' show usePathUrlStrategy;
+import 'package:jalasupport/url_strategy.dart';
 import 'package:go_router/go_router.dart';
 import 'package:jalasupport/app_router.dart';
 
@@ -76,7 +76,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   if (kIsWeb) {
-    usePathUrlStrategy();
+    configureUrlStrategy();
   }
 
   // Firebase init (required for FCM on web)
