@@ -355,6 +355,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   List<NavigationItem> _webNavItems = [];
   List<NavigationItem> _mobileNavItems = [];
+  final ScrollController _bottomNavScroll = ScrollController();
 
   // KPI tap — navigate to tickets with a pre-selected status tab
   String? _initialTicketStatus;
@@ -974,6 +975,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     _notificationCheckTimer?.cancel();
     _connectivitySubscription?.cancel();
     _localeChangeSubscription?.cancel(); // ✨ NEW: Cancel locale subscription
+    _bottomNavScroll.dispose();
     super.dispose();
   }
 
@@ -2811,16 +2813,21 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     }
   }
 
-  // ✨ UPDATED: Floating bottom navigation bar with chat badge
+  // ✨ UPDATED: Floating bottom navigation bar — shows every applicable tab
+  // directly (no "More" drawer, which never worked on real mobile builds
+  // since the app's drawer is only registered when kIsWeb). Overflow is
+  // handled the same way as the Management screen's tab strip: native
+  // horizontal drag/scroll PLUS click-to-page arrow buttons.
   Widget _buildFloatingBottomNavBar() {
     if (kIsWeb) return const SizedBox.shrink();
 
-    // Show only the 4 primary tabs + a "More" drawer button
-    // Indices: 0=Dashboard, 1=Tickets, 2=Chat, 3=Notifications
-    final primaryIndices = [0, 1, 2, 3];
-    final isAr = _locale.languageCode == 'ar';
-    final moreLabel = isAr ? 'المزيد' : 'More';
-    final moreActive = !primaryIndices.contains(_currentIndex);
+    final visibleIndices = List<int>.generate(_mobileNavItems.length, (i) => i)
+        .where((idx) {
+      final item = _mobileNavItems[idx];
+      if (item.icon == Icons.report_problem && !_hasComplaintPermission) return false;
+      if (item.icon == Icons.local_shipping_outlined && !_hasFleetAccess && !_hasMyVehicles) return false;
+      return true;
+    }).toList();
 
     return Container(
       margin: const EdgeInsets.fromLTRB(8, 0, 8, 20),
@@ -2839,55 +2846,75 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       ),
       child: Row(
         children: [
-          ...primaryIndices.map((idx) {
-            final item = _mobileNavItems[idx];
-            final isSelected = _currentIndex == idx;
-            int? badge;
-            if (idx == 2) badge = _unreadChatRoomsCount > 0 ? _unreadChatRoomsCount : null;
-            if (idx == 3) badge = _unreadCount > 0 ? _unreadCount : null;
-            return _buildBottomNavItem(
-              icon: item.icon,
-              label: _getMobileNavLabel(idx),
-              isSelected: isSelected,
-              badgeCount: badge,
-              onTap: () => setState(() { _currentIndex = idx; _isNotificationsOpen = false; }),
-            );
-          }),
-          // "More" button opens drawer
+          _bottomNavPagerButton(isNext: false),
           Expanded(
-            child: Builder(
-              builder: (ctx) => GestureDetector(
-                onTap: () => Scaffold.of(ctx).openDrawer(),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  decoration: BoxDecoration(
-                    color: moreActive ? AppColors.primary.withValues(alpha: 0.15) : Colors.transparent,
-                    borderRadius: BorderRadius.circular(50),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.grid_view_rounded,
-                          color: moreActive ? AppColors.primary : Colors.grey[600], size: 24),
-                      const SizedBox(height: 4),
-                      Text(
-                        moreLabel,
-                        style: TextStyle(
-                          fontSize: 9,
-                          fontWeight: moreActive ? FontWeight.bold : FontWeight.w500,
-                          color: moreActive ? AppColors.primary : Colors.grey[600],
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
+            child: SingleChildScrollView(
+              controller: _bottomNavScroll,
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              child: Row(
+                children: visibleIndices.map((idx) {
+                  final item = _mobileNavItems[idx];
+                  final isSelected = _currentIndex == idx;
+                  int? badge;
+                  if (idx == 2) badge = _unreadChatRoomsCount > 0 ? _unreadChatRoomsCount : null;
+                  if (idx == 3) badge = _unreadCount > 0 ? _unreadCount : null;
+                  return _buildBottomNavItem(
+                    icon: item.icon,
+                    label: _getMobileNavLabel(idx),
+                    isSelected: isSelected,
+                    badgeCount: badge,
+                    onTap: () => setState(() { _currentIndex = idx; _isNotificationsOpen = false; }),
+                  );
+                }).toList(),
               ),
             ),
           ),
+          _bottomNavPagerButton(isNext: true),
         ],
       ),
+    );
+  }
+
+  // Same scroll-safety guard as the Management screen's tab strip:
+  // hasClients only means a ScrollPosition is attached, not that it has
+  // finished computing scroll extents — hasContentDimensions is the real
+  // guard against a null-check failure in ScrollPosition.maxScrollExtent.
+  bool get _bottomNavScrollReady =>
+      _bottomNavScroll.hasClients && _bottomNavScroll.position.hasContentDimensions;
+
+  void _scrollBottomNav(double delta) {
+    if (!_bottomNavScrollReady) return;
+    final target = (_bottomNavScroll.offset + delta)
+        .clamp(0.0, _bottomNavScroll.position.maxScrollExtent);
+    _bottomNavScroll.animateTo(
+      target,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+  }
+
+  Widget _bottomNavPagerButton({required bool isNext}) {
+    return AnimatedBuilder(
+      animation: _bottomNavScroll,
+      builder: (context, _) {
+        final ready = _bottomNavScrollReady;
+        final atStart = !ready || _bottomNavScroll.offset <= 0;
+        final atEnd = !ready || _bottomNavScroll.offset >= _bottomNavScroll.position.maxScrollExtent;
+        final disabled = isNext ? atEnd : atStart;
+        return SizedBox(
+          width: 26,
+          height: 40,
+          child: IconButton(
+            padding: EdgeInsets.zero,
+            iconSize: 18,
+            splashRadius: 16,
+            icon: Icon(isNext ? Icons.chevron_right : Icons.chevron_left),
+            color: disabled ? Colors.grey[300] : AppColors.primary,
+            onPressed: disabled ? null : () => _scrollBottomNav(isNext ? 150 : -150),
+          ),
+        );
+      },
     );
   }
 
@@ -2898,7 +2925,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     required VoidCallback onTap,
     int? badgeCount,
   }) {
-    return Expanded(
+    return SizedBox(
+      width: 74,
       child: GestureDetector(
         onTap: onTap,
         child: Container(
