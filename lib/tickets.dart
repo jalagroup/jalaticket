@@ -1658,28 +1658,24 @@ class _TicketsScreenState extends State<TicketsScreen>
   }
 
   Future<void> _jumpToTicket(String ticketId, {String? targetStatus}) async {
-    // 1. Search every already-loaded tab first.
-    for (int i = 0; i < _statuses.length; i++) {
-      final tickets = _ticketsByStatus[_statuses[i]] ?? [];
-      if (tickets.any((t) => t.id == ticketId)) {
-        _tabController.animateTo(i);
-        await Future.delayed(const Duration(milliseconds: 300));
-        if (mounted && !_isDisposed) _highlightTicket(ticketId);
-        return;
-      }
-    }
-
-    // 2. Not in any loaded tab — fetch the ticket's actual current status
-    //    from Supabase so we always land on the correct tab.
-    String? actualStatus = targetStatus;
+    // Always resolve the ticket's TRUE current status from the server first.
+    // [targetStatus] is derived from a notification's type, which reflects
+    // the ticket's status at the moment the notification was created — by
+    // the time it's tapped the ticket may have moved on (e.g. a "new
+    // ticket" notification tapped after the ticket is already in progress),
+    // so it's only used as a fallback if this lookup fails. Searching
+    // already-cached tabs first (the old approach) risked landing on a tab
+    // whose cached list was stale rather than the ticket's real status.
+    String? actualStatus;
     try {
       final data = await supabase
           .from('tickets')
           .select('status')
           .eq('id', ticketId)
           .maybeSingle();
-      if (data != null) actualStatus = data['status'] as String?;
+      actualStatus = data?['status'] as String?;
     } catch (_) {}
+    actualStatus ??= targetStatus;
 
     if (!mounted || _isDisposed) return;
 
@@ -1689,22 +1685,26 @@ class _TicketsScreenState extends State<TicketsScreen>
         orElse: () => TicketStatus.pending,
       );
       final tabIndex = _statuses.indexOf(status);
-      if (tabIndex >= 0) _tabController.animateTo(tabIndex);
+      if (tabIndex >= 0 && tabIndex != _tabController.index) {
+        _tabController.animateTo(tabIndex);
+      }
     }
 
-    // Refresh the now-current tab so the ticket loads, then highlight.
+    final currentStatus = _statuses[_tabController.index];
+    if ((_ticketsByStatus[currentStatus] ?? []).any((t) => t.id == ticketId)) {
+      await Future.delayed(const Duration(milliseconds: 300));
+      if (mounted && !_isDisposed) _highlightTicket(ticketId);
+      return;
+    }
+
+    // Not cached yet for the resolved tab (e.g. it hasn't been visited
+    // before) — refresh it so the ticket loads, then highlight.
     _loadCurrentTabTickets();
     await Future.delayed(const Duration(milliseconds: 900));
     if (!mounted || _isDisposed) return;
 
-    for (int i = 0; i < _statuses.length; i++) {
-      final tickets = _ticketsByStatus[_statuses[i]] ?? [];
-      if (tickets.any((t) => t.id == ticketId)) {
-        _tabController.animateTo(i);
-        await Future.delayed(const Duration(milliseconds: 200));
-        if (mounted && !_isDisposed) _highlightTicket(ticketId);
-        return;
-      }
+    if ((_ticketsByStatus[currentStatus] ?? []).any((t) => t.id == ticketId)) {
+      await Future.delayed(const Duration(milliseconds: 200));
     }
     if (mounted && !_isDisposed) _highlightTicket(ticketId);
   }
