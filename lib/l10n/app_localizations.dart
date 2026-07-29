@@ -1163,6 +1163,9 @@ class AppLocalizations {
   String get assigneeDueDate => translate('assignee_due_date');
   String get setYourDueDate => translate('set_your_due_date');
   String get notSet => translate('not_set');
+  String get subticketTag => translate('subticket_tag');
+  String get showReplies => translate('show_replies');
+  String get hideReplies => translate('hide_replies');
   String get reports => translate('reports');
   String get invalidTab => translate('invalid_tab');
   String get noManagementOptionsAvailable =>
@@ -2266,6 +2269,9 @@ const Map<String, String> _enValues = {
   'assignee_due_date': 'Expected Due Date (by assignee)',
   'set_your_due_date': 'Set your expected due date',
   'not_set': 'Not set',
+  'subticket_tag': 'SUB-TICKET',
+  'show_replies': 'Show replies',
+  'hide_replies': 'Hide replies',
   'reports': 'Reports',
   'invalid_tab': 'Invalid tab',
   'no_management_options_available': 'No management options available',
@@ -3380,6 +3386,9 @@ const Map<String, String> _arValues = {
   'assignee_due_date': 'تاريخ الاستحقاق المتوقع (من المسؤول)',
   'set_your_due_date': 'حدد تاريخ الاستحقاق المتوقع الخاص بك',
   'not_set': 'غير محدد',
+  'subticket_tag': 'تذكرة فرعية',
+  'show_replies': 'إظهار الردود',
+  'hide_replies': 'إخفاء الردود',
   'reports': 'التقارير',
   'invalid_tab': 'علامة تبويب غير صالحة',
   'no_management_options_available': 'لا توجد خيارات إدارة متاحة',

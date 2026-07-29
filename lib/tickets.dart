@@ -124,6 +124,31 @@ class ExpectedDueDateField extends StatelessWidget {
   }
 }
 
+/// Draws the rounded elbow connecting the vertical reply-thread line to
+/// each sub-ticket "reply" bubble in EnhancedTicketCard's sub-tickets
+/// thread view.
+class _ReplyElbowPainter extends CustomPainter {
+  final Color color;
+  const _ReplyElbowPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+    final path = Path()
+      ..moveTo(size.width / 2, 0)
+      ..quadraticBezierTo(size.width / 2, size.height, size.width, size.height);
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _ReplyElbowPainter oldDelegate) =>
+      oldDelegate.color != color;
+}
+
 /// Fallback palette so a department without an explicit color still shows
 /// a consistent, distinguishable color on its ticket tag.
 const _kDepartmentColorPalette = [
@@ -4318,6 +4343,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
   bool _loadingUserInfo = false;
   bool _loadingSubtickets = false;
   bool _loadingExpandedData = false;
+  bool _showSubtickets = false;
 
   // NEW: Check-in status tracking
   TicketCheckInStatus? _checkInStatus;
@@ -5202,6 +5228,8 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
               _buildSupervisionBadge(),
             if (_subtickets.isNotEmpty)
               _buildSubticketsBadge(),
+            if (widget.ticket.parentTicketId != null)
+              _buildSubticketTagBadge(),
           ],
         ),
 
@@ -5418,6 +5446,10 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
               const SizedBox(width: 6),
               _buildSubticketsBadge(),
             ],
+            if (widget.ticket.parentTicketId != null) ...[
+              const SizedBox(width: 6),
+              _buildSubticketTagBadge(),
+            ],
             const SizedBox(width: 12),
             Expanded(
               child: Wrap(
@@ -5501,6 +5533,10 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
                   const SizedBox(width: 8),
                   if (_subtickets.isNotEmpty) ...[
                     _buildSubticketsBadge(),
+                    const SizedBox(width: 8),
+                  ],
+                  if (widget.ticket.parentTicketId != null) ...[
+                    _buildSubticketTagBadge(),
                     const SizedBox(width: 8),
                   ],
                   Expanded(
@@ -5941,91 +5977,150 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
     );
   }
 
-  // Tree view of sub-tickets shown in the collapsed card body
-  Widget _buildSubticketsTree() {
+  // Tag shown on a ticket that is itself a sub-ticket (a "reply"), mirroring
+  // _buildSubticketsBadge which tags a ticket that HAS sub-tickets (a "post").
+  Widget _buildSubticketTagBadge() {
+    final l10n = AppLocalizations.safeOf(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.indigo.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.indigo.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.subdirectory_arrow_right, size: 11, color: Colors.indigo[700]),
+          const SizedBox(width: 4),
+          Text(
+            l10n.subticketTag,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              color: Colors.indigo[700],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // "Post + replies" section header for the sub-ticket thread: the parent
+  // ticket card is the post, each sub-ticket below is a reply. Tapping the
+  // header toggles the thread open/closed instead of always showing it.
+  Widget _buildSubticketsSection(AppLocalizations l10n) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => setState(() => _showSubtickets = !_showSubtickets),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.cyan.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.forum_outlined, color: Colors.cyan, size: 16),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '${l10n.subtickets} (${_subtickets.length})',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.cyan,
+                    fontSize: 14,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  _showSubtickets ? l10n.hideReplies : l10n.showReplies,
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                ),
+                Icon(
+                  _showSubtickets ? Icons.expand_less : Icons.expand_more,
+                  size: 18,
+                  color: Colors.grey[600],
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_showSubtickets) ...[
+          const SizedBox(height: 8),
+          _buildSubticketsThread(),
+        ],
+      ],
+    );
+  }
+
+  // Reply-thread view of sub-tickets: a left connector line down the whole
+  // list (like a comment thread) rather than a per-item tree/elbow, since
+  // each sub-ticket is conceptually a reply to the same parent post, not a
+  // nested branch of the previous sub-ticket.
+  Widget _buildSubticketsThread() {
     final l10n = AppLocalizations.safeOf(context);
 
-    return Container(
-      margin: const EdgeInsets.only(top: 2),
-      padding: const EdgeInsets.all(10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 4),
-          // Tree items
-          ..._subtickets.asMap().entries.map((entry) {
-            final index = entry.key;
-            final subticket = entry.value;
-            final isLast = index == _subtickets.length - 1;
-            final statusColor = _getStatusColorForTicket(subticket.status);
-
-            return IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Tree lines column
-                  SizedBox(
-                    width: 20,
-                    child: Column(
-                      children: [
-                        // Vertical line above branch
-                        Expanded(
-                          child: Center(
-                            child: Container(
-                              width: 1.5,
-                              color: Colors.cyan.withValues(alpha: 0.35),
-                            ),
+    return Column(
+      children: _subtickets.map((subticket) {
+        final statusColor = _getStatusColorForTicket(subticket.status);
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Reply connector: a single continuous line, like a
+                // comment/reply thread, with a rounded elbow into each item.
+                SizedBox(
+                  width: 18,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: Center(
+                          child: Container(
+                            width: 2,
+                            color: Colors.cyan.withValues(alpha: 0.3),
                           ),
                         ),
-                        // Branch elbow
-                        Row(
-                          children: [
-                            Container(
-                              width: 1.5,
-                              height: 10,
-                              color: Colors.cyan.withValues(alpha: 0.35),
-                            ),
-                            Container(
-                              width: 8,
-                              height: 1.5,
-                              color: Colors.cyan.withValues(alpha: 0.35),
-                            ),
-                          ],
+                      ),
+                      SizedBox(
+                        height: 14,
+                        child: CustomPaint(
+                          size: const Size(18, 14),
+                          painter: _ReplyElbowPainter(
+                              color: Colors.cyan.withValues(alpha: 0.3)),
                         ),
-                        // Vertical line below branch (hidden for last)
-                        if (!isLast)
-                          Expanded(
-                            child: Center(
-                              child: Container(
-                                width: 1.5,
-                                color: Colors.cyan.withValues(alpha: 0.35),
-                              ),
-                            ),
-                          )
-                        else
-                          const Expanded(child: SizedBox()),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 6),
-                  // Sub-ticket card
-                  Expanded(
+                ),
+                const SizedBox(width: 6),
+                // Reply bubble
+                Expanded(
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: () =>
+                        TicketNavigationService.navigateTo(subticket.id),
                     child: Container(
-                      margin: EdgeInsets.only(bottom: isLast ? 0 : 6),
-                      padding: const EdgeInsets.all(8),
+                      padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: statusColor.withValues(alpha: 0.3),
-                        ),
+                        color: Colors.grey.withOpacity(0.04),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: statusColor.withValues(alpha: 0.25)),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Number + status badge
                           Row(
                             children: [
+                              _buildSubticketTagBadge(),
+                              const SizedBox(width: 6),
                               Text(
                                 '#${subticket.ticketNumber}',
                                 style: TextStyle(
@@ -6034,7 +6129,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
                                   color: Colors.blueGrey[600],
                                 ),
                               ),
-                              const SizedBox(width: 6),
+                              const Spacer(),
                               Container(
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 6, vertical: 1),
@@ -6054,8 +6149,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
                               ),
                             ],
                           ),
-                          const SizedBox(height: 4),
-                          // Title
+                          const SizedBox(height: 6),
                           Text(
                             subticket.title,
                             style: const TextStyle(
@@ -6065,7 +6159,6 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
-                          // Description
                           if (subticket.description.isNotEmpty) ...[
                             const SizedBox(height: 2),
                             Text(
@@ -6082,12 +6175,12 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
                       ),
                     ),
                   ),
-                ],
-              ),
-            );
-          }),
-        ],
-      ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -6173,15 +6266,12 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
             ],
           ),
 
-          // Sub-tickets Section
+          // Sub-tickets Section — shown like a post's reply thread: the
+          // parent ticket is the "post", each sub-ticket a "reply", and the
+          // whole thread can be collapsed/expanded via the header.
           if (_subtickets.isNotEmpty) ...[
             const SizedBox(height: 16),
-            _buildInfoSection(
-               '${l10n.subtickets} (${_subtickets.length})',
-              Icons.account_tree,
-              Colors.cyan,
-              [_buildSubticketsTree()],
-            ),
+            _buildSubticketsSection(l10n),
           ],
 
           // Tracking Points Section (in-progress + closed tickets)
