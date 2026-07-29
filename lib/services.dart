@@ -1248,6 +1248,91 @@ class TicketService {
     }
   }
 
+  /// Splits a ticket across multiple admins: creates one sub-ticket per
+  /// admin (each a full clone of the parent's content, individually
+  /// assigned), and puts the parent itself "in progress" under the
+  /// splitting super admin — so it goes through the exact same
+  /// prefinished/approval cycle as any other ticket the super admin is
+  /// assigned to, once every sub-ticket is closed.
+  static Future<bool> splitTicketToAdmins(
+      String ticketId, List<String> adminIds) async {
+    try {
+      final ticket = await supabase
+          .from('tickets')
+          .select()
+          .eq('id', ticketId)
+          .single();
+
+      final currentUser = await AuthService.getCurrentUser();
+      if (currentUser == null) return false;
+
+      for (final adminId in adminIds) {
+        final subticketData = {
+          'title': ticket['title'],
+          'description': ticket['description'],
+          'target_department_id': ticket['target_department_id'],
+          'nature_of_problem': ticket['nature_of_problem'],
+          'nature_of_work_id': ticket['nature_of_work_id'],
+          'other_nature_of_work': ticket['other_nature_of_work'],
+          'place_id': ticket['place_id'],
+          'other_place': ticket['other_place'],
+          'location': ticket['location'],
+          'problem_title_id': ticket['problem_title_id'],
+          'custom_problem_title': ticket['custom_problem_title'],
+          'other_problem_title': ticket['other_problem_title'],
+          'priority': ticket['priority'],
+          'high_priority_explain': ticket['high_priority_explain'],
+          'model_number_id': ticket['model_number_id'],
+          'custom_model_number': ticket['custom_model_number'],
+          'other_model_number': ticket['other_model_number'],
+          'parent_ticket_id': ticketId,
+          'created_by': currentUser.id,
+          'creator_phone': ticket['creator_phone'],
+          'assigned_to': adminId,
+          'status': TicketStatus.inprogress.value,
+        };
+
+        final created = await supabase
+            .from('tickets')
+            .insert(subticketData)
+            .select('id, ticket_number, title')
+            .single();
+
+        await NotificationService.notifySubticketCreated(
+          subticketId: created['id'],
+          parentTicketId: ticketId,
+          createdByUserId: currentUser.id,
+          targetAdminId: adminId,
+          subticketNumber: created['ticket_number'],
+          subticketTitle: created['title'],
+          parentTicketNumber: ticket['ticket_number'],
+        );
+      }
+
+      // The parent ticket is now "worked on" by the splitting super admin —
+      // its own finish/approval cycle only unlocks once every sub-ticket is
+      // closed (enforced in the UI, not here).
+      await supabase.from('tickets').update({
+        'assigned_to': currentUser.id,
+        'status': TicketStatus.inprogress.value,
+      }).eq('id', ticketId);
+
+      await NotificationService.notifyTicketStatusChanged(
+        ticketId: ticketId,
+        ticketCreatorId: ticket['created_by'],
+        changedByUserId: currentUser.id,
+        ticketNumber: ticket['ticket_number'],
+        oldStatus: ticket['status'],
+        newStatus: TicketStatus.inprogress.value,
+      );
+
+      return true;
+    } catch (e) {
+      print('Error splitting ticket to admins: $e');
+      return false;
+    }
+  }
+
 // UPDATED: markTicketFinished method
   static Future<bool> markTicketFinished({
     required String ticketId,

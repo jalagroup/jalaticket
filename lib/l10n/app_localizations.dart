@@ -1166,6 +1166,10 @@ class AppLocalizations {
   String get subticketTag => translate('subticket_tag');
   String get showReplies => translate('show_replies');
   String get hideReplies => translate('hide_replies');
+  String get splitBetweenMultipleAdmins => translate('split_between_multiple_admins');
+  String get splitBetweenMultipleAdminsHint => translate('split_between_multiple_admins_hint');
+  String get selectAtLeastTwoAdmins => translate('select_at_least_two_admins');
+  String get adminReports => translate('admin_reports');
   String get reports => translate('reports');
   String get invalidTab => translate('invalid_tab');
   String get noManagementOptionsAvailable =>
@@ -2272,6 +2276,10 @@ const Map<String, String> _enValues = {
   'subticket_tag': 'SUB-TICKET',
   'show_replies': 'Show replies',
   'hide_replies': 'Hide replies',
+  'split_between_multiple_admins': 'Split between multiple admins',
+  'split_between_multiple_admins_hint': 'Creates one sub-ticket per selected admin; you review each when finished',
+  'select_at_least_two_admins': 'Select at least two admins to split this ticket',
+  'admin_reports': 'Admin reports',
   'reports': 'Reports',
   'invalid_tab': 'Invalid tab',
   'no_management_options_available': 'No management options available',
@@ -3389,6 +3397,10 @@ const Map<String, String> _arValues = {
   'subticket_tag': 'تذكرة فرعية',
   'show_replies': 'إظهار الردود',
   'hide_replies': 'إخفاء الردود',
+  'split_between_multiple_admins': 'تقسيم بين عدة مسؤولين',
+  'split_between_multiple_admins_hint': 'يتم إنشاء تذكرة فرعية لكل مسؤول محدد؛ تراجع كل واحدة عند انتهائها',
+  'select_at_least_two_admins': 'الرجاء اختيار مسؤولين اثنين على الأقل لتقسيم هذه التذكرة',
+  'admin_reports': 'تقارير المسؤولين',
   'reports': 'التقارير',
   'invalid_tab': 'علامة تبويب غير صالحة',
   'no_management_options_available': 'لا توجد خيارات إدارة متاحة',

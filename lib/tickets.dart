@@ -4344,6 +4344,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
   bool _loadingSubtickets = false;
   bool _loadingExpandedData = false;
   bool _showSubtickets = false;
+  Map<String, Map<String, dynamic>> _subticketReports = {};
 
   // NEW: Check-in status tracking
   TicketCheckInStatus? _checkInStatus;
@@ -4783,6 +4784,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
           _loadingSubtickets = false;
         });
       }
+      await _loadSubticketReports(subtickets);
     } catch (e) {
       print('Error loading subtickets: $e');
       if (mounted) {
@@ -4791,6 +4793,33 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
           _loadingSubtickets = false;
         });
       }
+    }
+  }
+
+  // The finish report (title + description) each admin submitted for their
+  // closed sub-ticket — shown under the main ticket so the super admin sees
+  // every admin's report in one place once the split ticket is done.
+  Future<void> _loadSubticketReports(List<TicketModel> subtickets) async {
+    final closedIds = subtickets
+        .where((s) => s.status == TicketStatus.closed)
+        .map((s) => s.id)
+        .toList();
+    if (closedIds.isEmpty) return;
+    try {
+      final rows = await supabase
+          .from('ticket_reports')
+          .select('ticket_id, title, description, created_at')
+          .inFilter('ticket_id', closedIds)
+          .order('created_at', ascending: false);
+      if (!mounted) return;
+      final byTicket = <String, Map<String, dynamic>>{};
+      for (final row in rows) {
+        // Most recent report per ticket wins (ordered desc above).
+        byTicket.putIfAbsent(row['ticket_id'], () => row);
+      }
+      setState(() => _subticketReports = byTicket);
+    } catch (e) {
+      print('Error loading sub-ticket reports: $e');
     }
   }
 
@@ -4869,6 +4898,14 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
     }
 
     return true;
+  }
+
+  // A ticket with sub-tickets (i.e. split across multiple admins) can only
+  // be marked finished by whoever it's assigned to once every sub-ticket is
+  // closed — the sub-tickets are the actual work being tracked.
+  bool _canMarkParentFinished() {
+    if (_subtickets.isEmpty) return true;
+    return _subtickets.every((s) => s.status == TicketStatus.closed);
   }
 
 // UPDATE: _canCreatorApprove to exclude under_supervision tickets
@@ -6169,6 +6206,46 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
                               ),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                          if (_subticketReports[subticket.id] != null) ...[
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.green.withValues(alpha: 0.06),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.green.withValues(alpha: 0.25)),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(Icons.fact_check_outlined, size: 12, color: Colors.green[700]),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        l10n.adminReports,
+                                        style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.green[700]),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _subticketReports[subticket.id]!['title'] ?? '',
+                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                                  ),
+                                  if ((_subticketReports[subticket.id]!['description'] ?? '').toString().isNotEmpty) ...[
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      _subticketReports[subticket.id]!['description'],
+                                      style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+                                      maxLines: 3,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ],
+                              ),
                             ),
                           ],
                         ],
@@ -7722,15 +7799,19 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
 
       if (widget.ticket.status == TicketStatus.inprogress &&
           widget.ticket.assignedTo == widget.currentUser.id) {
-        final isCheckedIn = _checkInStatus != null;
-        actions.add({
-          'label': isCheckedIn
-              ? '${l10n.markFinished} 🔒'
-              : l10n.markFinished,
-          'icon': isCheckedIn ? Icons.lock : Icons.check_circle,
-          'color': isCheckedIn ? Colors.grey : Colors.purple,
-          'onPressed': () => _showFinishDialog()
-        });
+        // A split ticket (has sub-tickets) can only be marked finished once
+        // every sub-ticket is closed — the sub-tickets ARE the actual work.
+        if (_canMarkParentFinished()) {
+          final isCheckedIn = _checkInStatus != null;
+          actions.add({
+            'label': isCheckedIn
+                ? '${l10n.markFinished} 🔒'
+                : l10n.markFinished,
+            'icon': isCheckedIn ? Icons.lock : Icons.check_circle,
+            'color': isCheckedIn ? Colors.grey : Colors.purple,
+            'onPressed': () => _showFinishDialog()
+          });
+        }
         actions.add({
           'label': l10n.createSubticket,
           'icon': Icons.account_tree,
@@ -8017,15 +8098,17 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
       }
 
       if (widget.ticket.status == TicketStatus.inprogress) {
-        final isCheckedIn = _checkInStatus != null;
-        actions.add({
-          'label': isCheckedIn
-              ? '${l10n.markFinished} 🔒'
-              : l10n.markFinished,
-          'icon': isCheckedIn ? Icons.lock : Icons.check_circle,
-          'color': isCheckedIn ? Colors.grey : Colors.purple,
-          'onPressed': () => _showFinishDialog()
-        });
+        if (_canMarkParentFinished()) {
+          final isCheckedIn = _checkInStatus != null;
+          actions.add({
+            'label': isCheckedIn
+                ? '${l10n.markFinished} 🔒'
+                : l10n.markFinished,
+            'icon': isCheckedIn ? Icons.lock : Icons.check_circle,
+            'color': isCheckedIn ? Colors.grey : Colors.purple,
+            'onPressed': () => _showFinishDialog()
+          });
+        }
         actions.add({
           'label': l10n.createSubticket,
           'icon': Icons.account_tree,
@@ -10235,6 +10318,8 @@ class AssignTicketDialog extends StatefulWidget {
 class _AssignTicketDialogState extends State<AssignTicketDialog> {
   List<AdminWithNatureOfWork> _admins = [];
   String? _selectedAdminId;
+  final Set<String> _selectedAdminIds = {};
+  bool _splitMode = false;
   bool _isLoading = false;
   bool _loadingAdmins = true;
 
@@ -10301,7 +10386,14 @@ class _AssignTicketDialogState extends State<AssignTicketDialog> {
   Future<void> _assignTicket() async {
     final l10n = AppLocalizations.safeOf(context);
 
-    if (_selectedAdminId == null) {
+    if (_splitMode) {
+      if (_selectedAdminIds.length < 2) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.selectAtLeastTwoAdmins)),
+        );
+        return;
+      }
+    } else if (_selectedAdminId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(l10n.pleaseSelectAdmin)),
       );
@@ -10311,10 +10403,13 @@ class _AssignTicketDialogState extends State<AssignTicketDialog> {
     setState(() => _isLoading = true);
 
     try {
-      final success = await TicketService.assignTicket(
-        widget.ticket.id,
-        _selectedAdminId!,
-      );
+      final success = _splitMode
+          ? await TicketService.splitTicketToAdmins(
+              widget.ticket.id, _selectedAdminIds.toList())
+          : await TicketService.assignTicket(
+              widget.ticket.id,
+              _selectedAdminId!,
+            );
 
       if (success) {
         setState(() => _isLoading = false);
@@ -10375,6 +10470,22 @@ class _AssignTicketDialogState extends State<AssignTicketDialog> {
                 ],
               ),
             ),
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: SwitchListTile(
+              value: _splitMode,
+              onChanged: (v) => setState(() {
+                _splitMode = v;
+                _selectedAdminIds.clear();
+                _selectedAdminId = null;
+              }),
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: Text(l10n.splitBetweenMultipleAdmins, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              subtitle: Text(l10n.splitBetweenMultipleAdminsHint, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+            ),
+          ),
           if (_loadingAdmins)
             Center(
               child: Padding(
@@ -10389,7 +10500,9 @@ class _AssignTicketDialogState extends State<AssignTicketDialog> {
             )
           else
             ..._admins.map((admin) {
-              final isSelected = _selectedAdminId == admin.adminId;
+              final isSelected = _splitMode
+                  ? _selectedAdminIds.contains(admin.adminId)
+                  : _selectedAdminId == admin.adminId;
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),
@@ -10407,7 +10520,25 @@ class _AssignTicketDialogState extends State<AssignTicketDialog> {
                     width: isSelected ? 2 : 1,
                   ),
                 ),
-                child: RadioListTile<String>(
+                child: _splitMode
+                    ? CheckboxListTile(
+                        value: isSelected,
+                        onChanged: (checked) {
+                          setState(() {
+                            if (checked == true) {
+                              _selectedAdminIds.add(admin.adminId);
+                            } else {
+                              _selectedAdminIds.remove(admin.adminId);
+                            }
+                          });
+                        },
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        dense: true,
+                        title: _buildAdminTileTitle(admin, l10n),
+                        subtitle: _buildAdminTileSubtitle(admin),
+                      )
+                    : RadioListTile<String>(
                   value: admin.adminId,
                   groupValue: _selectedAdminId,
                   onChanged: (value) {
@@ -10416,82 +10547,8 @@ class _AssignTicketDialogState extends State<AssignTicketDialog> {
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   dense: true,
-                  title: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              admin.fullName,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 13,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              admin.email,
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (admin.matchingNatureOfWork)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.green,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            l10n.match,
-                            style: const TextStyle(
-                              fontSize: 9,
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  subtitle: admin.natureOfWorkNames.isNotEmpty
-                      ? Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Wrap(
-                            spacing: 4,
-                            runSpacing: 4,
-                            children: admin.natureOfWorkNames
-                                .map((name) => Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 4,
-                                        vertical: 2,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.blue.withOpacity(0.1),
-                                        borderRadius: BorderRadius.circular(4),
-                                        border: Border.all(
-                                          color: Colors.blue.withOpacity(0.3),
-                                        ),
-                                      ),
-                                      child: Text(
-                                        name,
-                                        style: const TextStyle(
-                                          fontSize: 9,
-                                          color: Colors.blue,
-                                        ),
-                                      ),
-                                    ))
-                                .toList(),
-                          ),
-                        )
-                      : null,
+                  title: _buildAdminTileTitle(admin, l10n),
+                  subtitle: _buildAdminTileSubtitle(admin),
                 ),
               );
             }).toList(),
@@ -10517,6 +10574,87 @@ class _AssignTicketDialogState extends State<AssignTicketDialog> {
               : Text(l10n.assign),
         ),
       ],
+    );
+  }
+
+  Widget _buildAdminTileTitle(AdminWithNatureOfWork admin, AppLocalizations l10n) {
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                admin.fullName,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                admin.email,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.grey[600],
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (admin.matchingNatureOfWork)
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 6,
+              vertical: 2,
+            ),
+            decoration: BoxDecoration(
+              color: Colors.green,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              l10n.match,
+              style: const TextStyle(
+                fontSize: 9,
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget? _buildAdminTileSubtitle(AdminWithNatureOfWork admin) {
+    if (admin.natureOfWorkNames.isEmpty) return null;
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        children: admin.natureOfWorkNames
+            .map((name) => Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                      color: Colors.blue.withOpacity(0.3),
+                    ),
+                  ),
+                  child: Text(
+                    name,
+                    style: const TextStyle(
+                      fontSize: 9,
+                      color: Colors.blue,
+                    ),
+                  ),
+                ))
+            .toList(),
+      ),
     );
   }
 }
