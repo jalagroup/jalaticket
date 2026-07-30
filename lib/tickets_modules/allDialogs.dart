@@ -39,6 +39,7 @@ class _IndividualsMaintenanceTicketDialogState
   String? _selectedModelNumberId;
   PriorityType _selectedPriority = PriorityType.medium;
   DateTime? _dueDate;
+  String? _directAssignAdminId;
   List<DepartmentModel> _departments = [];
   List<NatureOfWorkModel> _natureOfWorkList = [];
   List<Map<String, dynamic>> _problemTitles = [];
@@ -314,6 +315,7 @@ class _IndividualsMaintenanceTicketDialogState
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
         'creator_due_date': _dueDate!.toIso8601String(),
+        if (_directAssignAdminId != null) 'assigned_to': _directAssignAdminId,
       };
 
       final success = await TicketService.createTicket(ticketData);
@@ -397,6 +399,7 @@ class _IndividualsMaintenanceTicketDialogState
           : MediaQuery.of(context).size.width * 0.7,
       contentPadding: const EdgeInsets.all(16),
       child: IndividualsMaintenanceTicketContent(
+        currentUser: widget.currentUser,
         titleController: _titleController,
         descriptionController: _descriptionController,
         locationController: _locationController,
@@ -410,6 +413,7 @@ class _IndividualsMaintenanceTicketDialogState
         selectedModelNumberId: _selectedModelNumberId,
         selectedPriority: _selectedPriority,
         selectedDueDate: _dueDate,
+        selectedDirectAssignAdminId: _directAssignAdminId,
         departments: _departments,
         natureOfWorkList: _natureOfWorkList,
         problemTitles: _problemTitles,
@@ -447,6 +451,9 @@ class _IndividualsMaintenanceTicketDialogState
         },
         onDueDateChanged: (value) {
           setState(() => _dueDate = value);
+        },
+        onDirectAssignChanged: (value) {
+          setState(() => _directAssignAdminId = value);
         },
         onUseCustomProblemChanged: (value) {
           setState(() {
@@ -967,6 +974,7 @@ class _PlacesMaintenanceTicketDialogState
   String? _selectedModelNumberId;
   PriorityType _selectedPriority = PriorityType.medium;
   DateTime? _dueDate;
+  String? _directAssignAdminId;
   List<DepartmentModel> _departments = [];
   List<PlaceModel> _places = [];
   List<NatureOfWorkModel> _natureOfWorkList = [];
@@ -1325,6 +1333,7 @@ class _PlacesMaintenanceTicketDialogState
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
         'creator_due_date': _dueDate!.toIso8601String(),
+        if (_directAssignAdminId != null) 'assigned_to': _directAssignAdminId,
       };
 
       print('📋 Creating place ticket with data: $ticketData');
@@ -1416,6 +1425,7 @@ class _PlacesMaintenanceTicketDialogState
           : MediaQuery.of(context).size.width * 0.7,
       contentPadding: const EdgeInsets.all(16),
       child: PlacesMaintenanceTicketContent(
+        currentUser: widget.currentUser,
         titleController: _titleController,
         descriptionController: _descriptionController,
         locationController: _locationController,
@@ -1430,6 +1440,7 @@ class _PlacesMaintenanceTicketDialogState
         selectedModelNumberId: _selectedModelNumberId,
         selectedPriority: _selectedPriority,
         selectedDueDate: _dueDate,
+        selectedDirectAssignAdminId: _directAssignAdminId,
         departments: _departments,
         places: _places,
         natureOfWorkList: _natureOfWorkList,
@@ -1472,6 +1483,9 @@ class _PlacesMaintenanceTicketDialogState
         },
         onDueDateChanged: (value) {
           setState(() => _dueDate = value);
+        },
+        onDirectAssignChanged: (value) {
+          setState(() => _directAssignAdminId = value);
         },
         onUseCustomProblemChanged: (value) {
           setState(() {
@@ -1596,6 +1610,7 @@ class _RequestsTicketDialogState extends State<RequestsTicketDialog> {
   String? _selectedModelNumberId;
   PriorityType _selectedPriority = PriorityType.medium;
   DateTime? _dueDate;
+  String? _directAssignAdminId;
   List<DepartmentModel> _departments = [];
   List<NatureOfWorkModel> _natureOfWorkList = [];
   List<Map<String, dynamic>> _parts = [];
@@ -1862,6 +1877,7 @@ class _RequestsTicketDialogState extends State<RequestsTicketDialog> {
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
         'creator_due_date': _dueDate!.toIso8601String(),
+        if (_directAssignAdminId != null) 'assigned_to': _directAssignAdminId,
       };
 
       print('Creating request ticket with data: $ticketData');
@@ -1942,6 +1958,7 @@ class _RequestsTicketDialogState extends State<RequestsTicketDialog> {
           : MediaQuery.of(context).size.width * 0.7,
       contentPadding: const EdgeInsets.all(16),
       child: RequestsTicketContent(
+        currentUser: widget.currentUser,
         titleController: _titleController,
         descriptionController: _descriptionController,
         locationController: _locationController,
@@ -1953,6 +1970,7 @@ class _RequestsTicketDialogState extends State<RequestsTicketDialog> {
         selectedModelNumberId: _selectedModelNumberId,
         selectedPriority: _selectedPriority,
         selectedDueDate: _dueDate,
+        selectedDirectAssignAdminId: _directAssignAdminId,
         departments: _departments,
         natureOfWorkList: _natureOfWorkList,
         parts: _parts,
@@ -1982,6 +2000,9 @@ class _RequestsTicketDialogState extends State<RequestsTicketDialog> {
         },
         onDueDateChanged: (value) {
           setState(() => _dueDate = value);
+        },
+        onDirectAssignChanged: (value) {
+          setState(() => _directAssignAdminId = value);
         },
         onUseCustomModelChanged: (value) {
           setState(() {

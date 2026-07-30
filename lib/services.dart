@@ -819,29 +819,39 @@ class TicketService {
 
       final targetDepartmentId = ticketData['target_department_id'];
 
-      print('🔍 Checking auto-assignment for department: $targetDepartmentId');
-
-      // Get auto-assignment - handle both true and NULL as enabled
-      final autoAssignment = await supabase
-          .from('auto_assignment_settings')
-          .select('assigned_admin_id, is_enabled')
-          .eq('department_id', targetDepartmentId)
-          .or('is_enabled.eq.true,is_enabled.is.null') // Accept true OR null
-          .maybeSingle();
-
-      print('🎯 Auto-assignment result: $autoAssignment');
-
-      // Apply auto-assignment if found and has an assigned admin
-      if (autoAssignment != null &&
-          autoAssignment['assigned_admin_id'] != null) {
-        ticketData['assigned_to'] = autoAssignment['assigned_admin_id'];
+      // A caller with direct-assignment permission may already have set
+      // assigned_to (e.g. the creator picked a specific admin themselves) —
+      // in that case skip auto-assignment entirely rather than letting the
+      // "no auto-assignment configured" branch silently reset status to
+      // pending while leaving that assigned_to in place.
+      if (ticketData['assigned_to'] != null) {
         ticketData['status'] = 'inprogress';
-        print(
-            '✅ Auto-assignment found - Assigning to: ${autoAssignment['assigned_admin_id']}');
-        print('✅ Status set to: inprogress');
+        print('✅ assigned_to already set by caller - Status set to: inprogress');
       } else {
-        ticketData['status'] = 'pending';
-        print('ℹ️ No auto-assignment found - Status set to: pending');
+        print('🔍 Checking auto-assignment for department: $targetDepartmentId');
+
+        // Get auto-assignment - handle both true and NULL as enabled
+        final autoAssignment = await supabase
+            .from('auto_assignment_settings')
+            .select('assigned_admin_id, is_enabled')
+            .eq('department_id', targetDepartmentId)
+            .or('is_enabled.eq.true,is_enabled.is.null') // Accept true OR null
+            .maybeSingle();
+
+        print('🎯 Auto-assignment result: $autoAssignment');
+
+        // Apply auto-assignment if found and has an assigned admin
+        if (autoAssignment != null &&
+            autoAssignment['assigned_admin_id'] != null) {
+          ticketData['assigned_to'] = autoAssignment['assigned_admin_id'];
+          ticketData['status'] = 'inprogress';
+          print(
+              '✅ Auto-assignment found - Assigning to: ${autoAssignment['assigned_admin_id']}');
+          print('✅ Status set to: inprogress');
+        } else {
+          ticketData['status'] = 'pending';
+          print('ℹ️ No auto-assignment found - Status set to: pending');
+        }
       }
 
       // Create ticket

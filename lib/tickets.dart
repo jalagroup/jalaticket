@@ -73,6 +73,140 @@ Future<List<DepartmentModel>> filterDeptsByPlaceId(
     ..sort((a, b) => a.localizedName(languageCode).compareTo(b.localizedName(languageCode)));
 }
 
+/// Shown on ticket-creation forms only for users a system admin has granted
+/// direct-assignment permission for the currently selected department
+/// (ticket_assignment_permissions). Lets them pick a specific admin right
+/// there, skipping the pending/auto-assignment step — the ticket is created
+/// already in-progress and assigned. Renders nothing if the user has no
+/// grant for the selected department, or no department is selected yet.
+class DirectAssignField extends StatefulWidget {
+  final UserModel currentUser;
+  final String? departmentId;
+  final String? value;
+  final ValueChanged<String?> onChanged;
+
+  const DirectAssignField({
+    super.key,
+    required this.currentUser,
+    required this.departmentId,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  State<DirectAssignField> createState() => _DirectAssignFieldState();
+}
+
+class _DirectAssignFieldState extends State<DirectAssignField> {
+  bool _loading = false;
+  bool _hasPermission = false;
+  List<Map<String, dynamic>> _admins = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant DirectAssignField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.departmentId != widget.departmentId) _load();
+  }
+
+  Future<void> _load() async {
+    final deptId = widget.departmentId;
+    if (deptId == null) {
+      setState(() { _hasPermission = false; _admins = []; });
+      return;
+    }
+    setState(() => _loading = true);
+    try {
+      final grant = await supabase
+          .from('ticket_assignment_permissions')
+          .select('id')
+          .eq('user_id', widget.currentUser.id)
+          .eq('department_id', deptId)
+          .maybeSingle();
+      if (grant == null) {
+        if (mounted) setState(() { _hasPermission = false; _admins = []; _loading = false; });
+        if (widget.value != null) widget.onChanged(null);
+        return;
+      }
+      final admins = await supabase
+          .from('users')
+          .select('id, full_name')
+          .eq('department_id', deptId)
+          .eq('user_type', 'admin')
+          .eq('is_active', true)
+          .order('full_name');
+      if (mounted) {
+        setState(() {
+          _hasPermission = true;
+          _admins = List<Map<String, dynamic>>.from(admins);
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() { _hasPermission = false; _loading = false; });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+    if (!_hasPermission) return const SizedBox.shrink();
+
+    final l10n = AppLocalizations.safeOf(context);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.teal.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.teal.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.rocket_launch_outlined, size: 14, color: Colors.teal[700]),
+              const SizedBox(width: 6),
+              Text(
+                l10n.directAssign,
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal[700]),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            initialValue: widget.value,
+            isDense: true,
+            decoration: InputDecoration(
+              hintText: l10n.directAssignHint,
+              filled: true,
+              fillColor: Colors.white,
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            items: _admins
+                .map((a) => DropdownMenuItem(value: a['id'] as String, child: Text(a['full_name'] ?? '')))
+                .toList(),
+            onChanged: widget.onChanged,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Shared expected-due-date picker used by every ticket/sub-ticket creation
 /// form and by the "working admin" due-date field on an in-progress ticket,
 /// so the date field looks and behaves the same everywhere.
@@ -11597,6 +11731,7 @@ class _CreateTicketDialogState extends State<CreateTicketDialog> {
   String? _selectedNatureOfWorkId;
   PriorityType _selectedPriority = PriorityType.medium;
   DateTime? _dueDate;
+  String? _directAssignAdminId;
 
   List<DepartmentModel> _departments = [];
   List<PlaceModel> _places = [];
@@ -11970,6 +12105,7 @@ class _CreateTicketDialogState extends State<CreateTicketDialog> {
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
         'creator_due_date': _dueDate!.toIso8601String(),
+        if (_directAssignAdminId != null) 'assigned_to': _directAssignAdminId,
       };
 
       final success = await TicketService.createTicket(ticketData);
@@ -12340,6 +12476,13 @@ class _CreateTicketDialogState extends State<CreateTicketDialog> {
             },
           ),
           const SizedBox(height: 16),
+
+          DirectAssignField(
+            currentUser: widget.currentUser,
+            departmentId: _selectedDepartmentId,
+            value: _directAssignAdminId,
+            onChanged: (v) => setState(() => _directAssignAdminId = v),
+          ),
 
           // Nature of Work Section
           if (_selectedDepartmentId != null) ...[
@@ -14324,6 +14467,7 @@ class _PlacesMaintenanceTicketScreenState
   String? _selectedModelNumberId;
   PriorityType _selectedPriority = PriorityType.medium;
   DateTime? _dueDate;
+  String? _directAssignAdminId;
 
   List<DepartmentModel> _departments = [];
   List<PlaceModel> _places = [];
@@ -14467,6 +14611,7 @@ class _PlacesMaintenanceTicketScreenState
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: PlacesMaintenanceTicketContent(
+                currentUser: widget.currentUser,
                 titleController: _titleController,
                 descriptionController: _descriptionController,
                 locationController: _locationController,
@@ -14481,6 +14626,7 @@ class _PlacesMaintenanceTicketScreenState
                 selectedModelNumberId: _selectedModelNumberId,
                 selectedPriority: _selectedPriority,
                 selectedDueDate: _dueDate,
+                selectedDirectAssignAdminId: _directAssignAdminId,
                 departments: _departments,
                 places: _places,
                 natureOfWorkList: _natureOfWorkList,
@@ -14523,6 +14669,9 @@ class _PlacesMaintenanceTicketScreenState
                 },
                 onDueDateChanged: (value) {
                   setState(() => _dueDate = value);
+                },
+                onDirectAssignChanged: (value) {
+                  setState(() => _directAssignAdminId = value);
                 },
                 onUseCustomProblemChanged: (value) {
                   setState(() {
@@ -14893,6 +15042,7 @@ class _PlacesMaintenanceTicketScreenState
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
         'creator_due_date': _dueDate!.toIso8601String(),
+        if (_directAssignAdminId != null) 'assigned_to': _directAssignAdminId,
       };
 
       print('📋 Creating place ticket with data: $ticketData');
@@ -14985,6 +15135,7 @@ class _PlacesMaintenanceTicketScreenState
 
 // PlacesMaintenanceTicketContent - Full Updated Method
 class PlacesMaintenanceTicketContent extends StatelessWidget {
+  final UserModel currentUser;
   final TextEditingController titleController;
   final TextEditingController descriptionController;
   final TextEditingController locationController;
@@ -14999,6 +15150,7 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
   final String? selectedModelNumberId;
   final PriorityType selectedPriority;
   final DateTime? selectedDueDate;
+  final String? selectedDirectAssignAdminId;
   final List<DepartmentModel> departments;
   final List<PlaceModel> places;
   final List<NatureOfWorkModel> natureOfWorkList;
@@ -15015,6 +15167,7 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
   final Function(String?) onModelNumberChanged;
   final Function(PriorityType) onPriorityChanged;
   final ValueChanged<DateTime?> onDueDateChanged;
+  final ValueChanged<String?> onDirectAssignChanged;
   final Function(bool) onUseCustomProblemChanged;
   final Function(bool) onUseCustomModelChanged;
   final VoidCallback onPickImages;
@@ -15023,6 +15176,7 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
 
   const PlacesMaintenanceTicketContent({
     Key? key,
+    required this.currentUser,
     required this.titleController,
     required this.descriptionController,
     required this.locationController,
@@ -15037,6 +15191,7 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
     required this.selectedModelNumberId,
     required this.selectedPriority,
     required this.selectedDueDate,
+    this.selectedDirectAssignAdminId,
     required this.departments,
     required this.places,
     required this.natureOfWorkList,
@@ -15053,6 +15208,7 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
     required this.onModelNumberChanged,
     required this.onPriorityChanged,
     required this.onDueDateChanged,
+    required this.onDirectAssignChanged,
     required this.onUseCustomProblemChanged,
     required this.onUseCustomModelChanged,
     required this.onPickImages,
@@ -15141,6 +15297,13 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
           onChanged: onDepartmentChanged,
         ),
         const SizedBox(height: 10),
+
+        DirectAssignField(
+          currentUser: currentUser,
+          departmentId: selectedDepartmentId,
+          value: selectedDirectAssignAdminId,
+          onChanged: onDirectAssignChanged,
+        ),
 
         // Nature of Work Section
         if (selectedDepartmentId != null) ...[
@@ -15733,6 +15896,7 @@ class _IndividualsMaintenanceTicketScreenState
   String? _selectedModelNumberId;
   PriorityType _selectedPriority = PriorityType.medium;
   DateTime? _dueDate;
+  String? _directAssignAdminId;
 
   List<DepartmentModel> _departments = [];
   List<NatureOfWorkModel> _natureOfWorkList = [];
@@ -15848,6 +16012,7 @@ class _IndividualsMaintenanceTicketScreenState
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: IndividualsMaintenanceTicketContent(
+                currentUser: widget.currentUser,
                 titleController: _titleController,
                 descriptionController: _descriptionController,
                 locationController: _locationController,
@@ -15861,6 +16026,7 @@ class _IndividualsMaintenanceTicketScreenState
                 selectedModelNumberId: _selectedModelNumberId,
                 selectedPriority: _selectedPriority,
                 selectedDueDate: _dueDate,
+                selectedDirectAssignAdminId: _directAssignAdminId,
                 departments: _departments,
                 natureOfWorkList: _natureOfWorkList,
                 problemTitles: _problemTitles,
@@ -15898,6 +16064,9 @@ class _IndividualsMaintenanceTicketScreenState
                 },
                 onDueDateChanged: (value) {
                   setState(() => _dueDate = value);
+                },
+                onDirectAssignChanged: (value) {
+                  setState(() => _directAssignAdminId = value);
                 },
                 onUseCustomProblemChanged: (value) {
                   setState(() {
@@ -16258,6 +16427,7 @@ class _IndividualsMaintenanceTicketScreenState
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
         'creator_due_date': _dueDate!.toIso8601String(),
+        if (_directAssignAdminId != null) 'assigned_to': _directAssignAdminId,
       };
 
       print('📋 Creating individuals ticket with data: $ticketData');
@@ -16350,6 +16520,7 @@ class _IndividualsMaintenanceTicketScreenState
 
 // IndividualsMaintenanceTicketContent - Full Updated Method
 class IndividualsMaintenanceTicketContent extends StatelessWidget {
+  final UserModel currentUser;
   final TextEditingController titleController;
   final TextEditingController descriptionController;
   final TextEditingController locationController;
@@ -16363,6 +16534,7 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
   final String? selectedModelNumberId;
   final PriorityType selectedPriority;
   final DateTime? selectedDueDate;
+  final String? selectedDirectAssignAdminId;
   final List<DepartmentModel> departments;
   final List<NatureOfWorkModel> natureOfWorkList;
   final List<Map<String, dynamic>> problemTitles;
@@ -16376,6 +16548,7 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
   final Function(String?) onModelNumberChanged;
   final Function(PriorityType) onPriorityChanged;
   final ValueChanged<DateTime?> onDueDateChanged;
+  final ValueChanged<String?> onDirectAssignChanged;
   final Function(bool) onUseCustomProblemChanged;
   final Function(bool) onUseCustomModelChanged;
   final VoidCallback onPickImages;
@@ -16384,6 +16557,7 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
 
   const IndividualsMaintenanceTicketContent({
     Key? key,
+    required this.currentUser,
     required this.titleController,
     required this.descriptionController,
     required this.locationController,
@@ -16397,6 +16571,7 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
     required this.selectedModelNumberId,
     required this.selectedPriority,
     required this.selectedDueDate,
+    this.selectedDirectAssignAdminId,
     required this.departments,
     required this.natureOfWorkList,
     required this.problemTitles,
@@ -16410,6 +16585,7 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
     required this.onModelNumberChanged,
     required this.onPriorityChanged,
     required this.onDueDateChanged,
+    required this.onDirectAssignChanged,
     required this.onUseCustomProblemChanged,
     required this.onUseCustomModelChanged,
     required this.onPickImages,
@@ -16488,6 +16664,13 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
           onChanged: onDepartmentChanged,
         ),
         const SizedBox(height: 10),
+
+        DirectAssignField(
+          currentUser: currentUser,
+          departmentId: selectedDepartmentId,
+          value: selectedDirectAssignAdminId,
+          onChanged: onDirectAssignChanged,
+        ),
 
         // Nature of Work Section
         if (selectedDepartmentId != null) ...[
@@ -17052,6 +17235,7 @@ class _RequestsTicketScreenState extends State<RequestsTicketScreen> {
   String? _selectedModelNumberId;
   PriorityType _selectedPriority = PriorityType.medium;
   DateTime? _dueDate;
+  String? _directAssignAdminId;
 
   List<DepartmentModel> _departments = [];
   List<NatureOfWorkModel> _natureOfWorkList = [];
@@ -17150,6 +17334,7 @@ class _RequestsTicketScreenState extends State<RequestsTicketScreen> {
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: RequestsTicketContent(
+                currentUser: widget.currentUser,
                 titleController: _titleController,
                 descriptionController: _descriptionController,
                 locationController: _locationController,
@@ -17161,6 +17346,7 @@ class _RequestsTicketScreenState extends State<RequestsTicketScreen> {
                 selectedModelNumberId: _selectedModelNumberId,
                 selectedPriority: _selectedPriority,
                 selectedDueDate: _dueDate,
+                selectedDirectAssignAdminId: _directAssignAdminId,
                 departments: _departments,
                 natureOfWorkList: _natureOfWorkList,
                 parts: _parts,
@@ -17190,6 +17376,9 @@ class _RequestsTicketScreenState extends State<RequestsTicketScreen> {
                 },
                 onDueDateChanged: (value) {
                   setState(() => _dueDate = value);
+                },
+                onDirectAssignChanged: (value) {
+                  setState(() => _directAssignAdminId = value);
                 },
                 onUseCustomModelChanged: (value) {
                   setState(() {
@@ -17532,6 +17721,7 @@ class _RequestsTicketScreenState extends State<RequestsTicketScreen> {
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
         'creator_due_date': _dueDate!.toIso8601String(),
+        if (_directAssignAdminId != null) 'assigned_to': _directAssignAdminId,
       };
 
       print('📋 Creating request ticket with data: $ticketData');
@@ -17623,6 +17813,7 @@ class _RequestsTicketScreenState extends State<RequestsTicketScreen> {
 
 // RequestsTicketContent - Full Updated Method
 class RequestsTicketContent extends StatelessWidget {
+  final UserModel currentUser;
   final TextEditingController titleController;
   final TextEditingController descriptionController;
   final TextEditingController locationController;
@@ -17634,6 +17825,7 @@ class RequestsTicketContent extends StatelessWidget {
   final String? selectedModelNumberId;
   final PriorityType selectedPriority;
   final DateTime? selectedDueDate;
+  final String? selectedDirectAssignAdminId;
   final List<DepartmentModel> departments;
   final List<NatureOfWorkModel> natureOfWorkList;
   final List<Map<String, dynamic>> parts;
@@ -17644,6 +17836,7 @@ class RequestsTicketContent extends StatelessWidget {
   final Function(String?) onModelNumberChanged;
   final Function(PriorityType) onPriorityChanged;
   final ValueChanged<DateTime?> onDueDateChanged;
+  final ValueChanged<String?> onDirectAssignChanged;
   final Function(bool) onUseCustomModelChanged;
   final VoidCallback onPickImages;
   final VoidCallback onPickFiles;
@@ -17651,6 +17844,7 @@ class RequestsTicketContent extends StatelessWidget {
 
   const RequestsTicketContent({
     Key? key,
+    required this.currentUser,
     required this.titleController,
     required this.descriptionController,
     required this.locationController,
@@ -17662,6 +17856,7 @@ class RequestsTicketContent extends StatelessWidget {
     required this.selectedModelNumberId,
     required this.selectedPriority,
     required this.selectedDueDate,
+    this.selectedDirectAssignAdminId,
     required this.departments,
     required this.natureOfWorkList,
     required this.parts,
@@ -17672,6 +17867,7 @@ class RequestsTicketContent extends StatelessWidget {
     required this.onModelNumberChanged,
     required this.onPriorityChanged,
     required this.onDueDateChanged,
+    required this.onDirectAssignChanged,
     required this.onUseCustomModelChanged,
     required this.onPickImages,
     required this.onPickFiles,
@@ -17749,6 +17945,13 @@ class RequestsTicketContent extends StatelessWidget {
           onChanged: onDepartmentChanged,
         ),
         const SizedBox(height: 10),
+
+        DirectAssignField(
+          currentUser: currentUser,
+          departmentId: selectedDepartmentId,
+          value: selectedDirectAssignAdminId,
+          onChanged: onDirectAssignChanged,
+        ),
 
         // Nature of Work Section
         if (selectedDepartmentId != null) ...[
@@ -18242,6 +18445,7 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
   String? _selectedNatureOfWorkId;
   PriorityType _selectedPriority = PriorityType.medium;
   DateTime? _dueDate;
+  String? _directAssignAdminId;
 
   List<DepartmentModel> _departments = [];
   List<PlaceModel> _places = [];
@@ -18607,6 +18811,7 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
         'created_by': widget.currentUser.id,
         'creator_phone': _phoneController.text.trim(),
         'creator_due_date': _dueDate!.toIso8601String(),
+        if (_directAssignAdminId != null) 'assigned_to': _directAssignAdminId,
       };
 
       final success = await TicketService.createTicket(ticketData);
@@ -19005,6 +19210,13 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
                     },
                   ),
                   const SizedBox(height: 16),
+
+                  DirectAssignField(
+                    currentUser: widget.currentUser,
+                    departmentId: _selectedDepartmentId,
+                    value: _directAssignAdminId,
+                    onChanged: (v) => setState(() => _directAssignAdminId = v),
+                  ),
 
                   // Nature of Work Section
                   if (_selectedDepartmentId != null) ...[

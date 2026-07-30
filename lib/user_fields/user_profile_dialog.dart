@@ -40,6 +40,13 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
   Set<String> _assignedDeptIds = {};
   bool _loadingDeptAssignments = false;
 
+  // Departments this user is allowed to directly assign a ticket into
+  // (picking a specific admin, skipping pending/auto-assignment) — granted
+  // per-user by a system admin, independent of the user's own role.
+  Set<String> _assignPermissionDeptIds = {};
+  Set<String> _editAssignPermissionDeptIds = {};
+  bool _loadingAssignPermissions = false;
+
   bool _editMode = false;
   bool _saving = false;
 
@@ -60,6 +67,7 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
     _editUserType = _user.userType;
     _loadValues();
     if (_user.userType == UserType.superAdmin) _loadDeptAssignments();
+    _loadAssignPermissions();
   }
 
   @override
@@ -97,6 +105,23 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
     }
   }
 
+  Future<void> _loadAssignPermissions() async {
+    setState(() => _loadingAssignPermissions = true);
+    try {
+      final rows = await supabase
+          .from('ticket_assignment_permissions')
+          .select('department_id')
+          .eq('user_id', _user.id);
+      if (mounted) {
+        setState(() => _assignPermissionDeptIds =
+            rows.map<String>((r) => r['department_id'] as String).toSet());
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _loadingAssignPermissions = false);
+    }
+  }
+
   bool get _canEdit {
     final ct = widget.currentUser.userType;
     return ct == UserType.systemAdmin || ct == UserType.superAdmin || ct == UserType.superUser;
@@ -114,6 +139,10 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
   /// matching the same rule used for department color/permissions elsewhere.
   bool get _canEditDepartments => widget.currentUser.userType == UserType.systemAdmin;
 
+  /// Direct-assignment permission grants are system-admin-only, and not
+  /// tied to the user's own role — any user type can be granted this.
+  bool get _canEditAssignPermissions => widget.currentUser.userType == UserType.systemAdmin;
+
   bool _canEditCustomField(UserFieldDefinition def) {
     if (def.isComputed) return false;
     return def.fillMode != UserFieldFillMode.userOnly;
@@ -128,6 +157,7 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
     _editUserType = _user.userType;
     _editDeptId = _user.departmentId;
     _editDeptIds = Set.from(_assignedDeptIds);
+    _editAssignPermissionDeptIds = Set.from(_assignPermissionDeptIds);
     _editPlaceId = _user.placeId;
     _editDirectManager = _user.directManagerId != null
         ? UserModel(
@@ -218,6 +248,20 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
               .toList());
         }
         _assignedDeptIds = Set.from(_editDeptIds);
+      }
+
+      if (_canEditAssignPermissions) {
+        await supabase.from('ticket_assignment_permissions').delete().eq('user_id', _user.id);
+        if (_editAssignPermissionDeptIds.isNotEmpty) {
+          await supabase.from('ticket_assignment_permissions').insert(_editAssignPermissionDeptIds
+              .map((id) => {
+                    'user_id': _user.id,
+                    'department_id': id,
+                    'granted_by': widget.currentUser.id,
+                  })
+              .toList());
+        }
+        _assignPermissionDeptIds = Set.from(_editAssignPermissionDeptIds);
       }
 
       for (final def in widget.customFieldDefs.where((d) => d.isActive && _canEditCustomField(d))) {
@@ -434,6 +478,11 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
                                 ),
                               )
                             : _valueText(_user.directManagerName ?? '—'),
+                      ),
+                      _fieldRow(
+                        icon: Icons.rocket_launch_outlined,
+                        label: 'Direct Assign Departments',
+                        child: _buildAssignPermissionField(),
                       ),
                       _fieldRow(
                         icon: Icons.toggle_on_outlined,
@@ -697,6 +746,84 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
         if (!_canEditDepartments) ...[
           const SizedBox(height: 4),
           Text('Only System Admin can change department assignments.', style: TextStyle(fontSize: 11, color: Colors.grey[400])),
+        ],
+      ],
+    );
+  }
+
+  /// Departments this user can directly assign a ticket into (picking a
+  /// specific admin, skipping pending/auto-assignment) — independent of
+  /// user type, since a place/branch admin or a regular user can be
+  /// granted this just as easily as a super admin.
+  Widget _buildAssignPermissionField() {
+    if (!_editMode) {
+      if (_loadingAssignPermissions) {
+        return const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2));
+      }
+      if (_assignPermissionDeptIds.isEmpty) return _valueText('—');
+      return Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: _assignPermissionDeptIds.map((id) {
+          final name = _deptName(id) ?? id;
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+            decoration: BoxDecoration(color: Colors.teal.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(6), border: Border.all(color: Colors.teal.withValues(alpha: 0.25))),
+            child: Text(name, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Colors.teal)),
+          );
+        }).toList(),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade50,
+            border: Border.all(color: Colors.grey.shade200),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: widget.departments.isEmpty
+              ? Text('No departments available', style: TextStyle(fontSize: 12, color: Colors.grey[500]))
+              : Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: widget.departments.map((d) {
+                    final id = d['id']!;
+                    final isSelected = _editAssignPermissionDeptIds.contains(id);
+                    return FilterChip(
+                      label: Text(d['name'] ?? '', style: const TextStyle(fontSize: 12)),
+                      selected: isSelected,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        side: BorderSide(color: isSelected ? Colors.teal.withValues(alpha: 0.5) : Colors.grey.shade300),
+                      ),
+                      selectedColor: Colors.teal.withValues(alpha: 0.14),
+                      checkmarkColor: Colors.teal,
+                      labelStyle: TextStyle(color: isSelected ? Colors.teal : Colors.black87, fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500),
+                      onSelected: _canEditAssignPermissions
+                          ? (selected) {
+                              setState(() {
+                                if (selected) {
+                                  _editAssignPermissionDeptIds.add(id);
+                                } else {
+                                  _editAssignPermissionDeptIds.remove(id);
+                                }
+                              });
+                            }
+                          : null,
+                    );
+                  }).toList(),
+                ),
+        ),
+        if (!_canEditAssignPermissions) ...[
+          const SizedBox(height: 4),
+          Text('Only System Admin can change this.', style: TextStyle(fontSize: 11, color: Colors.grey[400])),
         ],
       ],
     );
