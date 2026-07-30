@@ -21,6 +21,7 @@ import 'package:uuid/uuid.dart';
 import 'package:jalasupport/main.dart' show myAppKey;
 import 'package:jalasupport/main_mobile.dart' show myAppMobileKey;
 import 'package:jalasupport/fcm_debug_dialog.dart';
+import 'package:jalasupport/library/library_screen.dart';
 
 // UI Components
 class AuthWrapper extends StatelessWidget {
@@ -2423,6 +2424,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               _buildAccountInfoSection(),
                               const SizedBox(height: 24),
                               _buildSecuritySection(),
+                              const SizedBox(height: 24),
+                              _buildLibrarySection(),
                             ],
                           ),
                         ),
@@ -2436,6 +2439,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         _buildAccountInfoSection(),
                         const SizedBox(height: 24),
                         _buildSecuritySection(),
+                        const SizedBox(height: 24),
+                        _buildLibrarySection(),
                         const SizedBox(height: 24),
                         _buildCustomFieldsSection(),
                       ],
@@ -3302,6 +3307,69 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 side: const BorderSide(color: Colors.deepPurple),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLibrarySection() {
+    final l10n = AppLocalizations.safeOf(context);
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.1),
+            spreadRadius: 1,
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(Icons.folder_open_outlined, color: AppColors.primary, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                l10n.myLibrary,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.onBackground,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: OutlinedButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => LibraryScreen(currentUser: widget.currentUser)),
+              ),
+              icon: const Icon(Icons.folder_open_outlined),
+              label: Text(l10n.myLibrary, style: const TextStyle(fontWeight: FontWeight.w600)),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                side: BorderSide(color: AppColors.primary),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
           ),

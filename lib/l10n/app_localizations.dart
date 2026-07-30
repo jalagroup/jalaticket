@@ -1172,6 +1172,15 @@ class AppLocalizations {
   String get adminReports => translate('admin_reports');
   String get directAssign => translate('direct_assign');
   String get directAssignHint => translate('direct_assign_hint');
+  String get myLibrary => translate('my_library');
+  String get uploadFile => translate('upload_file');
+  String get libraryEmpty => translate('library_empty');
+  String get shared => translate('shared');
+  String get unshare => translate('unshare');
+  String get share => translate('share');
+  String get copyLink => translate('copy_link');
+  String get revokeLink => translate('revoke_link');
+  String get attachToTicket => translate('attach_to_ticket');
   String get reports => translate('reports');
   String get invalidTab => translate('invalid_tab');
   String get noManagementOptionsAvailable =>
@@ -2284,6 +2293,15 @@ const Map<String, String> _enValues = {
   'admin_reports': 'Admin reports',
   'direct_assign': 'Assign directly',
   'direct_assign_hint': 'Leave unassigned for normal pending queue',
+  'my_library': 'My Library',
+  'upload_file': 'Upload file',
+  'library_empty': 'No files yet. Upload something to get started.',
+  'shared': 'Shared',
+  'unshare': 'Unshare',
+  'share': 'Share',
+  'copy_link': 'Copy link',
+  'revoke_link': 'Revoke link',
+  'attach_to_ticket': 'Attach to ticket',
   'reports': 'Reports',
   'invalid_tab': 'Invalid tab',
   'no_management_options_available': 'No management options available',
@@ -3407,6 +3425,15 @@ const Map<String, String> _arValues = {
   'admin_reports': 'تقارير المسؤولين',
   'direct_assign': 'تعيين مباشر',
   'direct_assign_hint': 'اتركه فارغاً ليدخل قائمة الانتظار العادية',
+  'my_library': 'مكتبتي',
+  'upload_file': 'رفع ملف',
+  'library_empty': 'لا توجد ملفات بعد. قم برفع ملف للبدء.',
+  'shared': 'مشارك',
+  'unshare': 'إلغاء المشاركة',
+  'share': 'مشاركة',
+  'copy_link': 'نسخ الرابط',
+  'revoke_link': 'إلغاء الرابط',
+  'attach_to_ticket': 'إرفاق بتذكرة',
   'reports': 'التقارير',
   'invalid_tab': 'علامة تبويب غير صالحة',
   'no_management_options_available': 'لا توجد خيارات إدارة متاحة',
