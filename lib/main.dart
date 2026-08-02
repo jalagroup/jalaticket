@@ -2876,8 +2876,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.72),
                     borderRadius: BorderRadius.circular(50),
-                    border:
-                        Border.all(color: Colors.white.withValues(alpha: 0.5)),
+                    // A white-on-white border disappears against the app's
+                    // white theme — a darker, low-alpha border is what
+                    // actually reads as an edge on a light background.
+                    border: Border.all(
+                        color: Colors.black.withValues(alpha: 0.16)),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withValues(alpha: 0.12),
@@ -2967,7 +2970,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                 color: disabled
                     ? Colors.white.withValues(alpha: 0.45)
                     : Colors.white.withValues(alpha: 0.75),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.5)),
+                border: Border.all(
+                    color: Colors.black.withValues(alpha: disabled ? 0.08 : 0.16)),
                 boxShadow: disabled
                     ? null
                     : [
