@@ -1807,7 +1807,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       children: [
         dash,
         Positioned(
-          bottom: 80,
+          // Clear the floating bottom nav bar's actual footprint on mobile
+          // (pill + external arrows + margins), not just an arbitrary
+          // offset that used to land right underneath it.
+          bottom: kIsWeb ? 16 : 110,
           right: 16,
           child: FloatingActionButton.small(
             heroTag: 'dashCustomize',
@@ -2829,47 +2832,61 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       return true;
     }).toList();
 
-    return Container(
-      margin: const EdgeInsets.fromLTRB(8, 0, 8, 20),
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(50),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 20,
-            offset: const Offset(0, -2),
-            spreadRadius: 0,
-          ),
-        ],
-      ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 0, 4, 16),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           _bottomNavPagerButton(isNext: false),
+          const SizedBox(width: 6),
           Expanded(
-            child: SingleChildScrollView(
-              controller: _bottomNavScroll,
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              child: Row(
-                children: visibleIndices.map((idx) {
-                  final item = _mobileNavItems[idx];
-                  final isSelected = _currentIndex == idx;
-                  int? badge;
-                  if (idx == 2) badge = _unreadChatRoomsCount > 0 ? _unreadChatRoomsCount : null;
-                  if (idx == 3) badge = _unreadCount > 0 ? _unreadCount : null;
-                  return _buildBottomNavItem(
-                    icon: item.icon,
-                    label: _getMobileNavLabel(idx),
-                    isSelected: isSelected,
-                    badgeCount: badge,
-                    onTap: () => setState(() { _currentIndex = idx; _isNotificationsOpen = false; }),
-                  );
-                }).toList(),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(50),
+                border: Border.all(color: Colors.grey.withValues(alpha: 0.08)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.12),
+                    blurRadius: 24,
+                    offset: const Offset(0, 6),
+                    spreadRadius: 0,
+                  ),
+                ],
+              ),
+              child: SingleChildScrollView(
+                controller: _bottomNavScroll,
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: Row(
+                  children: [
+                    ...visibleIndices.map((idx) {
+                      final item = _mobileNavItems[idx];
+                      final isSelected = _currentIndex == idx;
+                      int? badge;
+                      if (idx == 2) badge = _unreadChatRoomsCount > 0 ? _unreadChatRoomsCount : null;
+                      if (idx == 3) badge = _unreadCount > 0 ? _unreadCount : null;
+                      return _buildBottomNavItem(
+                        icon: item.icon,
+                        label: _getMobileNavLabel(idx),
+                        isSelected: isSelected,
+                        badgeCount: badge,
+                        onTap: () => setState(() { _currentIndex = idx; _isNotificationsOpen = false; }),
+                      );
+                    }),
+                    _buildBottomNavItem(
+                      icon: Icons.person_outline_rounded,
+                      label: AppLocalizations.safeOf(context).profile,
+                      isSelected: false,
+                      onTap: _navigateToProfile,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
+          const SizedBox(width: 6),
           _bottomNavPagerButton(isNext: true),
         ],
       ),
@@ -2894,6 +2911,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     );
   }
 
+  // Pager arrows now live OUTSIDE the pill (their own floating circle to its
+  // left/right) instead of inside it, per feedback that they felt cramped
+  // and too small next to the nav items.
   Widget _bottomNavPagerButton({required bool isNext}) {
     return AnimatedBuilder(
       animation: _bottomNavScroll,
@@ -2902,14 +2922,27 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         final atStart = !ready || _bottomNavScroll.offset <= 0;
         final atEnd = !ready || _bottomNavScroll.offset >= _bottomNavScroll.position.maxScrollExtent;
         final disabled = isNext ? atEnd : atStart;
-        return SizedBox(
-          width: 26,
+        return Container(
+          width: 40,
           height: 40,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: disabled ? Colors.white.withValues(alpha: 0.6) : Colors.white,
+            boxShadow: disabled
+                ? null
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.12),
+                      blurRadius: 12,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+          ),
           child: IconButton(
             padding: EdgeInsets.zero,
-            iconSize: 18,
-            splashRadius: 16,
-            icon: Icon(isNext ? Icons.chevron_right : Icons.chevron_left),
+            iconSize: 26,
+            splashRadius: 20,
+            icon: Icon(isNext ? Icons.chevron_right_rounded : Icons.chevron_left_rounded),
             color: disabled ? Colors.grey[300] : AppColors.primary,
             onPressed: disabled ? null : () => _scrollBottomNav(isNext ? 150 : -150),
           ),

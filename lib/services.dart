@@ -1669,7 +1669,19 @@ class TicketNavigationService {
     return s;
   }
 
-  static void setListener(VoidCallback cb) => _listener = cb;
+  // TicketsScreen is rebuilt from scratch on every tab switch (main.dart
+  // uses a switch on _currentIndex, not an IndexedStack), so it isn't
+  // mounted yet — and hasn't registered its listener — at the exact moment
+  // navigateTo() fires when a notification is tapped from a different tab.
+  // navigateTo()'s _listener?.call() is then a no-op and the pending
+  // navigation would otherwise sit unconsumed forever. Re-check for a
+  // pending navigation the moment a listener registers, so it doesn't
+  // matter which happens first.
+  static void setListener(VoidCallback cb) {
+    _listener = cb;
+    if (_pendingTicketId != null) cb();
+  }
+
   static void removeListener() => _listener = null;
 }
 

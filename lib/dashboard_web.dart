@@ -653,21 +653,45 @@ class _DashboardWebState extends State<DashboardWeb>
               ),
             )
           : Column(
+              mainAxisSize: isMobile ? MainAxisSize.min : MainAxisSize.max,
               children: [
-                Expanded(
-                  child: ListView.separated(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: isMobile
-                        ? _inProgressTickets.take(3).length
-                        : _inProgressTickets.length,
-                    separatorBuilder: (context, index) =>
-                        const SizedBox(height: 12),
-                    itemBuilder: (context, index) {
-                      final ticket = _inProgressTickets[index];
-                      return _buildTicketItem(ticket, isMobile);
-                    },
-                  ),
-                ),
+                // On mobile this whole container sits inside the page's own
+                // SingleChildScrollView (unbounded height), so a plain
+                // Expanded(ListView) here has no bounded ancestor to expand
+                // into — a classic "RenderFlex children have non-zero flex
+                // but incoming height constraints are unbounded" failure.
+                // Assertions are stripped in release builds, so instead of
+                // crashing it silently mis-lays-out this and (per observed
+                // behavior) subsequent sibling sections on the page. Fix:
+                // let the list size itself (shrinkWrap, no inner scrolling —
+                // the outer page scroll already handles that) on mobile;
+                // keep the original Expanded+scrollable behavior for the
+                // desktop fixed-height (400) container.
+                isMobile
+                    ? ListView.separated(
+                        padding: const EdgeInsets.all(16),
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: _inProgressTickets.take(3).length,
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(height: 12),
+                        itemBuilder: (context, index) {
+                          final ticket = _inProgressTickets[index];
+                          return _buildTicketItem(ticket, isMobile);
+                        },
+                      )
+                    : Expanded(
+                        child: ListView.separated(
+                          padding: const EdgeInsets.all(16),
+                          itemCount: _inProgressTickets.length,
+                          separatorBuilder: (context, index) =>
+                              const SizedBox(height: 12),
+                          itemBuilder: (context, index) {
+                            final ticket = _inProgressTickets[index];
+                            return _buildTicketItem(ticket, isMobile);
+                          },
+                        ),
+                      ),
                 // View All button at the bottom
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
