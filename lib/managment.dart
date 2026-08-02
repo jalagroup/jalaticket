@@ -4648,6 +4648,13 @@ class _UsersManagementState extends State<UsersManagement>
                       ],
                     ),
                   ),
+                  // Action buttons: horizontally scrollable so they can't
+                  // overflow the header row on narrow mobile screens.
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      reverse: Localizations.localeOf(context).languageCode == 'ar',
+                      child: Row(children: [
                   if (_selectMode) ...[
                     OutlinedButton(
                       onPressed: () => setState(() { _selectMode = false; _selectedIds.clear(); }),
@@ -4774,6 +4781,9 @@ class _UsersManagementState extends State<UsersManagement>
                       ),
                     ),
                   ],
+                      ]),
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 10),
