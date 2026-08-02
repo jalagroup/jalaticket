@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:jalasupport/main.dart';
 import 'package:jalasupport/auth.dart';
 
-const _kOnboardingDoneKey = 'onboarding_complete_v1';
+const _kOnboardingDoneKey = 'onboarding_complete_v2';
 
 Future<bool> isOnboardingComplete() async {
   final prefs = await SharedPreferences.getInstance();
@@ -63,12 +63,13 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     with TickerProviderStateMixin {
   final _controller = PageController();
   int _page = 0;
-  static const _total = 3;
+  static const _total = 4;
 
   // Animation controllers – one per page illustration
   late final AnimationController _anim0;
   late final AnimationController _anim1;
   late final AnimationController _anim2;
+  late final AnimationController _anim3;
   // Page-transition fade/slide
   late final AnimationController _transCtrl;
   late final Animation<double> _fadeAnim;
@@ -87,6 +88,9 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     _anim2 = AnimationController(
         vsync: this, duration: const Duration(seconds: 2))
       ..repeat();
+    _anim3 = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1600))
+      ..repeat();
 
     _transCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 400));
@@ -104,6 +108,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     _anim0.dispose();
     _anim1.dispose();
     _anim2.dispose();
+    _anim3.dispose();
     _transCtrl.dispose();
     _controller.dispose();
     super.dispose();
@@ -161,6 +166,15 @@ class _OnboardingScreenState extends State<OnboardingScreen>
         bodyAr:
             'استقبل تنبيهات فورية لتحديثات التذاكر والتعيينات والرسائل.',
         illustration: _NotificationIllustration(animation: _anim2),
+      ),
+      _PageData(
+        titleEn: 'Shake to Report\nan Issue',
+        titleAr: 'اهزّ هاتفك للإبلاغ\nعن مشكلة',
+        bodyEn:
+            'Having a problem with the app? Just shake your phone anytime and send us a report instantly.',
+        bodyAr:
+            'تواجه مشكلة في التطبيق؟ اهزّ هاتفك في أي وقت وأرسل لنا بلاغاً فورياً.',
+        illustration: _ShakeIllustration(animation: _anim3),
       ),
     ];
 
@@ -718,6 +732,84 @@ class _NotificationIllustration extends StatelessWidget {
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
                             color: AppColors.primary)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ─── Illustration 4: Shake to report ───────────────────────────────────────────
+
+class _ShakeIllustration extends StatelessWidget {
+  final AnimationController animation;
+  const _ShakeIllustration({required this.animation});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (_, __) {
+        final t = animation.value;
+        // Short shake burst, then a pause, looped.
+        final burst = (t < 0.4) ? (math.sin(t * math.pi * 10) * (1 - t / 0.4)) : 0.0;
+        final angle = burst * 0.22;
+        final dx = burst * 14;
+        return SizedBox(
+          width: 220,
+          height: 220,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // Motion arcs behind the phone
+              for (int i = 0; i < 2; i++)
+                Opacity(
+                  opacity: (burst.abs()).clamp(0.0, 1.0) * 0.5,
+                  child: Transform.translate(
+                    offset: Offset(i == 0 ? -70 : 70, 0),
+                    child: Icon(
+                      i == 0 ? Icons.arrow_left_rounded : Icons.arrow_right_rounded,
+                      size: 36,
+                      color: Colors.white.withValues(alpha: 0.8),
+                    ),
+                  ),
+                ),
+              Transform.translate(
+                offset: Offset(dx, 0),
+                child: Transform.rotate(
+                  angle: angle,
+                  child: Container(
+                    width: 110,
+                    height: 170,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(24),
+                      boxShadow: [
+                        BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.15),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8))
+                      ],
+                    ),
+                    child: Center(
+                      child: Container(
+                        width: 56,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withValues(alpha: 0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.bug_report_rounded,
+                          color: AppColors.primary,
+                          size: 30,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
