@@ -10396,10 +10396,41 @@ class _AssignTicketDialogState extends State<AssignTicketDialog> {
   // date set here (on behalf of the assignee) never is.
   DateTime? _assigneeDueDate;
 
+  // Split mode: each selected admin gets their OWN task, not a clone of the
+  // parent ticket — the super admin types what that specific person needs
+  // to do, keyed by admin id. Created/disposed as admins are checked.
+  final Map<String, TextEditingController> _taskTitleControllers = {};
+  final Map<String, TextEditingController> _taskDescControllers = {};
+
   @override
   void initState() {
     super.initState();
     _loadAdmins();
+  }
+
+  @override
+  void dispose() {
+    for (final c in _taskTitleControllers.values) {
+      c.dispose();
+    }
+    for (final c in _taskDescControllers.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _setAdminSelected(String adminId, bool selected) {
+    setState(() {
+      if (selected) {
+        _selectedAdminIds.add(adminId);
+        _taskTitleControllers.putIfAbsent(adminId, () => TextEditingController());
+        _taskDescControllers.putIfAbsent(adminId, () => TextEditingController());
+      } else {
+        _selectedAdminIds.remove(adminId);
+        _taskTitleControllers.remove(adminId)?.dispose();
+        _taskDescControllers.remove(adminId)?.dispose();
+      }
+    });
   }
 
   Future<void> _loadAdmins() async {
@@ -10459,12 +10490,24 @@ class _AssignTicketDialogState extends State<AssignTicketDialog> {
   Future<void> _assignTicket() async {
     final l10n = AppLocalizations.safeOf(context);
 
+    Map<String, ({String title, String description})> tasksByAdminId = {};
     if (_splitMode) {
       if (_selectedAdminIds.length < 2) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(l10n.selectAtLeastTwoAdmins)),
         );
         return;
+      }
+      for (final adminId in _selectedAdminIds) {
+        final title = _taskTitleControllers[adminId]?.text.trim() ?? '';
+        final description = _taskDescControllers[adminId]?.text.trim() ?? '';
+        if (title.isEmpty || description.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(l10n.pleaseFillTaskForAllAdmins)),
+          );
+          return;
+        }
+        tasksByAdminId[adminId] = (title: title, description: description);
       }
     } else if (_selectedAdminId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -10478,7 +10521,7 @@ class _AssignTicketDialogState extends State<AssignTicketDialog> {
     try {
       final success = _splitMode
           ? await TicketService.splitTicketToAdmins(
-              widget.ticket.id, _selectedAdminIds.toList())
+              widget.ticket.id, tasksByAdminId)
           : await TicketService.assignTicket(
               widget.ticket.id,
               _selectedAdminId!,
@@ -10603,22 +10646,60 @@ class _AssignTicketDialogState extends State<AssignTicketDialog> {
                   ),
                 ),
                 child: _splitMode
-                    ? CheckboxListTile(
-                        value: isSelected,
-                        onChanged: (checked) {
-                          setState(() {
-                            if (checked == true) {
-                              _selectedAdminIds.add(admin.adminId);
-                            } else {
-                              _selectedAdminIds.remove(admin.adminId);
-                            }
-                          });
-                        },
-                        contentPadding:
-                            const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                        dense: true,
-                        title: _buildAdminTileTitle(admin, l10n),
-                        subtitle: _buildAdminTileSubtitle(admin),
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          CheckboxListTile(
+                            value: isSelected,
+                            onChanged: (checked) =>
+                                _setAdminSelected(admin.adminId, checked == true),
+                            contentPadding:
+                                const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                            dense: true,
+                            title: _buildAdminTileTitle(admin, l10n),
+                            subtitle: _buildAdminTileSubtitle(admin),
+                          ),
+                          if (isSelected)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    l10n.taskForThisAdmin,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  TextField(
+                                    controller: _taskTitleControllers[admin.adminId],
+                                    style: const TextStyle(fontSize: 13),
+                                    decoration: InputDecoration(
+                                      isDense: true,
+                                      hintText: '${l10n.title} *',
+                                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  TextField(
+                                    controller: _taskDescControllers[admin.adminId],
+                                    style: const TextStyle(fontSize: 13),
+                                    maxLines: 2,
+                                    decoration: InputDecoration(
+                                      isDense: true,
+                                      hintText: '${l10n.description} *',
+                                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
                       )
                     : RadioListTile<String>(
                   value: admin.adminId,

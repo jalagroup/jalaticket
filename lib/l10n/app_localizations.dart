@@ -1182,6 +1182,8 @@ class AppLocalizations {
   String get revokeLink => translate('revoke_link');
   String get attachToTicket => translate('attach_to_ticket');
   String get skip => translate('skip');
+  String get taskForThisAdmin => translate('task_for_this_admin');
+  String get pleaseFillTaskForAllAdmins => translate('please_fill_task_for_all_admins');
   String get reports => translate('reports');
   String get invalidTab => translate('invalid_tab');
   String get noManagementOptionsAvailable =>
@@ -2304,6 +2306,8 @@ const Map<String, String> _enValues = {
   'revoke_link': 'Revoke link',
   'attach_to_ticket': 'Attach to ticket',
   'skip': 'Skip',
+  'task_for_this_admin': "This admin's task",
+  'please_fill_task_for_all_admins': 'Please enter a title and description for every selected admin',
   'reports': 'Reports',
   'invalid_tab': 'Invalid tab',
   'no_management_options_available': 'No management options available',
@@ -3437,6 +3441,8 @@ const Map<String, String> _arValues = {
   'revoke_link': 'إلغاء الرابط',
   'attach_to_ticket': 'إرفاق بتذكرة',
   'skip': 'تخطي',
+  'task_for_this_admin': 'مهمة هذا المسؤول',
+  'please_fill_task_for_all_admins': 'الرجاء إدخال عنوان ووصف لكل مسؤول تم اختياره',
   'reports': 'التقارير',
   'invalid_tab': 'علامة تبويب غير صالحة',
   'no_management_options_available': 'لا توجد خيارات إدارة متاحة',

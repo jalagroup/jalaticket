@@ -1260,13 +1260,16 @@ class TicketService {
   }
 
   /// Splits a ticket across multiple admins: creates one sub-ticket per
-  /// admin (each a full clone of the parent's content, individually
-  /// assigned), and puts the parent itself "in progress" under the
-  /// splitting super admin — so it goes through the exact same
-  /// prefinished/approval cycle as any other ticket the super admin is
-  /// assigned to, once every sub-ticket is closed.
-  static Future<bool> splitTicketToAdmins(
-      String ticketId, List<String> adminIds) async {
+  /// admin, each with the SPECIFIC task (title + description) the super
+  /// admin wrote for that person — not a clone of the parent ticket, since
+  /// each admin is handling a different piece of the work. Other context
+  /// (department, place, priority, nature of work) is still inherited from
+  /// the parent since that's shared, not per-person. Puts the parent itself
+  /// "in progress" under the splitting super admin — so it goes through the
+  /// exact same prefinished/approval cycle as any other ticket the super
+  /// admin is assigned to, once every sub-ticket is closed.
+  static Future<bool> splitTicketToAdmins(String ticketId,
+      Map<String, ({String title, String description})> tasksByAdminId) async {
     try {
       final ticket = await supabase
           .from('tickets')
@@ -1277,10 +1280,12 @@ class TicketService {
       final currentUser = await AuthService.getCurrentUser();
       if (currentUser == null) return false;
 
-      for (final adminId in adminIds) {
+      for (final entry in tasksByAdminId.entries) {
+        final adminId = entry.key;
+        final task = entry.value;
         final subticketData = {
-          'title': ticket['title'],
-          'description': ticket['description'],
+          'title': task.title,
+          'description': task.description,
           'target_department_id': ticket['target_department_id'],
           'nature_of_problem': ticket['nature_of_problem'],
           'nature_of_work_id': ticket['nature_of_work_id'],
