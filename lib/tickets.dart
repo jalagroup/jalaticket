@@ -8154,6 +8154,41 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
   }
 
 // NEW: Super Admin starts working on the ticket themselves
+  // Optional expected-due-date prompt shown when someone starts working on
+  // a ticket (self-assigning) — unlike the creator's due date, this is
+  // never required; "Skip" leaves assignee_due_date unset.
+  Future<DateTime?> _promptOptionalDueDate() async {
+    final l10n = AppLocalizations.safeOf(context);
+    DateTime? picked;
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(l10n.assigneeDueDate),
+          content: ExpectedDueDateField(
+            label: l10n.assigneeDueDate,
+            value: picked,
+            onChanged: (v) => setDialogState(() => picked = v),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                picked = null;
+                Navigator.pop(context);
+              },
+              child: Text(l10n.skip),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(l10n.save),
+            ),
+          ],
+        ),
+      ),
+    );
+    return picked;
+  }
+
   Future<void> _superAdminStartWork() async {
     final l10n = AppLocalizations.safeOf(context);
 
@@ -8161,11 +8196,15 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
       debugPrint(
           '🛠️ Super Admin starting work on ticket ${widget.ticket.ticketNumber}');
 
+      final dueDate = await _promptOptionalDueDate();
+      if (!mounted) return;
+
       // Update ticket: assign to super admin and change status to inprogress
       await supabase.from('tickets').update({
         'assigned_to': widget.currentUser.id,
         'status': TicketStatus.inprogress.value,
         'updated_at': DateTime.now().toIso8601String(),
+        if (dueDate != null) 'assignee_due_date': dueDate.toIso8601String(),
       }).eq('id', widget.ticket.id);
 
       // Create activity log
@@ -8745,8 +8784,11 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
     final l10n = AppLocalizations.safeOf(context);
 
     try {
+      final dueDate = await _promptOptionalDueDate();
+      if (!mounted) return;
       await TicketService.updateTicket(widget.ticket.id, {
         'status': TicketStatus.inprogress.value,
+        if (dueDate != null) 'assignee_due_date': dueDate.toIso8601String(),
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(l10n.ticketStatusChangedToInProgress)),
@@ -10456,6 +10498,9 @@ class _AssignTicketDialogState extends State<AssignTicketDialog> {
   bool _splitMode = false;
   bool _isLoading = false;
   bool _loadingAdmins = true;
+  // Optional — the creator's due date is required at creation, but the due
+  // date set here (on behalf of the assignee) never is.
+  DateTime? _assigneeDueDate;
 
   @override
   void initState() {
@@ -10543,6 +10588,7 @@ class _AssignTicketDialogState extends State<AssignTicketDialog> {
           : await TicketService.assignTicket(
               widget.ticket.id,
               _selectedAdminId!,
+              dueDate: _assigneeDueDate,
             );
 
       if (success) {
@@ -10620,6 +10666,14 @@ class _AssignTicketDialogState extends State<AssignTicketDialog> {
               subtitle: Text(l10n.splitBetweenMultipleAdminsHint, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
             ),
           ),
+          if (!_splitMode) ...[
+            ExpectedDueDateField(
+              label: l10n.assigneeDueDate,
+              value: _assigneeDueDate,
+              onChanged: (v) => setState(() => _assigneeDueDate = v),
+            ),
+            const SizedBox(height: 12),
+          ],
           if (_loadingAdmins)
             Center(
               child: Padding(

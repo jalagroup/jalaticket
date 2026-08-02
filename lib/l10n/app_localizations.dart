@@ -1181,6 +1181,7 @@ class AppLocalizations {
   String get copyLink => translate('copy_link');
   String get revokeLink => translate('revoke_link');
   String get attachToTicket => translate('attach_to_ticket');
+  String get skip => translate('skip');
   String get reports => translate('reports');
   String get invalidTab => translate('invalid_tab');
   String get noManagementOptionsAvailable =>
@@ -2302,6 +2303,7 @@ const Map<String, String> _enValues = {
   'copy_link': 'Copy link',
   'revoke_link': 'Revoke link',
   'attach_to_ticket': 'Attach to ticket',
+  'skip': 'Skip',
   'reports': 'Reports',
   'invalid_tab': 'Invalid tab',
   'no_management_options_available': 'No management options available',
@@ -3413,7 +3415,7 @@ const Map<String, String> _arValues = {
   'email_templates': 'قوالب البريد الإلكتروني',
   'expected_due_date': 'تاريخ الاستحقاق المتوقع',
   'creator_due_date': 'تاريخ الاستحقاق المتوقع (من المنشئ)',
-  'assignee_due_date': 'تاريخ الاستحقاق المتوقع (من المسؤول)',
+  'assignee_due_date': 'وقت الانهاء المتوقع',
   'set_your_due_date': 'حدد تاريخ الاستحقاق المتوقع الخاص بك',
   'not_set': 'غير محدد',
   'subticket_tag': 'تذكرة فرعية',
@@ -3434,6 +3436,7 @@ const Map<String, String> _arValues = {
   'copy_link': 'نسخ الرابط',
   'revoke_link': 'إلغاء الرابط',
   'attach_to_ticket': 'إرفاق بتذكرة',
+  'skip': 'تخطي',
   'reports': 'التقارير',
   'invalid_tab': 'علامة تبويب غير صالحة',
   'no_management_options_available': 'لا توجد خيارات إدارة متاحة',

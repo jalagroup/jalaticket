@@ -1949,7 +1949,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       bottomNavigationBar:
           hasBottomNavBar ? _buildFloatingBottomNavBar() : null,
       drawer: kIsWeb && !isWidthNotGood ? _buildWebDrawer() : null,
-      extendBody: true, // Allow body to extend behind bottom nav
+      // false (not true): every individual screen's own scroll view would
+      // otherwise need its own bottom padding to avoid being hidden behind
+      // the floating nav bar — with this false, Scaffold reserves the nav
+      // bar's actual height from the body automatically, for every screen,
+      // with no per-screen changes needed.
+      extendBody: false,
     );
   }
 

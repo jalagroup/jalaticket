@@ -1213,7 +1213,7 @@ class TicketService {
   }
 
   // Enhanced assignTicket method
-  static Future<bool> assignTicket(String ticketId, String adminId) async {
+  static Future<bool> assignTicket(String ticketId, String adminId, {DateTime? dueDate}) async {
     try {
       // Get current ticket data
       final ticket = await supabase
@@ -1226,6 +1226,7 @@ class TicketService {
       await supabase.from('tickets').update({
         'assigned_to': adminId,
         'status': TicketStatus.inprogress.value,
+        if (dueDate != null) 'assignee_due_date': dueDate.toIso8601String(),
       }).eq('id', ticketId);
 
       // Get current user (assigner)
