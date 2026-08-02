@@ -1163,6 +1163,7 @@ class AppLocalizations {
   String get assigneeDueDate => translate('assignee_due_date');
   String get setYourDueDate => translate('set_your_due_date');
   String get notSet => translate('not_set');
+  String get selectExpectedDueDate => translate('select_expected_due_date');
   String get subticketTag => translate('subticket_tag');
   String get showReplies => translate('show_replies');
   String get hideReplies => translate('hide_replies');
@@ -2287,6 +2288,7 @@ const Map<String, String> _enValues = {
   'assignee_due_date': 'Expected Due Date (by assignee)',
   'set_your_due_date': 'Set your expected due date',
   'not_set': 'Not set',
+  'select_expected_due_date': 'Select expected due date',
   'subticket_tag': 'SUB-TICKET',
   'show_replies': 'Show replies',
   'hide_replies': 'Hide replies',
@@ -3422,6 +3424,7 @@ const Map<String, String> _arValues = {
   'assignee_due_date': 'وقت الانهاء المتوقع',
   'set_your_due_date': 'حدد تاريخ الاستحقاق المتوقع الخاص بك',
   'not_set': 'غير محدد',
+  'select_expected_due_date': 'اختر تاريخ الانتهاء المتوقع',
   'subticket_tag': 'تذكرة فرعية',
   'show_replies': 'إظهار الردود',
   'hide_replies': 'إخفاء الردود',

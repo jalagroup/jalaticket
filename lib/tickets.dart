@@ -228,6 +228,7 @@ class ExpectedDueDateField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.safeOf(context);
     return InkWell(
       borderRadius: BorderRadius.circular(8),
       onTap: () async {
@@ -250,7 +251,7 @@ class ExpectedDueDateField extends StatelessWidget {
         child: Text(
           value != null
               ? '${value!.year}-${value!.month.toString().padLeft(2, '0')}-${value!.day.toString().padLeft(2, '0')}'
-              : (isRequired ? 'Select expected due date' : 'Not set'),
+              : (isRequired ? l10n.selectExpectedDueDate : l10n.notSet),
           style: TextStyle(color: value != null ? null : Colors.grey[600]),
         ),
       ),
@@ -336,7 +337,7 @@ class OptimizedDialog extends StatelessWidget {
     final isMobile = MediaQuery.of(context).size.width < 768;
     final effectiveWidth = width ??
         (isMobile
-            ? MediaQuery.of(context).size.width * 0.95
+            ? MediaQuery.of(context).size.width * 0.96
             : MediaQuery.of(context).size.width * 0.6);
 
     return Dialog(
@@ -1621,6 +1622,12 @@ class _TicketsScreenState extends State<TicketsScreen>
   AnimationController? _highlightAnimationController;
   Animation<Color?>? _highlightAnimation;
 
+  // Lets a notification tap scroll the ticket list to the exact card,
+  // not just switch to the right tab — GlobalKey per rendered ticket so
+  // Scrollable.ensureVisible can locate it once built.
+  final Map<String, GlobalKey> _ticketItemKeys = {};
+  final ScrollController _ticketsListScroll = ScrollController();
+
   // Search and filters
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
@@ -1927,6 +1934,7 @@ class _TicketsScreenState extends State<TicketsScreen>
     TicketNavigationService.removeListener();
 
     WidgetsBinding.instance.removeObserver(this);
+    _ticketsListScroll.dispose();
     _highlightTimer?.cancel();
     _highlightAnimationController?.dispose();
     _tabController.removeListener(_onTabChanged);
@@ -2241,6 +2249,44 @@ class _TicketsScreenState extends State<TicketsScreen>
         });
       }
     });
+
+    _scrollToTicketInList(ticketId);
+  }
+
+  // Notification taps land on the right tab already; this brings the
+  // exact card into view too, instead of leaving it wherever the list
+  // happened to be scrolled. ListView.builder is lazy, so a ticket far
+  // below the fold may not be built yet — nudge the scroll position
+  // toward its estimated location so it gets built, then retry with
+  // Scrollable.ensureVisible for a precise, animated finish.
+  Future<void> _scrollToTicketInList(String ticketId) async {
+    for (var attempt = 0; attempt < 8; attempt++) {
+      await Future.delayed(const Duration(milliseconds: 150));
+      if (!mounted || _isDisposed) return;
+
+      final ctx = _ticketItemKeys[ticketId]?.currentContext;
+      if (ctx != null) {
+        await Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 500),
+          curve: Curves.easeInOut,
+          alignment: 0.1,
+        );
+        return;
+      }
+
+      if (_ticketsListScroll.hasClients &&
+          _ticketsListScroll.position.hasContentDimensions) {
+        final tickets = _getCurrentTickets();
+        final index = tickets.indexWhere((t) => t.id == ticketId);
+        if (index >= 0) {
+          const estimatedItemHeight = 180.0;
+          final target = (index * estimatedItemHeight)
+              .clamp(0.0, _ticketsListScroll.position.maxScrollExtent);
+          _ticketsListScroll.jumpTo(target);
+        }
+      }
+    }
   }
 
   bool _isTicketHighlighted(String ticketId) {
@@ -4158,6 +4204,7 @@ class _TicketsScreenState extends State<TicketsScreen>
           width: listWidth,
           child: ListView.builder(
             key: ValueKey('ticket_list_$currentStatus'),
+            controller: _ticketsListScroll,
             physics: const AlwaysScrollableScrollPhysics(),
             itemCount: tickets.length,
             padding: EdgeInsets.only(
@@ -4169,6 +4216,7 @@ class _TicketsScreenState extends State<TicketsScreen>
             itemBuilder: (context, index) {
               final ticket = tickets[index];
               return Container(
+                key: _ticketItemKeys.putIfAbsent(ticket.id, () => GlobalKey()),
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 3),
                 child: EnhancedTicketCard(
@@ -5432,9 +5480,10 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
 
 // 2. UPDATE: Mobile info grid - free style without boxes, icon + value only
   Widget _buildMobileInfoGrid() {
+    final hasPlace = widget.ticket.placeId != null;
     return Column(
       children: [
-        // Row 1: Creator | Place
+        // Row 1: Creator | Place (place omitted when not applicable)
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -5444,13 +5493,15 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
                 _loadingUserInfo ? 'Loading...' : _creatorName ?? 'Unknown',
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildFreeGridItem(
-                Icons.location_on_outlined,
-                _loadingUserInfo ? 'Loading...' : _localizedEntityName(_placeName, _placeNameEn, _placeNameAr, 'Unknown'),
+            if (hasPlace) ...[
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildFreeGridItem(
+                  Icons.location_on_outlined,
+                  _loadingUserInfo ? 'Loading...' : _localizedEntityName(_placeName, _placeNameEn, _placeNameAr, 'Unknown'),
+                ),
               ),
-            ),
+            ],
           ],
         ),
 
@@ -5602,10 +5653,11 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
                     Icons.person_outline,
                     _loadingUserInfo ? 'Loading...' : _creatorName ?? 'Unknown',
                   ),
-                  _buildCompactInfo(
-                    Icons.location_on_outlined,
-                    _loadingUserInfo ? 'Loading...' : _localizedEntityName(_placeName, _placeNameEn, _placeNameAr, 'Unknown'),
-                  ),
+                  if (widget.ticket.placeId != null)
+                    _buildCompactInfo(
+                      Icons.location_on_outlined,
+                      _loadingUserInfo ? 'Loading...' : _localizedEntityName(_placeName, _placeNameEn, _placeNameAr, 'Unknown'),
+                    ),
                   _buildCompactInfo(
                     Icons.business_outlined,
                     _loadingUserInfo
@@ -5931,9 +5983,11 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
         children: [
           _buildCompactInfo(Icons.person_outline,
               _loadingUserInfo ? 'Loading...' : _creatorName ?? 'Unknown'),
-          _buildDivider(),
-          _buildCompactInfo(Icons.location_on_outlined,
-              _loadingUserInfo ? 'Loading...' : _localizedEntityName(_placeName, _placeNameEn, _placeNameAr, 'Unknown')),
+          if (widget.ticket.placeId != null) ...[
+            _buildDivider(),
+            _buildCompactInfo(Icons.location_on_outlined,
+                _loadingUserInfo ? 'Loading...' : _localizedEntityName(_placeName, _placeNameEn, _placeNameAr, 'Unknown')),
+          ],
           _buildDivider(),
           _buildCompactInfo(Icons.business_outlined,
               _loadingUserInfo ? 'Loading...' : _localizedEntityName(_departmentName, _departmentNameEn, _departmentNameAr, 'Unknown')),
@@ -6496,7 +6550,8 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
                   ? DateFormat('dd/MM/yyyy').format(widget.ticket.assigneeDueDate!)
                   : l10n.notSet,
             ),
-      _buildDetailItem(l10n.place, _localizedEntityName(_placeName, _placeNameEn, _placeNameAr, l10n.loading)),
+      if (widget.ticket.placeId != null)
+        _buildDetailItem(l10n.place, _localizedEntityName(_placeName, _placeNameEn, _placeNameAr, l10n.loading)),
       if (widget.ticket.otherPlace != null)
         _buildDetailItem(l10n.otherPlace, widget.ticket.otherPlace!),
       if (widget.ticket.location?.isNotEmpty == true)
@@ -6644,14 +6699,16 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: _buildLabeledGridItem(
-                  l10n.place,
-                  _localizedEntityName(_placeName, _placeNameEn, _placeNameAr, l10n.loading),
-                ),
+                child: widget.ticket.placeId != null
+                    ? _buildLabeledGridItem(
+                        l10n.place,
+                        _localizedEntityName(_placeName, _placeNameEn, _placeNameAr, l10n.loading),
+                      )
+                    : const SizedBox(),
               ),
             ],
           ),
-        ] else ...[
+        ] else if (widget.ticket.placeId != null) ...[
           const SizedBox(height: 12),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -7894,67 +7951,15 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
     await showDialog<void>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSt) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Row(children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.indigo.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.swap_horiz_rounded, color: Colors.indigo, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(l10n.reassignDepartmentTitle,
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-            ),
-          ]),
-          content: SizedBox(
-            width: 360,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(l10n.reassignDepartmentHint,
-                    style: TextStyle(fontSize: 13, color: Colors.grey[600])),
-                const SizedBox(height: 16),
-                DropdownButtonFormField<String>(
-                  value: selectedDeptId,
-                  isExpanded: true,
-                  decoration: InputDecoration(
-                    labelText: l10n.selectNewDepartment,
-                    isDense: true,
-                    filled: true,
-                    fillColor: Colors.grey.shade50,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                    enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide(color: Colors.grey.shade200)),
-                    focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Colors.indigo, width: 1.5)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-                  ),
-                  items: departments.map((d) {
-                    final name = (lang == 'ar'
-                            ? d['name_ar']
-                            : d['name_en'] ?? d['name']) as String? ??
-                        d['name'] as String;
-                    return DropdownMenuItem<String>(
-                        value: d['id'] as String, child: Text(name, style: const TextStyle(fontSize: 13)));
-                  }).toList(),
-                  onChanged: (v) => setSt(() => selectedDeptId = v),
-                ),
-              ],
-            ),
-          ),
+        builder: (ctx, setSt) => OptimizedDialog(
+          title: l10n.reassignDepartmentTitle,
+          isScrollable: false,
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
               child: Text(l10n.cancel),
             ),
+            const SizedBox(width: 8),
             ElevatedButton.icon(
               onPressed: selectedDeptId == null
                   ? null
@@ -7972,6 +7977,42 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
               ),
             ),
           ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(l10n.reassignDepartmentHint,
+                  style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                value: selectedDeptId,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: l10n.selectNewDepartment,
+                  isDense: true,
+                  filled: true,
+                  fillColor: Colors.grey.shade50,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: Colors.grey.shade200)),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: Colors.indigo, width: 1.5)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                ),
+                items: departments.map((d) {
+                  final name = (lang == 'ar'
+                          ? d['name_ar']
+                          : d['name_en'] ?? d['name']) as String? ??
+                      d['name'] as String;
+                  return DropdownMenuItem<String>(
+                      value: d['id'] as String, child: Text(name, style: const TextStyle(fontSize: 13)));
+                }).toList(),
+                onChanged: (v) => setSt(() => selectedDeptId = v),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -8039,13 +8080,9 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
     await showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text(l10n.assigneeDueDate),
-          content: ExpectedDueDateField(
-            label: l10n.assigneeDueDate,
-            value: picked,
-            onChanged: (v) => setDialogState(() => picked = v),
-          ),
+        builder: (context, setDialogState) => OptimizedDialog(
+          title: l10n.assigneeDueDate,
+          isScrollable: false,
           actions: [
             TextButton(
               onPressed: () {
@@ -8054,11 +8091,17 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
               },
               child: Text(l10n.skip),
             ),
+            const SizedBox(width: 8),
             ElevatedButton(
               onPressed: () => Navigator.pop(context),
               child: Text(l10n.save),
             ),
           ],
+          child: ExpectedDueDateField(
+            label: l10n.assigneeDueDate,
+            value: picked,
+            onChanged: (v) => setDialogState(() => picked = v),
+          ),
         ),
       ),
     );
@@ -9110,8 +9153,28 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         card,
+        // Small branch connector stub linking the main card to the
+        // sub-tickets panel below it, so it reads visually as attached
+        // to this ticket rather than a separate, unrelated block.
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
+          padding: const EdgeInsets.only(left: 26),
+          child: Container(
+            width: 2,
+            height: 10,
+            color: Colors.cyan.withValues(alpha: 0.35),
+          ),
+        ),
+        Container(
+          margin: const EdgeInsets.fromLTRB(16, 0, 8, 4),
+          padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+          decoration: BoxDecoration(
+            color: Colors.cyan.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(12),
+            border: Border(
+              left: BorderSide(
+                  color: Colors.cyan.withValues(alpha: 0.4), width: 3),
+            ),
+          ),
           child: _buildSubticketsSection(l10n),
         ),
       ],

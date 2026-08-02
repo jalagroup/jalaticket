@@ -248,6 +248,11 @@ class _MyAppState extends State<MyApp> {
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.white,
           surfaceTintColor: Colors.white,
+          // Material 3 defaults to a scrolled-under elevation of 3, which
+          // paints a gray shadow band under the app bar the instant content
+          // scrolls beneath it — keeping every screen's header pure white
+          // regardless of scroll position.
+          scrolledUnderElevation: 0,
           foregroundColor: AppColors.onBackground,
           elevation: 0,
           titleTextStyle: TextStyle(
@@ -2033,7 +2038,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       surfaceTintColor: Colors.white,
       foregroundColor: AppColors.onBackground,
       elevation: 0,
-      scrolledUnderElevation: 1,
+      scrolledUnderElevation: 0,
       shadowColor: Colors.black12,
       titleSpacing: 0,
       // When showing nav tabs: logo+name in leading, tabs in title.
@@ -2837,56 +2842,80 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       return true;
     }).toList();
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 0, 4, 16),
+    // No hard rectangular backing behind the pill/arrows — a soft upward
+    // fade instead, so the bar reads as floating over the page rather than
+    // sitting in an opaque white box (the reserved bottomNavigationBar
+    // slot is otherwise painted with the Scaffold's flat background).
+    return Container(
+      padding: const EdgeInsets.fromLTRB(4, 24, 4, 16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.white.withValues(alpha: 0.0),
+            Colors.white.withValues(alpha: 0.9),
+          ],
+          stops: const [0.0, 0.55],
+        ),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           _bottomNavPagerButton(isNext: false),
           const SizedBox(width: 6),
           Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(50),
-                border: Border.all(color: Colors.grey.withValues(alpha: 0.08)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.12),
-                    blurRadius: 24,
-                    offset: const Offset(0, 6),
-                    spreadRadius: 0,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(50),
+              clipBehavior: Clip.antiAlias,
+              child: BackdropFilter(
+                filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.72),
+                    borderRadius: BorderRadius.circular(50),
+                    border:
+                        Border.all(color: Colors.white.withValues(alpha: 0.5)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.12),
+                        blurRadius: 24,
+                        offset: const Offset(0, 6),
+                        spreadRadius: 0,
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              child: SingleChildScrollView(
-                controller: _bottomNavScroll,
-                scrollDirection: Axis.horizontal,
-                physics: const BouncingScrollPhysics(),
-                child: Row(
-                  children: [
-                    ...visibleIndices.map((idx) {
-                      final item = _mobileNavItems[idx];
-                      final isSelected = _currentIndex == idx;
-                      int? badge;
-                      if (idx == 2) badge = _unreadChatRoomsCount > 0 ? _unreadChatRoomsCount : null;
-                      if (idx == 3) badge = _unreadCount > 0 ? _unreadCount : null;
-                      return _buildBottomNavItem(
-                        icon: item.icon,
-                        label: _getMobileNavLabel(idx),
-                        isSelected: isSelected,
-                        badgeCount: badge,
-                        onTap: () => setState(() { _currentIndex = idx; _isNotificationsOpen = false; }),
-                      );
-                    }),
-                    _buildBottomNavItem(
-                      icon: Icons.person_outline_rounded,
-                      label: AppLocalizations.safeOf(context).profile,
-                      isSelected: false,
-                      onTap: _navigateToProfile,
+                  child: SingleChildScrollView(
+                    controller: _bottomNavScroll,
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    child: Row(
+                      children: [
+                        ...visibleIndices.map((idx) {
+                          final item = _mobileNavItems[idx];
+                          final isSelected = _currentIndex == idx;
+                          int? badge;
+                          if (idx == 2) badge = _unreadChatRoomsCount > 0 ? _unreadChatRoomsCount : null;
+                          if (idx == 3) badge = _unreadCount > 0 ? _unreadCount : null;
+                          return _buildBottomNavItem(
+                            icon: item.icon,
+                            label: _getMobileNavLabel(idx),
+                            isSelected: isSelected,
+                            badgeCount: badge,
+                            onTap: () => setState(() { _currentIndex = idx; _isNotificationsOpen = false; }),
+                          );
+                        }),
+                        _buildBottomNavItem(
+                          icon: Icons.person_outline_rounded,
+                          label: AppLocalizations.safeOf(context).profile,
+                          isSelected: false,
+                          onTap: _navigateToProfile,
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -2927,29 +2956,37 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         final atStart = !ready || _bottomNavScroll.offset <= 0;
         final atEnd = !ready || _bottomNavScroll.offset >= _bottomNavScroll.position.maxScrollExtent;
         final disabled = isNext ? atEnd : atStart;
-        return Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: disabled ? Colors.white.withValues(alpha: 0.6) : Colors.white,
-            boxShadow: disabled
-                ? null
-                : [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.12),
-                      blurRadius: 12,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
-          ),
-          child: IconButton(
-            padding: EdgeInsets.zero,
-            iconSize: 26,
-            splashRadius: 20,
-            icon: Icon(isNext ? Icons.chevron_right_rounded : Icons.chevron_left_rounded),
-            color: disabled ? Colors.grey[300] : AppColors.primary,
-            onPressed: disabled ? null : () => _scrollBottomNav(isNext ? 150 : -150),
+        return ClipOval(
+          child: BackdropFilter(
+            filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: disabled
+                    ? Colors.white.withValues(alpha: 0.45)
+                    : Colors.white.withValues(alpha: 0.75),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.5)),
+                boxShadow: disabled
+                    ? null
+                    : [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.12),
+                          blurRadius: 12,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+              ),
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                iconSize: 26,
+                splashRadius: 20,
+                icon: Icon(isNext ? Icons.chevron_right_rounded : Icons.chevron_left_rounded),
+                color: disabled ? Colors.grey[300] : AppColors.primary,
+                onPressed: disabled ? null : () => _scrollBottomNav(isNext ? 150 : -150),
+              ),
+            ),
           ),
         );
       },
@@ -2967,7 +3004,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       width: 74,
       child: GestureDetector(
         onTap: onTap,
-        child: Container(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOutCubic,
           padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
             color: isSelected ? AppColors.primary.withValues(alpha: 0.15) : Colors.transparent,
@@ -2979,7 +3018,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  Icon(icon, color: isSelected ? AppColors.primary : Colors.grey[600], size: 24),
+                  AnimatedScale(
+                    duration: const Duration(milliseconds: 250),
+                    curve: Curves.easeOutBack,
+                    scale: isSelected ? 1.12 : 1.0,
+                    child: Icon(icon, color: isSelected ? AppColors.primary : Colors.grey[600], size: 24),
+                  ),
                   if (badgeCount != null)
                     Positioned(
                       right: -6,
