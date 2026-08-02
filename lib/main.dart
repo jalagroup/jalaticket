@@ -249,13 +249,15 @@ class _MyAppState extends State<MyApp> {
           // surface (cards, dialogs, popups, the pull-to-refresh spinner's
           // own Material backing, etc.) toward that color as you scroll or
           // interact, which at low opacity reads as a dull gray/beige cast
-          // appearing "out of nowhere". Pinning it to white neutralizes
-          // that tint everywhere in one place instead of per-widget.
-          surfaceTint: Colors.white,
+          // appearing "out of nowhere". Transparent (not just white) makes
+          // ElevationOverlay skip the blend entirely rather than blending
+          // white-on-white, which is the only way to be certain no tint
+          // is ever applied regardless of the base surface color.
+          surfaceTint: Colors.transparent,
         ),
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.white,
-          surfaceTintColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
           // Material 3 defaults to a scrolled-under elevation of 3, which
           // paints a gray shadow band under the app bar the instant content
           // scrolls beneath it — keeping every screen's header pure white
@@ -2046,7 +2048,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
     return AppBar(
       backgroundColor: Colors.white,
-      surfaceTintColor: Colors.white,
+      surfaceTintColor: Colors.transparent,
       foregroundColor: AppColors.onBackground,
       elevation: 0,
       scrolledUnderElevation: 0,

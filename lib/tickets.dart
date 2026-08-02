@@ -3194,6 +3194,8 @@ class _TicketsScreenState extends State<TicketsScreen>
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0,
         elevation: 0,
         shadowColor: Colors.grey.withOpacity(0.1),
         title: Row(
