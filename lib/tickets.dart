@@ -4195,6 +4195,8 @@ class _TicketsScreenState extends State<TicketsScreen>
     }
 
     return RefreshIndicator(
+      backgroundColor: Colors.white,
+      color: AppColors.primary,
       onRefresh: () async {
         _refreshData();
         await Future.delayed(const Duration(seconds: 1));
@@ -9104,33 +9106,36 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
         ticketsScreenState?._isTicketHighlighted(widget.ticket.id) ?? false;
     final highlightColor =
         ticketsScreenState?._getTicketHighlightColor(widget.ticket.id);
+    final hasSubtickets = _subtickets.isNotEmpty;
+    final borderColor =
+        isHighlighted ? Colors.orange : Colors.grey.withOpacity(0.2);
+    final borderWidth = isHighlighted ? 3.0 : 1.0;
 
-    final card = AnimatedContainer(
+    // The main ticket's own content — its bottom corners are squared off
+    // when sub-tickets exist, so it butts directly against the sub-tickets
+    // zone below with no gap, reading as one continuous card rather than
+    // two stacked, separately-bordered boxes.
+    final mainSection = AnimatedContainer(
       duration: const Duration(milliseconds: 300),
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isHighlighted ? Colors.orange : Colors.grey.withOpacity(0.2),
-          width: isHighlighted ? 3 : 1,
+        borderRadius: BorderRadius.only(
+          topLeft: const Radius.circular(12),
+          topRight: const Radius.circular(12),
+          bottomLeft: Radius.circular(hasSubtickets ? 0 : 12),
+          bottomRight: Radius.circular(hasSubtickets ? 0 : 12),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: isHighlighted
-                ? Colors.orange.withOpacity(0.3)
-                : Colors.black.withOpacity(0.1),
-            blurRadius: isHighlighted ? 12 : 4,
-            spreadRadius: isHighlighted ? 2 : 0.1,
-            offset: const Offset(0, 0),
-          ),
-        ],
       ),
       child: Container(
         decoration: isHighlighted && highlightColor != null
             ? BoxDecoration(
                 color: highlightColor,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(12),
+                  topRight: const Radius.circular(12),
+                  bottomLeft: Radius.circular(hasSubtickets ? 0 : 12),
+                  bottomRight: Radius.circular(hasSubtickets ? 0 : 12),
+                ),
               )
             : null,
         child: Column(
@@ -9142,42 +9147,52 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
       ),
     );
 
-    // Sub-tickets render as their own full cards BELOW the whole main
-    // card (collapsed or expanded) — not nested inside its collapsible
-    // info panel — so they're always reachable/expandable/trackable in
-    // their own right, matching how the main ticket itself works.
-    if (_subtickets.isEmpty) return card;
-
-    final l10n = AppLocalizations.safeOf(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        card,
-        // Small branch connector stub linking the main card to the
-        // sub-tickets panel below it, so it reads visually as attached
-        // to this ticket rather than a separate, unrelated block.
-        Padding(
-          padding: const EdgeInsets.only(left: 26),
-          child: Container(
-            width: 2,
-            height: 10,
-            color: Colors.cyan.withValues(alpha: 0.35),
-          ),
-        ),
-        Container(
-          margin: const EdgeInsets.fromLTRB(16, 0, 8, 4),
-          padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
-          decoration: BoxDecoration(
-            color: Colors.cyan.withValues(alpha: 0.05),
-            borderRadius: BorderRadius.circular(12),
-            border: Border(
-              left: BorderSide(
-                  color: Colors.cyan.withValues(alpha: 0.4), width: 3),
-            ),
-          ),
-          child: _buildSubticketsSection(l10n),
+    final outerDecoration = BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: borderColor, width: borderWidth),
+      boxShadow: [
+        BoxShadow(
+          color: isHighlighted
+              ? Colors.orange.withOpacity(0.3)
+              : Colors.black.withOpacity(0.1),
+          blurRadius: isHighlighted ? 12 : 4,
+          spreadRadius: isHighlighted ? 2 : 0.1,
+          offset: const Offset(0, 0),
         ),
       ],
+    );
+
+    // Sub-tickets render as part of the SAME bordered/shadowed card as
+    // the main ticket — a thin colored divider separates the two zones
+    // instead of a gap, so the sub-tickets panel reads as an attached
+    // section of this ticket, not a separate floating block below it.
+    if (!hasSubtickets) {
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+        decoration: outerDecoration,
+        clipBehavior: Clip.antiAlias,
+        child: mainSection,
+      );
+    }
+
+    final l10n = AppLocalizations.safeOf(context);
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+      decoration: outerDecoration,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          mainSection,
+          Container(height: 1, color: Colors.cyan.withValues(alpha: 0.25)),
+          Container(
+            width: double.infinity,
+            color: Colors.cyan.withValues(alpha: 0.04),
+            padding: const EdgeInsets.fromLTRB(12, 8, 10, 10),
+            child: _buildSubticketsSection(l10n),
+          ),
+        ],
+      ),
     );
   }
 }

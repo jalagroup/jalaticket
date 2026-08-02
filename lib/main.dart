@@ -244,6 +244,14 @@ class _MyAppState extends State<MyApp> {
           onSecondary: AppColors.onSecondary,
           onSurface: AppColors.onSurface,
           onBackground: AppColors.onBackground,
+          // ColorScheme.light() defaults surfaceTint to `primary` (orange)
+          // when not set explicitly — Material 3 then tints EVERY elevated
+          // surface (cards, dialogs, popups, the pull-to-refresh spinner's
+          // own Material backing, etc.) toward that color as you scroll or
+          // interact, which at low opacity reads as a dull gray/beige cast
+          // appearing "out of nowhere". Pinning it to white neutralizes
+          // that tint everywhere in one place instead of per-widget.
+          surfaceTint: Colors.white,
         ),
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.white,
@@ -1954,12 +1962,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       bottomNavigationBar:
           hasBottomNavBar ? _buildFloatingBottomNavBar() : null,
       drawer: kIsWeb && !isWidthNotGood ? _buildWebDrawer() : null,
-      // false (not true): every individual screen's own scroll view would
-      // otherwise need its own bottom padding to avoid being hidden behind
-      // the floating nav bar — with this false, Scaffold reserves the nav
-      // bar's actual height from the body automatically, for every screen,
-      // with no per-screen changes needed.
-      extendBody: false,
+      // true: the body paints all the way behind the floating nav bar
+      // instead of stopping above it, so the pill/arrows float over real
+      // page content (genuinely transparent gaps, no opaque strip) rather
+      // than a flat Scaffold-colored rectangle. This relies on every
+      // scrollable screen already reserving its own bottom space via the
+      // shared `bottomNavBarHeight` (90.0) padding convention used across
+      // tickets/management/chat/auth — independent of Scaffold's own
+      // reservation, so nothing is hidden behind the bar with this on.
+      extendBody: true,
     );
   }
 
@@ -2842,23 +2853,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       return true;
     }).toList();
 
-    // No hard rectangular backing behind the pill/arrows — a soft upward
-    // fade instead, so the bar reads as floating over the page rather than
-    // sitting in an opaque white box (the reserved bottomNavigationBar
-    // slot is otherwise painted with the Scaffold's flat background).
-    return Container(
-      padding: const EdgeInsets.fromLTRB(4, 24, 4, 16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.white.withValues(alpha: 0.0),
-            Colors.white.withValues(alpha: 0.9),
-          ],
-          stops: const [0.0, 0.55],
-        ),
-      ),
+    // Fully transparent behind the pill/arrows — a true floating island.
+    // With extendBody: true the real page keeps scrolling underneath this
+    // whole strip, so there is genuine content for the pill's own glass
+    // blur to blur; the strip itself paints nothing at all.
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 0, 4, 16),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
