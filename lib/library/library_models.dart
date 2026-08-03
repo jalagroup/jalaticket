@@ -6,6 +6,7 @@ class LibraryFile {
   final int? fileSize;
   final String? mimeType;
   final bool isShared;
+  final String? folderId;
   final DateTime createdAt;
 
   const LibraryFile({
@@ -16,6 +17,7 @@ class LibraryFile {
     this.fileSize,
     this.mimeType,
     required this.isShared,
+    this.folderId,
     required this.createdAt,
   });
 
@@ -27,6 +29,7 @@ class LibraryFile {
         fileSize: j['file_size'] as int?,
         mimeType: j['mime_type'] as String?,
         isShared: j['is_shared'] as bool? ?? false,
+        folderId: j['folder_id'] as String?,
         createdAt: DateTime.parse(j['created_at'] as String),
       );
 
@@ -37,4 +40,28 @@ class LibraryFile {
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
+}
+
+class LibraryFolder {
+  final String id;
+  final String ownerUserId;
+  final String? parentFolderId;
+  final String name;
+  final DateTime createdAt;
+
+  const LibraryFolder({
+    required this.id,
+    required this.ownerUserId,
+    this.parentFolderId,
+    required this.name,
+    required this.createdAt,
+  });
+
+  factory LibraryFolder.fromJson(Map<String, dynamic> j) => LibraryFolder(
+        id: j['id'] as String,
+        ownerUserId: j['owner_user_id'] as String,
+        parentFolderId: j['parent_folder_id'] as String?,
+        name: j['name'] as String,
+        createdAt: DateTime.parse(j['created_at'] as String),
+      );
 }

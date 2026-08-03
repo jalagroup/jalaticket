@@ -5373,7 +5373,17 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
                 size: 22,
               ),
             ),
-            const SizedBox(width: 12),
+            const Spacer(),
+            _buildActionButtons(isMobile: true),
+          ],
+        ),
+
+        const SizedBox(height: 10),
+
+        // Row 2: Ticket number tag beside the title
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
@@ -5389,22 +5399,19 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
                 ),
               ),
             ),
-            const Spacer(),
-            _buildActionButtons(isMobile: true),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                widget.ticket.title,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
-        ),
-
-        const SizedBox(height: 10),
-
-        // Row 2: Title
-        Text(
-          widget.ticket.title,
-          style: const TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-          ),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
         ),
 
         const SizedBox(height: 10),

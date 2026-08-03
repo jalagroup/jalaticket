@@ -40,6 +40,7 @@ import 'package:jalasupport/sound_service.dart';
 import 'package:jalasupport/ai_dashboard_onboarding.dart';
 import 'package:jalasupport/ai_dashboard_screen.dart';
 import 'package:jalasupport/custom_complaints/cc_home_screen.dart';
+import 'package:jalasupport/library/library_screen.dart';
 import 'package:jalasupport/user_fields/user_field_service.dart';
 import 'package:jalasupport/url_strategy.dart';
 import 'package:go_router/go_router.dart';
@@ -371,6 +372,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   List<NavigationItem> _webNavItems = [];
   List<NavigationItem> _mobileNavItems = [];
   final ScrollController _bottomNavScroll = ScrollController();
+  final ScrollController _webNavTabScroll = ScrollController();
 
   // KPI tap — navigate to tickets with a pre-selected status tab
   String? _initialTicketStatus;
@@ -548,6 +550,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       NavigationItem(icon: Icons.dynamic_form_outlined, label: l10n.customComplaints),
       NavigationItem(icon: Icons.settings, label: l10n.management),
       NavigationItem(icon: Icons.local_shipping_outlined, label: _locale.languageCode == 'ar' ? 'الأسطول' : 'Fleet'),
+      NavigationItem(icon: Icons.folder_outlined, label: l10n.myLibrary),
     ];
 
     // Web navigation items
@@ -559,6 +562,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       NavigationItem(icon: Icons.dynamic_form_outlined, label: l10n.customComplaints),
       NavigationItem(icon: Icons.settings, label: l10n.management),
       NavigationItem(icon: Icons.local_shipping_outlined, label: _locale.languageCode == 'ar' ? 'الأسطول' : 'Fleet'),
+      NavigationItem(icon: Icons.folder_outlined, label: l10n.myLibrary),
     ];
 
     if (mounted) {
@@ -991,6 +995,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     _connectivitySubscription?.cancel();
     _localeChangeSubscription?.cancel(); // ✨ NEW: Cancel locale subscription
     _bottomNavScroll.dispose();
+    _webNavTabScroll.dispose();
     super.dispose();
   }
 
@@ -1511,14 +1516,49 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     }
   }
 
+  bool get _webNavTabScrollReady =>
+      _webNavTabScroll.hasClients && _webNavTabScroll.position.hasContentDimensions;
+
+  void _scrollWebNavTab(double delta) {
+    if (!_webNavTabScrollReady) return;
+    final target = (_webNavTabScroll.offset + delta)
+        .clamp(0.0, _webNavTabScroll.position.maxScrollExtent);
+    _webNavTabScroll.animateTo(
+      target,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+  }
+
+  Widget _webNavTabPagerButton({required bool isNext}) {
+    final ready = _webNavTabScrollReady;
+    final atStart = !ready || _webNavTabScroll.offset <= 0;
+    final atEnd = !ready || _webNavTabScroll.offset >= _webNavTabScroll.position.maxScrollExtent;
+    final disabled = isNext ? atEnd : atStart;
+    return SizedBox(
+      width: 28,
+      height: 56,
+      child: IconButton(
+        padding: EdgeInsets.zero,
+        iconSize: 18,
+        splashRadius: 16,
+        icon: Icon(isNext ? Icons.chevron_right_rounded : Icons.chevron_left_rounded),
+        color: disabled ? Colors.grey[300] : Colors.grey[700],
+        onPressed: disabled ? null : () => _scrollWebNavTab(isNext ? 160 : -160),
+      ),
+    );
+  }
+
   /// Underline-style nav tab bar (no ripple, orange indicator like tickets TabBar).
+  /// Lays out normally when every tab fits the available header width; once
+  /// they don't, becomes horizontally scrollable (no visible scrollbar,
+  /// overflow clipped) with click-to-page arrows on each side instead.
   Widget _buildWebNavTabWidget() {
     if (_webNavItems.isEmpty) return const SizedBox();
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: _webNavItems.asMap().entries.where((entry) {
+    final tabsRow = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: _webNavItems.asMap().entries.where((entry) {
           if (entry.value.icon == Icons.report_problem &&
               !_hasComplaintPermission) return false;
           if (entry.value.icon == Icons.local_shipping_outlined &&
@@ -1618,7 +1658,32 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             ),
           );
         }).toList(),
-      ),
+      );
+
+    return AnimatedBuilder(
+      animation: _webNavTabScroll,
+      builder: (context, _) {
+        final overflowing = _webNavTabScroll.hasClients &&
+            _webNavTabScroll.position.hasContentDimensions &&
+            _webNavTabScroll.position.maxScrollExtent > 0;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (overflowing) _webNavTabPagerButton(isNext: false),
+            Flexible(
+              child: ClipRect(
+                child: SingleChildScrollView(
+                  controller: _webNavTabScroll,
+                  scrollDirection: Axis.horizontal,
+                  physics: const ClampingScrollPhysics(),
+                  child: tabsRow,
+                ),
+              ),
+            ),
+            if (overflowing) _webNavTabPagerButton(isNext: true),
+          ],
+        );
+      },
     );
   }
 
@@ -1635,6 +1700,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       case 4: return l10n.customComplaints;
       case 5: return l10n.management;
       case 6: return Localizations.localeOf(context).languageCode == 'ar' ? 'الأسطول' : 'Fleet';
+      case 7: return l10n.myLibrary;
       default: return '';
     }
   }
@@ -1651,6 +1717,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       case 5: return l10n.customComplaints;
       case 6: return l10n.management;
       case 7: return Localizations.localeOf(context).languageCode == 'ar' ? 'الأسطول' : 'Fleet';
+      case 8: return l10n.myLibrary;
       default: return '';
     }
   }
@@ -1750,6 +1817,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           return _hasFleetAccess
               ? FleetManagementScreen(currentUser: _currentUser!)
               : MyVehiclesScreen(currentUser: _currentUser!);
+        case 8:
+          return LibraryScreen(currentUser: _currentUser!);
         default:
           return _buildDashboardTab(isMobile, navigateToTickets);
       }
@@ -1789,6 +1858,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           return _hasFleetAccess
               ? FleetManagementScreen(currentUser: _currentUser!)
               : MyVehiclesScreen(currentUser: _currentUser!);
+        case 7:
+          return LibraryScreen(currentUser: _currentUser!);
         default:
           return _buildDashboardTab(isMobile, navigateToTickets);
       }

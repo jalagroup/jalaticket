@@ -17,6 +17,7 @@ const List<String> kWebTabPaths = [
   '/custom-complaints', // 4
   '/management',        // 5
   '/fleet',             // 6
+  '/library',           // 7
 ];
 
 /// Returns the tab index (0-6) for the given path, or 0 if not found.
@@ -262,6 +263,9 @@ final GoRouter appRouter = GoRouter(
 
     // ── Fleet ─────────────────────────────────────────────────────────────────
     GoRoute(path: '/fleet', pageBuilder: _mainPage),
+
+    // ── Library ───────────────────────────────────────────────────────────────
+    GoRoute(path: '/library', pageBuilder: _mainPage),
 
     // ── Root ──────────────────────────────────────────────────────────────────
     GoRoute(path: '/', builder: (_, __) => const AuthWrapper()),

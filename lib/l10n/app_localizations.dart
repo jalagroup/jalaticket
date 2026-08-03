@@ -1183,6 +1183,28 @@ class AppLocalizations {
   String get revokeLink => translate('revoke_link');
   String get attachToTicket => translate('attach_to_ticket');
   String get skip => translate('skip');
+  String get newFolder => translate('new_folder');
+  String get folderName => translate('folder_name');
+  String get rename => translate('rename');
+  String get move => translate('move');
+  String get moveHere => translate('move_here');
+  String get libraryRoot => translate('library_root');
+  String get folderNotEmpty => translate('folder_not_empty');
+  String get deleteFolderTitle => translate('delete_folder_title');
+  String get deleteFolderConfirm => translate('delete_folder_confirm');
+  String get folderEmpty => translate('folder_empty');
+  String get selectDestinationFolder => translate('select_destination_folder');
+  String get deleteFileTitle => translate('delete_file_title');
+  String get deleteFileConfirm => translate('delete_file_confirm');
+  String get linkCopied => translate('link_copied');
+  String get renameFile => translate('rename_file');
+  String get renameFolder => translate('rename_folder');
+  String get moveFile => translate('move_file');
+  String get moveFolder => translate('move_folder');
+  String get folderNameRequired => translate('folder_name_required');
+  String get attachedToTicket => translate('attached_to_ticket');
+  String get selectATicket => translate('select_a_ticket');
+  String get searchByTitleOrNumber => translate('search_by_title_or_number');
   String get taskForThisAdmin => translate('task_for_this_admin');
   String get pleaseFillTaskForAllAdmins => translate('please_fill_task_for_all_admins');
   String get reports => translate('reports');
@@ -2308,6 +2330,28 @@ const Map<String, String> _enValues = {
   'revoke_link': 'Revoke link',
   'attach_to_ticket': 'Attach to ticket',
   'skip': 'Skip',
+  'new_folder': 'New folder',
+  'folder_name': 'Folder name',
+  'rename': 'Rename',
+  'move': 'Move',
+  'move_here': 'Move here',
+  'library_root': 'My Library',
+  'folder_not_empty': 'This folder isn\'t empty. Move or delete its contents first.',
+  'delete_folder_title': 'Delete folder?',
+  'delete_folder_confirm': 'This will permanently delete the folder.',
+  'folder_empty': 'This folder is empty.',
+  'select_destination_folder': 'Select destination folder',
+  'delete_file_title': 'Delete file?',
+  'delete_file_confirm': 'This will permanently delete this file.',
+  'link_copied': 'Link copied to clipboard',
+  'rename_file': 'Rename file',
+  'rename_folder': 'Rename folder',
+  'move_file': 'Move file',
+  'move_folder': 'Move folder',
+  'folder_name_required': 'Please enter a folder name',
+  'attached_to_ticket': 'Attached to ticket',
+  'select_a_ticket': 'Select a ticket',
+  'search_by_title_or_number': 'Search by title or ticket number',
   'task_for_this_admin': "This admin's task",
   'please_fill_task_for_all_admins': 'Please enter a title and description for every selected admin',
   'reports': 'Reports',
@@ -3444,6 +3488,28 @@ const Map<String, String> _arValues = {
   'revoke_link': 'إلغاء الرابط',
   'attach_to_ticket': 'إرفاق بتذكرة',
   'skip': 'تخطي',
+  'new_folder': 'مجلد جديد',
+  'folder_name': 'اسم المجلد',
+  'rename': 'إعادة تسمية',
+  'move': 'نقل',
+  'move_here': 'نقل هنا',
+  'library_root': 'مكتبتي',
+  'folder_not_empty': 'هذا المجلد ليس فارغاً. قم بنقل أو حذف محتوياته أولاً.',
+  'delete_folder_title': 'حذف المجلد؟',
+  'delete_folder_confirm': 'سيتم حذف المجلد نهائياً.',
+  'folder_empty': 'هذا المجلد فارغ.',
+  'select_destination_folder': 'اختر المجلد الوجهة',
+  'delete_file_title': 'حذف الملف؟',
+  'delete_file_confirm': 'سيتم حذف هذا الملف نهائياً.',
+  'link_copied': 'تم نسخ الرابط',
+  'rename_file': 'إعادة تسمية الملف',
+  'rename_folder': 'إعادة تسمية المجلد',
+  'move_file': 'نقل الملف',
+  'move_folder': 'نقل المجلد',
+  'folder_name_required': 'الرجاء إدخال اسم المجلد',
+  'attached_to_ticket': 'تم الإرفاق بالتذكرة',
+  'select_a_ticket': 'اختر تذكرة',
+  'search_by_title_or_number': 'ابحث بالعنوان أو رقم التذكرة',
   'task_for_this_admin': 'مهمة هذا المسؤول',
   'please_fill_task_for_all_admins': 'الرجاء إدخال عنوان ووصف لكل مسؤول تم اختياره',
   'reports': 'التقارير',
