@@ -1205,6 +1205,29 @@ class AppLocalizations {
   String get attachedToTicket => translate('attached_to_ticket');
   String get selectATicket => translate('select_a_ticket');
   String get searchByTitleOrNumber => translate('search_by_title_or_number');
+  String get shareWithPeople => translate('share_with_people');
+  String get manageAccess => translate('manage_access');
+  String get addPerson => translate('add_person');
+  String get searchByName => translate('search_by_name');
+  String get permission => translate('permission');
+  String get viewOnly => translate('view_only');
+  String get canEdit => translate('can_edit');
+  String get removeAccess => translate('remove_access');
+  String get sharedByName => translate('shared_by_name');
+  String get sharedWithMe => translate('shared_with_me');
+  String get myFiles => translate('my_files');
+  String get noOneHasAccessYet => translate('no_one_has_access_yet');
+  String get personAdded => translate('person_added');
+  String get shareThisLibraryAttachment => translate('share_this_library_attachment');
+  String get shareThisLibraryAttachmentHint => translate('share_this_library_attachment_hint');
+  String get shareWithAllDeptAdmins => translate('share_with_all_dept_admins');
+  String get shareWithSpecificAdmin => translate('share_with_specific_admin');
+  String get dontShare => translate('dont_share');
+  String get fromLibrary => translate('from_library');
+  String get sharedFromLibraryWith => translate('shared_from_library_with');
+  String get attachFromLibrary => translate('attach_from_library');
+  String get takePhoto => translate('take_photo');
+  String get chooseFromGallery => translate('choose_from_gallery');
   String get taskForThisAdmin => translate('task_for_this_admin');
   String get pleaseFillTaskForAllAdmins => translate('please_fill_task_for_all_admins');
   String get reports => translate('reports');
@@ -2352,6 +2375,30 @@ const Map<String, String> _enValues = {
   'attached_to_ticket': 'Attached to ticket',
   'select_a_ticket': 'Select a ticket',
   'search_by_title_or_number': 'Search by title or ticket number',
+  'share_with_people': 'Share with people',
+  'manage_access': 'Manage access',
+  'add_person': 'Add person',
+  'search_by_name': 'Search by name',
+  'permission': 'Permission',
+  'view_only': 'View only',
+  'can_edit': 'Can edit',
+  'remove_access': 'Remove access',
+  'shared_by_name': 'Shared by',
+  'shared_with_me': 'Shared with me',
+  'my_files': 'My files',
+  'no_one_has_access_yet': 'No one else has access yet.',
+  'person_added': 'Person added',
+  'share_this_library_attachment': 'Share this attachment?',
+  'share_this_library_attachment_hint':
+      'This file is from your personal library. Share it with the people handling this ticket so they can open it.',
+  'share_with_all_dept_admins': 'All admins in the department',
+  'share_with_specific_admin': 'A specific admin',
+  'dont_share': "Don't share",
+  'from_library': 'From library',
+  'shared_from_library_with': 'Shared from library with',
+  'attach_from_library': 'Attach from library',
+  'take_photo': 'Take photo',
+  'choose_from_gallery': 'Choose from gallery',
   'task_for_this_admin': "This admin's task",
   'please_fill_task_for_all_admins': 'Please enter a title and description for every selected admin',
   'reports': 'Reports',
@@ -3510,6 +3557,30 @@ const Map<String, String> _arValues = {
   'attached_to_ticket': 'تم الإرفاق بالتذكرة',
   'select_a_ticket': 'اختر تذكرة',
   'search_by_title_or_number': 'ابحث بالعنوان أو رقم التذكرة',
+  'share_with_people': 'مشاركة مع أشخاص',
+  'manage_access': 'إدارة الوصول',
+  'add_person': 'إضافة شخص',
+  'search_by_name': 'ابحث بالاسم',
+  'permission': 'الصلاحية',
+  'view_only': 'عرض فقط',
+  'can_edit': 'يمكنه التعديل',
+  'remove_access': 'إزالة الوصول',
+  'shared_by_name': 'شارَكه',
+  'shared_with_me': 'مشارك معي',
+  'my_files': 'ملفاتي',
+  'no_one_has_access_yet': 'لا يوجد أحد آخر لديه وصول بعد.',
+  'person_added': 'تمت إضافة الشخص',
+  'share_this_library_attachment': 'مشاركة هذا المرفق؟',
+  'share_this_library_attachment_hint':
+      'هذا الملف من مكتبتك الشخصية. شاركه مع المسؤولين عن هذه التذكرة ليتمكنوا من فتحه.',
+  'share_with_all_dept_admins': 'جميع مسؤولي القسم',
+  'share_with_specific_admin': 'مسؤول محدد',
+  'dont_share': 'عدم المشاركة',
+  'from_library': 'من المكتبة',
+  'shared_from_library_with': 'تمت مشاركته من المكتبة مع',
+  'attach_from_library': 'إرفاق من المكتبة',
+  'take_photo': 'التقاط صورة',
+  'choose_from_gallery': 'اختيار من المعرض',
   'task_for_this_admin': 'مهمة هذا المسؤول',
   'please_fill_task_for_all_admins': 'الرجاء إدخال عنوان ووصف لكل مسؤول تم اختياره',
   'reports': 'التقارير',

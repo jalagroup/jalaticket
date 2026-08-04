@@ -10,6 +10,9 @@ import 'package:jalasupport/create_complaint_dialog.dart';
 import 'package:jalasupport/truck_maintenance_dialog.dart';
 import 'package:jalasupport/l10n/app_localizations.dart';
 import 'package:jalasupport/tickets_modules/allDialogs.dart';
+import 'package:jalasupport/library/library_models.dart' show LibraryFile;
+import 'package:jalasupport/library/library_ticket_attach.dart';
+import 'package:jalasupport/library/library_service.dart';
 import 'package:jalasupport/main.dart';
 import 'package:jalasupport/models.dart';
 import 'package:jalasupport/searchable_dropdown.dart';
@@ -4560,6 +4563,9 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
   List<Map<String, dynamic>> _ticketAttachments = [];
   List<Map<String, dynamic>> _reportAttachments = [];
   List<Map<String, dynamic>> _activityLogs = [];
+  // library_file_id -> names of people that library file is shared with,
+  // so an attachment picked "from library" can show who can also open it.
+  Map<String, List<String>> _librarySharedWith = {};
 
   @override
   void initState() {
@@ -4893,6 +4899,7 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
       ]);
 
       await Future.wait(futures);
+      await _loadLibrarySharedWith();
 
       if (mounted) {
         setState(() => _loadingExpandedData = false);
@@ -4902,6 +4909,37 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
       if (mounted) {
         setState(() => _loadingExpandedData = false);
       }
+    }
+  }
+
+  // For any attachment that was attached "from library", shows who else it
+  // was shared with — one batched query for every such attachment on this
+  // ticket rather than a lookup per attachment.
+  Future<void> _loadLibrarySharedWith() async {
+    final fileIds = _ticketAttachments
+        .map((a) => a['library_file_id'] as String?)
+        .whereType<String>()
+        .toSet()
+        .toList();
+    if (fileIds.isEmpty) {
+      _librarySharedWith = {};
+      return;
+    }
+    try {
+      final rows = await supabase
+          .from('library_shares')
+          .select('file_id, shared_with:users!library_shares_shared_with_user_id_fkey(full_name)')
+          .inFilter('file_id', fileIds);
+      final grouped = <String, List<String>>{};
+      for (final row in rows) {
+        final fileId = row['file_id'] as String?;
+        final name = (row['shared_with'] as Map<String, dynamic>?)?['full_name'] as String?;
+        if (fileId == null || name == null) continue;
+        grouped.putIfAbsent(fileId, () => []).add(name);
+      }
+      _librarySharedWith = grouped;
+    } catch (e) {
+      print('Error loading library share info: $e');
     }
   }
 
@@ -7265,9 +7303,12 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
   }
 
   Widget _buildFileAttachment(Map<String, dynamic> attachment) {
+    final l10n = AppLocalizations.safeOf(context);
     final fileName = attachment['file_name'] as String;
     final fileSize = attachment['file_size'] as int?;
     final mimeType = attachment['mime_type'] as String?;
+    final libraryFileId = attachment['library_file_id'] as String?;
+    final sharedWith = libraryFileId != null ? _librarySharedWith[libraryFileId] : null;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -7317,6 +7358,24 @@ class _EnhancedTicketCardState extends State<EnhancedTicketCard> {
                     style: TextStyle(
                       fontSize: 11,
                       color: Colors.grey[600],
+                    ),
+                  ),
+                if (sharedWith != null && sharedWith.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.people_alt_outlined, size: 11, color: AppColors.secondary),
+                        const SizedBox(width: 3),
+                        Flexible(
+                          child: Text(
+                            '${l10n.sharedFromLibraryWith} ${sharedWith.join(', ')}',
+                            style: TextStyle(fontSize: 10.5, color: AppColors.secondary, fontWeight: FontWeight.w600),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
               ],
@@ -11862,8 +11921,23 @@ class _CreateTicketDialogState extends State<CreateTicketDialog> {
   bool _useOtherProblemTitle = false;
   bool _useOtherModelNumber = false;
   List<PlatformFile> _selectedFiles = [];
+  final List<LibraryFile> _libraryAttachments = [];
   final ImagePicker _imagePicker = ImagePicker();
   bool _isUploadingFiles = false;
+
+  Future<void> _pickFromLibrary() async {
+    final picked = await pickLibraryFiles(context, userId: widget.currentUser.id);
+    if (picked == null) return;
+    setState(() {
+      for (final f in picked) {
+        if (!_libraryAttachments.any((e) => e.id == f.id)) _libraryAttachments.add(f);
+      }
+    });
+  }
+
+  void _removeLibraryAttachment(LibraryFile file) {
+    setState(() => _libraryAttachments.removeWhere((e) => e.id == file.id));
+  }
 
   @override
   void initState() {
@@ -12248,6 +12322,24 @@ class _CreateTicketDialogState extends State<CreateTicketDialog> {
         await _uploadFiles(ticketId);
       }
 
+      if (_libraryAttachments.isNotEmpty) {
+        for (final f in _libraryAttachments) {
+          await LibraryService.attachToTicket(
+            file: f,
+            ticketId: ticketId,
+            uploadedByUserId: widget.currentUser.id,
+          );
+        }
+        if (mounted) {
+          await promptShareLibraryAttachments(
+            context,
+            currentUser: widget.currentUser,
+            attachedFiles: _libraryAttachments,
+            departmentId: _selectedDepartmentId,
+          );
+        }
+      }
+
       setState(() => _isLoading = false);
 
       if (mounted) {
@@ -12297,9 +12389,19 @@ class _CreateTicketDialogState extends State<CreateTicketDialog> {
               icon: const Icon(Icons.attach_file),
               label: Text(l10n.files),
             ),
+            TextButton.icon(
+              onPressed: _pickFromLibrary,
+              icon: Icon(Icons.folder_shared_outlined, size: 18, color: AppColors.secondary),
+              label: Text(l10n.attachFromLibrary, style: TextStyle(color: AppColors.secondary)),
+              style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+            ),
           ],
         ),
         const SizedBox(height: 8),
+        if (_libraryAttachments.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          LibraryAttachmentChips(files: _libraryAttachments, onRemove: _removeLibraryAttachment),
+        ],
         if (_selectedFiles.isNotEmpty) ...[
           Container(
             height: 120,
@@ -13688,11 +13790,26 @@ class _ITSolutionTicketScreenState extends State<ITSolutionTicketScreen> {
   PriorityType _selectedPriority = PriorityType.medium;
   DateTime? _dueDate;
   List<PlatformFile> _selectedFiles = [];
+  final List<LibraryFile> _libraryAttachments = [];
   final ImagePicker _imagePicker = ImagePicker();
   bool _isLoading = false;
   bool _isUploadingFiles = false;
 
   String? _itDepartmentId;
+
+  Future<void> _pickFromLibrary() async {
+    final picked = await pickLibraryFiles(context, userId: widget.currentUser.id);
+    if (picked == null) return;
+    setState(() {
+      for (final f in picked) {
+        if (!_libraryAttachments.any((e) => e.id == f.id)) _libraryAttachments.add(f);
+      }
+    });
+  }
+
+  void _removeLibraryAttachment(LibraryFile file) {
+    setState(() => _libraryAttachments.removeWhere((e) => e.id == file.id));
+  }
 
   @override
   void initState() {
@@ -13749,6 +13866,7 @@ class _ITSolutionTicketScreenState extends State<ITSolutionTicketScreen> {
                 selectedPriority: _selectedPriority,
                 selectedDueDate: _dueDate,
                 selectedFiles: _selectedFiles,
+                libraryAttachments: _libraryAttachments,
                 onPriorityChanged: (value) {
                   setState(() => _selectedPriority = value);
                 },
@@ -13758,6 +13876,8 @@ class _ITSolutionTicketScreenState extends State<ITSolutionTicketScreen> {
                 onPickImages: _pickImages,
                 onPickFiles: _pickFiles,
                 onRemoveFile: _removeFile,
+                onPickFromLibrary: _pickFromLibrary,
+                onRemoveLibraryAttachment: _removeLibraryAttachment,
               ),
             ),
           ),
@@ -14088,6 +14208,24 @@ class _ITSolutionTicketScreenState extends State<ITSolutionTicketScreen> {
         await _uploadFiles(ticketId);
       }
 
+      if (_libraryAttachments.isNotEmpty) {
+        for (final f in _libraryAttachments) {
+          await LibraryService.attachToTicket(
+            file: f,
+            ticketId: ticketId,
+            uploadedByUserId: widget.currentUser.id,
+          );
+        }
+        if (mounted) {
+          await promptShareLibraryAttachments(
+            context,
+            currentUser: widget.currentUser,
+            attachedFiles: _libraryAttachments,
+            departmentId: _itDepartmentId,
+          );
+        }
+      }
+
       setState(() => _isLoading = false);
 
       if (mounted) {
@@ -14156,11 +14294,14 @@ class ITSolutionTicketDialogContent extends StatelessWidget {
   final PriorityType selectedPriority;
   final DateTime? selectedDueDate;
   final List<PlatformFile> selectedFiles;
+  final List<LibraryFile> libraryAttachments;
   final Function(PriorityType) onPriorityChanged;
   final ValueChanged<DateTime?> onDueDateChanged;
   final VoidCallback onPickImages;
   final VoidCallback onPickFiles;
   final Function(int) onRemoveFile;
+  final VoidCallback onPickFromLibrary;
+  final ValueChanged<LibraryFile> onRemoveLibraryAttachment;
 
   const ITSolutionTicketDialogContent({
     Key? key,
@@ -14171,11 +14312,14 @@ class ITSolutionTicketDialogContent extends StatelessWidget {
     required this.selectedPriority,
     required this.selectedDueDate,
     required this.selectedFiles,
+    required this.libraryAttachments,
     required this.onPriorityChanged,
     required this.onDueDateChanged,
     required this.onPickImages,
     required this.onPickFiles,
     required this.onRemoveFile,
+    required this.onPickFromLibrary,
+    required this.onRemoveLibraryAttachment,
   }) : super(key: key);
 
   @override
@@ -14320,6 +14464,9 @@ class ITSolutionTicketDialogContent extends StatelessWidget {
           onPickFiles,
           onRemoveFile,
           l10n,
+          libraryAttachments,
+          onPickFromLibrary,
+          onRemoveLibraryAttachment,
         ),
         const SizedBox(height: 10),
 
@@ -14382,6 +14529,9 @@ class ITSolutionTicketDialogContent extends StatelessWidget {
     VoidCallback pickFiles,
     Function(int) removeFile,
     AppLocalizations l10n,
+    List<LibraryFile> libraryAttachments,
+    VoidCallback pickFromLibrary,
+    ValueChanged<LibraryFile> removeLibraryAttachment,
   ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -14413,8 +14563,21 @@ class ITSolutionTicketDialogContent extends StatelessWidget {
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               ),
             ),
+            TextButton.icon(
+              onPressed: pickFromLibrary,
+              icon: Icon(Icons.folder_shared_outlined, size: 18, color: AppColors.secondary),
+              label: Text(l10n.attachFromLibrary, style: TextStyle(color: AppColors.secondary)),
+              style: TextButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+            ),
           ],
         ),
+        if (libraryAttachments.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          LibraryAttachmentChips(files: libraryAttachments, onRemove: removeLibraryAttachment),
+        ],
         const SizedBox(height: 8),
         if (files.isNotEmpty) ...[
           SizedBox(
@@ -14592,11 +14755,26 @@ class _PlacesMaintenanceTicketScreenState
   List<Map<String, dynamic>> _parts = [];
 
   List<PlatformFile> _selectedFiles = [];
+  final List<LibraryFile> _libraryAttachments = [];
   final ImagePicker _imagePicker = ImagePicker();
   bool _isLoading = false;
   bool _isUploadingFiles = false;
   bool _useCustomProblem = false;
   bool _useCustomModel = false;
+
+  Future<void> _pickFromLibrary() async {
+    final picked = await pickLibraryFiles(context, userId: widget.currentUser.id);
+    if (picked == null) return;
+    setState(() {
+      for (final f in picked) {
+        if (!_libraryAttachments.any((e) => e.id == f.id)) _libraryAttachments.add(f);
+      }
+    });
+  }
+
+  void _removeLibraryAttachment(LibraryFile file) {
+    setState(() => _libraryAttachments.removeWhere((e) => e.id == file.id));
+  }
 
   @override
   void initState() {
@@ -14749,6 +14927,7 @@ class _PlacesMaintenanceTicketScreenState
                 problemTitles: _problemTitles,
                 parts: _parts,
                 selectedFiles: _selectedFiles,
+                libraryAttachments: _libraryAttachments,
                 useCustomProblem: _useCustomProblem,
                 useCustomModel: _useCustomModel,
                 canSelectPlace: _canSelectPlace(),
@@ -14812,6 +14991,8 @@ class _PlacesMaintenanceTicketScreenState
                 onPickImages: _pickImages,
                 onPickFiles: _pickFiles,
                 onRemoveFile: _removeFile,
+                onPickFromLibrary: _pickFromLibrary,
+                onRemoveLibraryAttachment: _removeLibraryAttachment,
               ),
             ),
           ),
@@ -15187,6 +15368,24 @@ class _PlacesMaintenanceTicketScreenState
         await _uploadFiles(ticketId);
       }
 
+      if (_libraryAttachments.isNotEmpty) {
+        for (final f in _libraryAttachments) {
+          await LibraryService.attachToTicket(
+            file: f,
+            ticketId: ticketId,
+            uploadedByUserId: widget.currentUser.id,
+          );
+        }
+        if (mounted) {
+          await promptShareLibraryAttachments(
+            context,
+            currentUser: widget.currentUser,
+            attachedFiles: _libraryAttachments,
+            departmentId: _selectedDepartmentId,
+          );
+        }
+      }
+
       setState(() => _isLoading = false);
 
       if (mounted) {
@@ -15273,6 +15472,7 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
   final List<Map<String, dynamic>> problemTitles;
   final List<Map<String, dynamic>> parts;
   final List<PlatformFile> selectedFiles;
+  final List<LibraryFile> libraryAttachments;
   final bool useCustomProblem;
   final bool useCustomModel;
   final bool canSelectPlace;
@@ -15289,6 +15489,8 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
   final VoidCallback onPickImages;
   final VoidCallback onPickFiles;
   final Function(int) onRemoveFile;
+  final VoidCallback onPickFromLibrary;
+  final ValueChanged<LibraryFile> onRemoveLibraryAttachment;
 
   const PlacesMaintenanceTicketContent({
     Key? key,
@@ -15314,6 +15516,7 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
     required this.problemTitles,
     required this.parts,
     required this.selectedFiles,
+    required this.libraryAttachments,
     required this.useCustomProblem,
     required this.useCustomModel,
     required this.canSelectPlace,
@@ -15330,6 +15533,8 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
     required this.onPickImages,
     required this.onPickFiles,
     required this.onRemoveFile,
+    required this.onPickFromLibrary,
+    required this.onRemoveLibraryAttachment,
   }) : super(key: key);
 
   String _getPlaceName(
@@ -15748,6 +15953,9 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
           onPickFiles,
           onRemoveFile,
           l10n,
+          libraryAttachments,
+          onPickFromLibrary,
+          onRemoveLibraryAttachment,
         ),
         const SizedBox(height: 10),
 
@@ -15810,6 +16018,9 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
     VoidCallback pickFiles,
     Function(int) removeFile,
     AppLocalizations l10n,
+    List<LibraryFile> libraryAttachments,
+    VoidCallback pickFromLibrary,
+    ValueChanged<LibraryFile> removeLibraryAttachment,
   ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -15842,8 +16053,21 @@ class PlacesMaintenanceTicketContent extends StatelessWidget {
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               ),
             ),
+            TextButton.icon(
+              onPressed: pickFromLibrary,
+              icon: Icon(Icons.folder_shared_outlined, size: 18, color: AppColors.secondary),
+              label: Text(l10n.attachFromLibrary, style: TextStyle(color: AppColors.secondary)),
+              style: TextButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+            ),
           ],
         ),
+        if (libraryAttachments.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          LibraryAttachmentChips(files: libraryAttachments, onRemove: removeLibraryAttachment),
+        ],
         const SizedBox(height: 8),
         if (files.isNotEmpty) ...[
           Container(
@@ -16020,11 +16244,26 @@ class _IndividualsMaintenanceTicketScreenState
   List<Map<String, dynamic>> _parts = [];
 
   List<PlatformFile> _selectedFiles = [];
+  final List<LibraryFile> _libraryAttachments = [];
   final ImagePicker _imagePicker = ImagePicker();
   bool _isLoading = false;
   bool _isUploadingFiles = false;
   bool _useCustomProblem = false;
   bool _useCustomModel = false;
+
+  Future<void> _pickFromLibrary() async {
+    final picked = await pickLibraryFiles(context, userId: widget.currentUser.id);
+    if (picked == null) return;
+    setState(() {
+      for (final f in picked) {
+        if (!_libraryAttachments.any((e) => e.id == f.id)) _libraryAttachments.add(f);
+      }
+    });
+  }
+
+  void _removeLibraryAttachment(LibraryFile file) {
+    setState(() => _libraryAttachments.removeWhere((e) => e.id == file.id));
+  }
 
   @override
   void initState() {
@@ -16148,6 +16387,7 @@ class _IndividualsMaintenanceTicketScreenState
                 problemTitles: _problemTitles,
                 parts: _parts,
                 selectedFiles: _selectedFiles,
+                libraryAttachments: _libraryAttachments,
                 useCustomProblem: _useCustomProblem,
                 useCustomModel: _useCustomModel,
                 onDepartmentChanged: (value) {
@@ -16207,6 +16447,8 @@ class _IndividualsMaintenanceTicketScreenState
                 onPickImages: _pickImages,
                 onPickFiles: _pickFiles,
                 onRemoveFile: _removeFile,
+                onPickFromLibrary: _pickFromLibrary,
+                onRemoveLibraryAttachment: _removeLibraryAttachment,
               ),
             ),
           ),
@@ -16572,6 +16814,24 @@ class _IndividualsMaintenanceTicketScreenState
         await _uploadFiles(ticketId);
       }
 
+      if (_libraryAttachments.isNotEmpty) {
+        for (final f in _libraryAttachments) {
+          await LibraryService.attachToTicket(
+            file: f,
+            ticketId: ticketId,
+            uploadedByUserId: widget.currentUser.id,
+          );
+        }
+        if (mounted) {
+          await promptShareLibraryAttachments(
+            context,
+            currentUser: widget.currentUser,
+            attachedFiles: _libraryAttachments,
+            departmentId: _selectedDepartmentId,
+          );
+        }
+      }
+
       setState(() => _isLoading = false);
 
       if (mounted) {
@@ -16656,6 +16916,7 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
   final List<Map<String, dynamic>> problemTitles;
   final List<Map<String, dynamic>> parts;
   final List<PlatformFile> selectedFiles;
+  final List<LibraryFile> libraryAttachments;
   final bool useCustomProblem;
   final bool useCustomModel;
   final Function(String?) onDepartmentChanged;
@@ -16670,6 +16931,8 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
   final VoidCallback onPickImages;
   final VoidCallback onPickFiles;
   final Function(int) onRemoveFile;
+  final VoidCallback onPickFromLibrary;
+  final ValueChanged<LibraryFile> onRemoveLibraryAttachment;
 
   const IndividualsMaintenanceTicketContent({
     Key? key,
@@ -16693,6 +16956,7 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
     required this.problemTitles,
     required this.parts,
     required this.selectedFiles,
+    required this.libraryAttachments,
     required this.useCustomProblem,
     required this.useCustomModel,
     required this.onDepartmentChanged,
@@ -16707,6 +16971,8 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
     required this.onPickImages,
     required this.onPickFiles,
     required this.onRemoveFile,
+    required this.onPickFromLibrary,
+    required this.onRemoveLibraryAttachment,
   }) : super(key: key);
 
   @override
@@ -17091,6 +17357,9 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
           onPickFiles,
           onRemoveFile,
           l10n,
+          libraryAttachments,
+          onPickFromLibrary,
+          onRemoveLibraryAttachment,
         ),
         const SizedBox(height: 10),
 
@@ -17154,6 +17423,9 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
     VoidCallback pickFiles,
     Function(int) removeFile,
     AppLocalizations l10n,
+    List<LibraryFile> libraryAttachments,
+    VoidCallback pickFromLibrary,
+    ValueChanged<LibraryFile> removeLibraryAttachment,
   ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -17186,8 +17458,21 @@ class IndividualsMaintenanceTicketContent extends StatelessWidget {
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               ),
             ),
+            TextButton.icon(
+              onPressed: pickFromLibrary,
+              icon: Icon(Icons.folder_shared_outlined, size: 18, color: AppColors.secondary),
+              label: Text(l10n.attachFromLibrary, style: TextStyle(color: AppColors.secondary)),
+              style: TextButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+            ),
           ],
         ),
+        if (libraryAttachments.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          LibraryAttachmentChips(files: libraryAttachments, onRemove: removeLibraryAttachment),
+        ],
         const SizedBox(height: 8),
         if (files.isNotEmpty) ...[
           Container(
@@ -17358,10 +17643,25 @@ class _RequestsTicketScreenState extends State<RequestsTicketScreen> {
   List<Map<String, dynamic>> _parts = [];
 
   List<PlatformFile> _selectedFiles = [];
+  final List<LibraryFile> _libraryAttachments = [];
   final ImagePicker _imagePicker = ImagePicker();
   bool _isLoading = false;
   bool _isUploadingFiles = false;
   bool _useCustomModel = false;
+
+  Future<void> _pickFromLibrary() async {
+    final picked = await pickLibraryFiles(context, userId: widget.currentUser.id);
+    if (picked == null) return;
+    setState(() {
+      for (final f in picked) {
+        if (!_libraryAttachments.any((e) => e.id == f.id)) _libraryAttachments.add(f);
+      }
+    });
+  }
+
+  void _removeLibraryAttachment(LibraryFile file) {
+    setState(() => _libraryAttachments.removeWhere((e) => e.id == file.id));
+  }
 
   @override
   void initState() {
@@ -17467,6 +17767,7 @@ class _RequestsTicketScreenState extends State<RequestsTicketScreen> {
                 natureOfWorkList: _natureOfWorkList,
                 parts: _parts,
                 selectedFiles: _selectedFiles,
+                libraryAttachments: _libraryAttachments,
                 useCustomModel: _useCustomModel,
                 onDepartmentChanged: (value) {
                   setState(() {
@@ -17509,6 +17810,8 @@ class _RequestsTicketScreenState extends State<RequestsTicketScreen> {
                 onPickImages: _pickImages,
                 onPickFiles: _pickFiles,
                 onRemoveFile: _removeFile,
+                onPickFromLibrary: _pickFromLibrary,
+                onRemoveLibraryAttachment: _removeLibraryAttachment,
               ),
             ),
           ),
@@ -17866,6 +18169,24 @@ class _RequestsTicketScreenState extends State<RequestsTicketScreen> {
         await _uploadFiles(ticketId);
       }
 
+      if (_libraryAttachments.isNotEmpty) {
+        for (final f in _libraryAttachments) {
+          await LibraryService.attachToTicket(
+            file: f,
+            ticketId: ticketId,
+            uploadedByUserId: widget.currentUser.id,
+          );
+        }
+        if (mounted) {
+          await promptShareLibraryAttachments(
+            context,
+            currentUser: widget.currentUser,
+            attachedFiles: _libraryAttachments,
+            departmentId: _selectedDepartmentId,
+          );
+        }
+      }
+
       setState(() => _isLoading = false);
 
       if (mounted) {
@@ -17946,6 +18267,7 @@ class RequestsTicketContent extends StatelessWidget {
   final List<NatureOfWorkModel> natureOfWorkList;
   final List<Map<String, dynamic>> parts;
   final List<PlatformFile> selectedFiles;
+  final List<LibraryFile> libraryAttachments;
   final bool useCustomModel;
   final Function(String?) onDepartmentChanged;
   final Function(String?) onNatureOfWorkChanged;
@@ -17957,6 +18279,8 @@ class RequestsTicketContent extends StatelessWidget {
   final VoidCallback onPickImages;
   final VoidCallback onPickFiles;
   final Function(int) onRemoveFile;
+  final VoidCallback onPickFromLibrary;
+  final ValueChanged<LibraryFile> onRemoveLibraryAttachment;
 
   const RequestsTicketContent({
     Key? key,
@@ -17977,6 +18301,7 @@ class RequestsTicketContent extends StatelessWidget {
     required this.natureOfWorkList,
     required this.parts,
     required this.selectedFiles,
+    required this.libraryAttachments,
     required this.useCustomModel,
     required this.onDepartmentChanged,
     required this.onNatureOfWorkChanged,
@@ -17988,6 +18313,8 @@ class RequestsTicketContent extends StatelessWidget {
     required this.onPickImages,
     required this.onPickFiles,
     required this.onRemoveFile,
+    required this.onPickFromLibrary,
+    required this.onRemoveLibraryAttachment,
   }) : super(key: key);
 
   @override
@@ -18294,6 +18621,9 @@ class RequestsTicketContent extends StatelessWidget {
           onPickFiles,
           onRemoveFile,
           l10n,
+          libraryAttachments,
+          onPickFromLibrary,
+          onRemoveLibraryAttachment,
         ),
         const SizedBox(height: 10),
 
@@ -18356,6 +18686,9 @@ class RequestsTicketContent extends StatelessWidget {
     VoidCallback pickFiles,
     Function(int) removeFile,
     AppLocalizations l10n,
+    List<LibraryFile> libraryAttachments,
+    VoidCallback pickFromLibrary,
+    ValueChanged<LibraryFile> removeLibraryAttachment,
   ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -18387,8 +18720,21 @@ class RequestsTicketContent extends StatelessWidget {
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               ),
             ),
+            TextButton.icon(
+              onPressed: pickFromLibrary,
+              icon: Icon(Icons.folder_shared_outlined, size: 18, color: AppColors.secondary),
+              label: Text(l10n.attachFromLibrary, style: TextStyle(color: AppColors.secondary)),
+              style: TextButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+            ),
           ],
         ),
+        if (libraryAttachments.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          LibraryAttachmentChips(files: libraryAttachments, onRemove: removeLibraryAttachment),
+        ],
         const SizedBox(height: 8),
         if (files.isNotEmpty) ...[
           Container(
@@ -18576,8 +18922,23 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
   bool _useOtherProblemTitle = false;
   bool _useOtherModelNumber = false;
   List<PlatformFile> _selectedFiles = [];
+  final List<LibraryFile> _libraryAttachments = [];
   final ImagePicker _imagePicker = ImagePicker();
   bool _isUploadingFiles = false;
+
+  Future<void> _pickFromLibrary() async {
+    final picked = await pickLibraryFiles(context, userId: widget.currentUser.id);
+    if (picked == null) return;
+    setState(() {
+      for (final f in picked) {
+        if (!_libraryAttachments.any((e) => e.id == f.id)) _libraryAttachments.add(f);
+      }
+    });
+  }
+
+  void _removeLibraryAttachment(LibraryFile file) {
+    setState(() => _libraryAttachments.removeWhere((e) => e.id == file.id));
+  }
 
   @override
   void initState() {
@@ -18954,6 +19315,24 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
         await _uploadFiles(ticketId);
       }
 
+      if (_libraryAttachments.isNotEmpty) {
+        for (final f in _libraryAttachments) {
+          await LibraryService.attachToTicket(
+            file: f,
+            ticketId: ticketId,
+            uploadedByUserId: widget.currentUser.id,
+          );
+        }
+        if (mounted) {
+          await promptShareLibraryAttachments(
+            context,
+            currentUser: widget.currentUser,
+            attachedFiles: _libraryAttachments,
+            departmentId: _selectedDepartmentId,
+          );
+        }
+      }
+
       setState(() => _isLoading = false);
 
       if (mounted) {
@@ -19003,9 +19382,19 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
               icon: const Icon(Icons.attach_file),
               label: Text(l10n.files),
             ),
+            TextButton.icon(
+              onPressed: _pickFromLibrary,
+              icon: Icon(Icons.folder_shared_outlined, size: 18, color: AppColors.secondary),
+              label: Text(l10n.attachFromLibrary, style: TextStyle(color: AppColors.secondary)),
+              style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+            ),
           ],
         ),
         const SizedBox(height: 8),
+        if (_libraryAttachments.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          LibraryAttachmentChips(files: _libraryAttachments, onRemove: _removeLibraryAttachment),
+        ],
         if (_selectedFiles.isNotEmpty) ...[
           Container(
             height: 120,

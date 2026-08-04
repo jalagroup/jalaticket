@@ -4,6 +4,8 @@ import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:jalasupport/complaint_service.dart';
 import 'package:jalasupport/l10n/app_localizations.dart';
+import 'package:jalasupport/library/library_models.dart' show LibraryFile;
+import 'package:jalasupport/library/library_ticket_attach.dart';
 import 'package:jalasupport/main.dart';
 import 'package:jalasupport/models.dart';
 import 'package:jalasupport/tickets.dart';
@@ -38,6 +40,7 @@ class _CreateComplaintDialogState extends State<CreateComplaintDialog> {
   ComplaintType _complaintType = ComplaintType.technical;
   List<ComplaintItemModel> _items = [];
   List<PlatformFile> _selectedFiles = [];
+  final List<LibraryFile> _libraryAttachments = [];
   bool _isLoading = false;
   bool _loadingItems = true;
 
@@ -89,6 +92,20 @@ class _CreateComplaintDialogState extends State<CreateComplaintDialog> {
     setState(() {
       _selectedFiles.removeAt(index);
     });
+  }
+
+  Future<void> _pickFromLibrary() async {
+    final picked = await pickLibraryFiles(context, userId: widget.currentUser.id);
+    if (picked == null) return;
+    setState(() {
+      for (final f in picked) {
+        if (!_libraryAttachments.any((e) => e.id == f.id)) _libraryAttachments.add(f);
+      }
+    });
+  }
+
+  void _removeLibraryAttachment(LibraryFile file) {
+    setState(() => _libraryAttachments.removeWhere((e) => e.id == file.id));
   }
 
   Future<void> _selectDate(BuildContext context, bool isProduceDate) async {
@@ -170,6 +187,37 @@ class _CreateComplaintDialogState extends State<CreateComplaintDialog> {
         }
       }
 
+      // Upload attachments sourced from the personal library. Complaints
+      // store their attachments in the separate `complaint_attachments`
+      // table/bucket (not `ticket_attachments`), so we download the bytes
+      // from the library bucket and feed them into the existing complaint
+      // attachment upload path instead of using LibraryService.attachToTicket.
+      if (_libraryAttachments.isNotEmpty) {
+        for (final f in _libraryAttachments) {
+          final bytes =
+              await supabase.storage.from('file_library').download(f.filePath);
+          await ComplaintService.uploadComplaintAttachment(
+            complaintId: complaintId,
+            fileName: f.fileName,
+            fileBytes: bytes,
+            mimeType: f.mimeType ?? 'application/octet-stream',
+            attachmentType: 'initial',
+            uploadedBy: widget.currentUser.id,
+          );
+        }
+        if (mounted) {
+          // Complaints have no fixed target department at creation time
+          // (they're assigned to a department/admin afterwards), so there is
+          // no departmentId to offer sharing with here; this is a no-op.
+          await promptShareLibraryAttachments(
+            context,
+            currentUser: widget.currentUser,
+            attachedFiles: _libraryAttachments,
+            departmentId: null,
+          );
+        }
+      }
+
       setState(() => _isLoading = false);
 
       if (mounted) {
@@ -217,6 +265,7 @@ class _CreateComplaintDialogState extends State<CreateComplaintDialog> {
             complaintType: _complaintType,
             items: _items,
             selectedFiles: _selectedFiles,
+            libraryAttachments: _libraryAttachments,
             loadingItems: _loadingItems,
             currentUser: widget.currentUser,
             onItemChanged: (value) {
@@ -229,6 +278,8 @@ class _CreateComplaintDialogState extends State<CreateComplaintDialog> {
             onSelectExpiredDate: () => _selectDate(context, false),
             onPickFiles: _pickFiles,
             onRemoveFile: _removeFile,
+            onPickFromLibrary: _pickFromLibrary,
+            onRemoveLibraryAttachment: _removeLibraryAttachment,
           ),
         ),
       ),
@@ -350,6 +401,7 @@ class _CreateComplaintScreenState extends State<CreateComplaintScreen> {
   ComplaintType _complaintType = ComplaintType.technical;
   List<ComplaintItemModel> _items = [];
   List<PlatformFile> _selectedFiles = [];
+  final List<LibraryFile> _libraryAttachments = [];
   bool _isLoading = false;
   bool _loadingItems = true;
 
@@ -401,6 +453,20 @@ class _CreateComplaintScreenState extends State<CreateComplaintScreen> {
     setState(() {
       _selectedFiles.removeAt(index);
     });
+  }
+
+  Future<void> _pickFromLibrary() async {
+    final picked = await pickLibraryFiles(context, userId: widget.currentUser.id);
+    if (picked == null) return;
+    setState(() {
+      for (final f in picked) {
+        if (!_libraryAttachments.any((e) => e.id == f.id)) _libraryAttachments.add(f);
+      }
+    });
+  }
+
+  void _removeLibraryAttachment(LibraryFile file) {
+    setState(() => _libraryAttachments.removeWhere((e) => e.id == file.id));
   }
 
   Future<void> _selectDate(BuildContext context, bool isProduceDate) async {
@@ -482,6 +548,37 @@ class _CreateComplaintScreenState extends State<CreateComplaintScreen> {
         }
       }
 
+      // Upload attachments sourced from the personal library. Complaints
+      // store their attachments in the separate `complaint_attachments`
+      // table/bucket (not `ticket_attachments`), so we download the bytes
+      // from the library bucket and feed them into the existing complaint
+      // attachment upload path instead of using LibraryService.attachToTicket.
+      if (_libraryAttachments.isNotEmpty) {
+        for (final f in _libraryAttachments) {
+          final bytes =
+              await supabase.storage.from('file_library').download(f.filePath);
+          await ComplaintService.uploadComplaintAttachment(
+            complaintId: complaintId,
+            fileName: f.fileName,
+            fileBytes: bytes,
+            mimeType: f.mimeType ?? 'application/octet-stream',
+            attachmentType: 'initial',
+            uploadedBy: widget.currentUser.id,
+          );
+        }
+        if (mounted) {
+          // Complaints have no fixed target department at creation time
+          // (they're assigned to a department/admin afterwards), so there is
+          // no departmentId to offer sharing with here; this is a no-op.
+          await promptShareLibraryAttachments(
+            context,
+            currentUser: widget.currentUser,
+            attachedFiles: _libraryAttachments,
+            departmentId: null,
+          );
+        }
+      }
+
       setState(() => _isLoading = false);
 
       if (mounted) {
@@ -548,6 +645,7 @@ class _CreateComplaintScreenState extends State<CreateComplaintScreen> {
                   complaintType: _complaintType,
                   items: _items,
                   selectedFiles: _selectedFiles,
+                  libraryAttachments: _libraryAttachments,
                   loadingItems: _loadingItems,
                   currentUser: widget.currentUser,
                   onItemChanged: (value) {
@@ -560,6 +658,8 @@ class _CreateComplaintScreenState extends State<CreateComplaintScreen> {
                   onSelectExpiredDate: () => _selectDate(context, false),
                   onPickFiles: _pickFiles,
                   onRemoveFile: _removeFile,
+                  onPickFromLibrary: _pickFromLibrary,
+                  onRemoveLibraryAttachment: _removeLibraryAttachment,
                 ),
               ),
             ),
@@ -661,6 +761,7 @@ class CreateComplaintContent extends StatelessWidget {
   final ComplaintType complaintType;
   final List<ComplaintItemModel> items;
   final List<PlatformFile> selectedFiles;
+  final List<LibraryFile> libraryAttachments;
   final bool loadingItems;
   final UserModel currentUser;
   final Function(String?) onItemChanged;
@@ -669,6 +770,8 @@ class CreateComplaintContent extends StatelessWidget {
   final VoidCallback onSelectExpiredDate;
   final VoidCallback onPickFiles;
   final Function(int) onRemoveFile;
+  final VoidCallback onPickFromLibrary;
+  final ValueChanged<LibraryFile> onRemoveLibraryAttachment;
 
   const CreateComplaintContent({
     Key? key,
@@ -685,6 +788,7 @@ class CreateComplaintContent extends StatelessWidget {
     required this.complaintType,
     required this.items,
     required this.selectedFiles,
+    required this.libraryAttachments,
     required this.loadingItems,
     required this.currentUser,
     required this.onItemChanged,
@@ -693,6 +797,8 @@ class CreateComplaintContent extends StatelessWidget {
     required this.onSelectExpiredDate,
     required this.onPickFiles,
     required this.onRemoveFile,
+    required this.onPickFromLibrary,
+    required this.onRemoveLibraryAttachment,
   }) : super(key: key);
 
   @override
@@ -1088,17 +1194,31 @@ class CreateComplaintContent extends StatelessWidget {
           const SizedBox(height: 12),
         ],
 
-        OutlinedButton.icon(
-          onPressed: onPickFiles,
-          icon: const Icon(Icons.add_photo_alternate, size: 20),
-          label: Text(l10n.addImages),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: primaryColor,
-            side: const BorderSide(color: primaryColor),
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
+        Row(
+          children: [
+            OutlinedButton.icon(
+              onPressed: onPickFiles,
+              icon: const Icon(Icons.add_photo_alternate, size: 20),
+              label: Text(l10n.addImages),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: primaryColor,
+                side: const BorderSide(color: primaryColor),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: onPickFromLibrary,
+              icon: Icon(Icons.folder_shared_outlined, size: 18, color: AppColors.secondary),
+              label: Text(l10n.attachFromLibrary, style: TextStyle(color: AppColors.secondary)),
+              style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+            ),
+          ],
         ),
+        if (libraryAttachments.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          LibraryAttachmentChips(files: libraryAttachments, onRemove: onRemoveLibraryAttachment),
+        ],
       ],
     );
   }

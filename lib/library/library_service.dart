@@ -124,6 +124,104 @@ class LibraryService {
         .eq('id', fileId);
   }
 
+  // ── Sharing ────────────────────────────────────────────────────────────
+
+  /// Folders/files directly shared with [userId] — shown as a distinct
+  /// "Shared with me" group at the library root. Once opened, everything
+  /// nested inside is reachable normally (RLS grants it via the folder
+  /// chain), so this only needs to look at direct shares.
+  static Future<List<LibraryFolder>> getSharedFolders(String userId) async {
+    final rows = await supabase
+        .from('library_shares')
+        .select('folder:library_folders!inner(*, owner:users!library_folders_owner_user_id_fkey(full_name))')
+        .eq('shared_with_user_id', userId)
+        .not('folder_id', 'is', null);
+    return rows
+        .map<LibraryFolder>((j) => LibraryFolder.fromJson(j['folder'] as Map<String, dynamic>))
+        .toList();
+  }
+
+  static Future<List<LibraryFile>> getSharedFiles(String userId) async {
+    final rows = await supabase
+        .from('library_shares')
+        .select('file:library_files!inner(*, owner:users!library_files_owner_user_id_fkey(full_name))')
+        .eq('shared_with_user_id', userId)
+        .not('file_id', 'is', null);
+    return rows
+        .map<LibraryFile>((j) => LibraryFile.fromJson(j['file'] as Map<String, dynamic>))
+        .toList();
+  }
+
+  static Future<List<LibraryShare>> getSharesForFile(String fileId) async {
+    final rows = await supabase
+        .from('library_shares')
+        .select('*, shared_with:users!library_shares_shared_with_user_id_fkey(full_name)')
+        .eq('file_id', fileId)
+        .order('created_at');
+    return rows.map<LibraryShare>((j) => LibraryShare.fromJson(j)).toList();
+  }
+
+  static Future<List<LibraryShare>> getSharesForFolder(String folderId) async {
+    final rows = await supabase
+        .from('library_shares')
+        .select('*, shared_with:users!library_shares_shared_with_user_id_fkey(full_name)')
+        .eq('folder_id', folderId)
+        .order('created_at');
+    return rows.map<LibraryShare>((j) => LibraryShare.fromJson(j)).toList();
+  }
+
+  static Future<void> shareFile({
+    required String fileId,
+    required String sharedByUserId,
+    required String sharedWithUserId,
+    required String permission,
+  }) async {
+    await supabase.from('library_shares').upsert(
+      {
+        'file_id': fileId,
+        'shared_by_user_id': sharedByUserId,
+        'shared_with_user_id': sharedWithUserId,
+        'permission': permission,
+      },
+      onConflict: 'file_id,shared_with_user_id',
+    );
+  }
+
+  static Future<void> shareFolder({
+    required String folderId,
+    required String sharedByUserId,
+    required String sharedWithUserId,
+    required String permission,
+  }) async {
+    await supabase.from('library_shares').upsert(
+      {
+        'folder_id': folderId,
+        'shared_by_user_id': sharedByUserId,
+        'shared_with_user_id': sharedWithUserId,
+        'permission': permission,
+      },
+      onConflict: 'folder_id,shared_with_user_id',
+    );
+  }
+
+  static Future<void> unshare(String shareId) async {
+    await supabase.from('library_shares').delete().eq('id', shareId);
+  }
+
+  /// Users this person can share with — everyone active except themselves;
+  /// small system, no need to paginate.
+  static Future<List<Map<String, dynamic>>> searchUsers(String excludeUserId, String query) async {
+    final rows = await supabase
+        .from('users')
+        .select('id, full_name')
+        .neq('id', excludeUserId)
+        .eq('is_active', true)
+        .ilike('full_name', '%$query%')
+        .order('full_name')
+        .limit(30);
+    return List<Map<String, dynamic>>.from(rows);
+  }
+
   static String getPublicUrl(String filePath) {
     return supabase.storage.from(_bucket).getPublicUrl(filePath);
   }
@@ -187,6 +285,7 @@ class LibraryService {
       'file_size': bytes.length,
       'mime_type': file.mimeType,
       'uploaded_by': uploadedByUserId,
+      'library_file_id': file.id,
     });
   }
 }

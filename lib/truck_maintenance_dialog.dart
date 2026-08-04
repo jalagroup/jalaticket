@@ -1,6 +1,10 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:jalasupport/l10n/app_localizations.dart';
+import 'package:jalasupport/library/library_models.dart' show LibraryFile;
+import 'package:jalasupport/library/library_service.dart';
+import 'package:jalasupport/library/library_ticket_attach.dart';
 import 'package:jalasupport/main.dart';
 import 'package:jalasupport/models.dart';
 import 'package:jalasupport/services.dart';
@@ -79,6 +83,7 @@ class _TrucksMaintenanceTicketScreenState
 
   PriorityType _priority = PriorityType.medium;
   List<PlatformFile> _selectedFiles = [];
+  final List<LibraryFile> _libraryAttachments = [];
   final _imagePicker = ImagePicker();
   bool _isLoading = false;
   bool _isUploadingFiles = false;
@@ -170,6 +175,20 @@ class _TrucksMaintenanceTicketScreenState
 
   void _removeFile(int i) => setState(() => _selectedFiles.removeAt(i));
 
+  Future<void> _pickFromLibrary() async {
+    final picked = await pickLibraryFiles(context, userId: widget.currentUser.id);
+    if (picked == null) return;
+    setState(() {
+      for (final f in picked) {
+        if (!_libraryAttachments.any((e) => e.id == f.id)) _libraryAttachments.add(f);
+      }
+    });
+  }
+
+  void _removeLibraryAttachment(LibraryFile file) {
+    setState(() => _libraryAttachments.removeWhere((e) => e.id == file.id));
+  }
+
   String _getMime(String name) {
     final ext = name.split('.').last.toLowerCase();
     const map = {
@@ -251,6 +270,24 @@ class _TrucksMaintenanceTicketScreenState
       final ticketNumber = recent.first['ticket_number'];
 
       if (_selectedFiles.isNotEmpty) await _uploadFiles(ticketId);
+
+      if (_libraryAttachments.isNotEmpty) {
+        for (final f in _libraryAttachments) {
+          await LibraryService.attachToTicket(
+            file: f,
+            ticketId: ticketId,
+            uploadedByUserId: widget.currentUser.id,
+          );
+        }
+        if (mounted) {
+          await promptShareLibraryAttachments(
+            context,
+            currentUser: widget.currentUser,
+            attachedFiles: _libraryAttachments,
+            departmentId: _trucksDeptId,
+          );
+        }
+      }
 
       if (!mounted) return;
       Navigator.pop(context);
@@ -476,7 +513,26 @@ class _TrucksMaintenanceTicketScreenState
                           style: TextButton.styleFrom(
                               foregroundColor: AppColors.primary),
                         ),
+                        TextButton.icon(
+                          onPressed: _pickFromLibrary,
+                          icon: Icon(Icons.folder_shared_outlined,
+                              size: 18, color: AppColors.secondary),
+                          label: Text(
+                              AppLocalizations.safeOf(context)
+                                  .attachFromLibrary,
+                              style: TextStyle(color: AppColors.secondary)),
+                          style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 8)),
+                        ),
                       ]),
+                      if (_libraryAttachments.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        LibraryAttachmentChips(
+                          files: _libraryAttachments,
+                          onRemove: _removeLibraryAttachment,
+                        ),
+                      ],
                       if (_selectedFiles.isNotEmpty) ...[
                         const SizedBox(height: 8),
                         SizedBox(

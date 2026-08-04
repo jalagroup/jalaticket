@@ -10,6 +10,9 @@ import 'package:uuid/uuid.dart';
 import '../models.dart';
 import '../main.dart';
 import '../branch_admin_service.dart' hide supabase;
+import 'package:jalasupport/library/library_models.dart' show LibraryFile;
+import 'package:jalasupport/library/library_ticket_attach.dart';
+import 'package:jalasupport/library/library_service.dart';
 
 class IndividualsMaintenanceTicketDialog extends StatefulWidget {
   final UserModel currentUser;
@@ -45,6 +48,7 @@ class _IndividualsMaintenanceTicketDialogState
   List<Map<String, dynamic>> _problemTitles = [];
   List<Map<String, dynamic>> _parts = [];
   List<PlatformFile> _selectedFiles = [];
+  final List<LibraryFile> _libraryAttachments = [];
   final ImagePicker _imagePicker = ImagePicker();
   bool _isLoading = false;
   bool _isUploadingFiles = false;
@@ -55,6 +59,20 @@ class _IndividualsMaintenanceTicketDialogState
     super.initState();
     _phoneController.text = widget.currentUser.phone ?? '';
     _loadData();
+  }
+
+  Future<void> _pickFromLibrary() async {
+    final picked = await pickLibraryFiles(context, userId: widget.currentUser.id);
+    if (picked == null) return;
+    setState(() {
+      for (final f in picked) {
+        if (!_libraryAttachments.any((e) => e.id == f.id)) _libraryAttachments.add(f);
+      }
+    });
+  }
+
+  void _removeLibraryAttachment(LibraryFile file) {
+    setState(() => _libraryAttachments.removeWhere((e) => e.id == file.id));
   }
 
   Future<void> _loadData() async {
@@ -342,6 +360,24 @@ class _IndividualsMaintenanceTicketDialogState
         await _uploadFiles(ticketId);
       }
 
+      if (_libraryAttachments.isNotEmpty) {
+        for (final f in _libraryAttachments) {
+          await LibraryService.attachToTicket(
+            file: f,
+            ticketId: ticketId,
+            uploadedByUserId: widget.currentUser.id,
+          );
+        }
+        if (mounted) {
+          await promptShareLibraryAttachments(
+            context,
+            currentUser: widget.currentUser,
+            attachedFiles: _libraryAttachments,
+            departmentId: _selectedDepartmentId,
+          );
+        }
+      }
+
       setState(() => _isLoading = false);
 
       if (mounted) {
@@ -398,7 +434,11 @@ class _IndividualsMaintenanceTicketDialogState
           ? MediaQuery.of(context).size.width * 0.95
           : MediaQuery.of(context).size.width * 0.7,
       contentPadding: const EdgeInsets.all(16),
-      child: IndividualsMaintenanceTicketContent(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          IndividualsMaintenanceTicketContent(
         currentUser: widget.currentUser,
         titleController: _titleController,
         descriptionController: _descriptionController,
@@ -478,6 +518,11 @@ class _IndividualsMaintenanceTicketDialogState
         onPickImages: _pickImages,
         onPickFiles: _pickFiles,
         onRemoveFile: _removeFile,
+        libraryAttachments: _libraryAttachments,
+        onPickFromLibrary: _pickFromLibrary,
+        onRemoveLibraryAttachment: _removeLibraryAttachment,
+      ),
+        ],
       ),
       actions: [
         TextButton(
@@ -577,6 +622,7 @@ class _ITSolutionTicketDialogState extends State<ITSolutionTicketDialog> {
   PriorityType _selectedPriority = PriorityType.medium;
   DateTime? _dueDate;
   List<PlatformFile> _selectedFiles = [];
+  final List<LibraryFile> _libraryAttachments = [];
   final ImagePicker _imagePicker = ImagePicker();
   bool _isLoading = false;
   bool _isUploadingFiles = false;
@@ -587,6 +633,20 @@ class _ITSolutionTicketDialogState extends State<ITSolutionTicketDialog> {
   void initState() {
     super.initState();
     _phoneController.text = widget.currentUser.phone ?? '';
+  }
+
+  Future<void> _pickFromLibrary() async {
+    final picked = await pickLibraryFiles(context, userId: widget.currentUser.id);
+    if (picked == null) return;
+    setState(() {
+      for (final f in picked) {
+        if (!_libraryAttachments.any((e) => e.id == f.id)) _libraryAttachments.add(f);
+      }
+    });
+  }
+
+  void _removeLibraryAttachment(LibraryFile file) {
+    setState(() => _libraryAttachments.removeWhere((e) => e.id == file.id));
   }
 
   Future<void> _pickFiles() async {
@@ -798,6 +858,24 @@ class _ITSolutionTicketDialogState extends State<ITSolutionTicketDialog> {
         await _uploadFiles(ticketId);
       }
 
+      if (_libraryAttachments.isNotEmpty) {
+        for (final f in _libraryAttachments) {
+          await LibraryService.attachToTicket(
+            file: f,
+            ticketId: ticketId,
+            uploadedByUserId: widget.currentUser.id,
+          );
+        }
+        if (mounted) {
+          await promptShareLibraryAttachments(
+            context,
+            currentUser: widget.currentUser,
+            attachedFiles: _libraryAttachments,
+            departmentId: _itDepartmentId,
+          );
+        }
+      }
+
       setState(() => _isLoading = false);
 
       if (mounted) {
@@ -863,6 +941,7 @@ class _ITSolutionTicketDialogState extends State<ITSolutionTicketDialog> {
         selectedPriority: _selectedPriority,
         selectedDueDate: _dueDate,
         selectedFiles: _selectedFiles,
+        libraryAttachments: _libraryAttachments,
         onPriorityChanged: (value) {
           setState(() => _selectedPriority = value);
         },
@@ -872,6 +951,8 @@ class _ITSolutionTicketDialogState extends State<ITSolutionTicketDialog> {
         onPickImages: _pickImages,
         onPickFiles: _pickFiles,
         onRemoveFile: _removeFile,
+        onPickFromLibrary: _pickFromLibrary,
+        onRemoveLibraryAttachment: _removeLibraryAttachment,
       ),
       actions: [
         TextButton(
@@ -981,6 +1062,7 @@ class _PlacesMaintenanceTicketDialogState
   List<Map<String, dynamic>> _problemTitles = [];
   List<Map<String, dynamic>> _parts = [];
   List<PlatformFile> _selectedFiles = [];
+  final List<LibraryFile> _libraryAttachments = [];
   final ImagePicker _imagePicker = ImagePicker();
   bool _isLoading = false;
   bool _isUploadingFiles = false;
@@ -996,6 +1078,20 @@ class _PlacesMaintenanceTicketDialogState
     }
 
     _loadData();
+  }
+
+  Future<void> _pickFromLibrary() async {
+    final picked = await pickLibraryFiles(context, userId: widget.currentUser.id);
+    if (picked == null) return;
+    setState(() {
+      for (final f in picked) {
+        if (!_libraryAttachments.any((e) => e.id == f.id)) _libraryAttachments.add(f);
+      }
+    });
+  }
+
+  void _removeLibraryAttachment(LibraryFile file) {
+    setState(() => _libraryAttachments.removeWhere((e) => e.id == file.id));
   }
 
   Future<void> _loadData() async {
@@ -1362,6 +1458,24 @@ class _PlacesMaintenanceTicketDialogState
         await _uploadFiles(ticketId);
       }
 
+      if (_libraryAttachments.isNotEmpty) {
+        for (final f in _libraryAttachments) {
+          await LibraryService.attachToTicket(
+            file: f,
+            ticketId: ticketId,
+            uploadedByUserId: widget.currentUser.id,
+          );
+        }
+        if (mounted) {
+          await promptShareLibraryAttachments(
+            context,
+            currentUser: widget.currentUser,
+            attachedFiles: _libraryAttachments,
+            departmentId: _selectedDepartmentId,
+          );
+        }
+      }
+
       setState(() => _isLoading = false);
 
       if (mounted) {
@@ -1424,7 +1538,11 @@ class _PlacesMaintenanceTicketDialogState
           ? MediaQuery.of(context).size.width * 0.95
           : MediaQuery.of(context).size.width * 0.7,
       contentPadding: const EdgeInsets.all(16),
-      child: PlacesMaintenanceTicketContent(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          PlacesMaintenanceTicketContent(
         currentUser: widget.currentUser,
         titleController: _titleController,
         descriptionController: _descriptionController,
@@ -1510,6 +1628,11 @@ class _PlacesMaintenanceTicketDialogState
         onPickImages: _pickImages,
         onPickFiles: _pickFiles,
         onRemoveFile: _removeFile,
+        libraryAttachments: _libraryAttachments,
+        onPickFromLibrary: _pickFromLibrary,
+        onRemoveLibraryAttachment: _removeLibraryAttachment,
+      ),
+        ],
       ),
       actions: [
         TextButton(
@@ -1615,6 +1738,7 @@ class _RequestsTicketDialogState extends State<RequestsTicketDialog> {
   List<NatureOfWorkModel> _natureOfWorkList = [];
   List<Map<String, dynamic>> _parts = [];
   List<PlatformFile> _selectedFiles = [];
+  final List<LibraryFile> _libraryAttachments = [];
   final ImagePicker _imagePicker = ImagePicker();
   bool _isLoading = false;
   bool _isUploadingFiles = false;
@@ -1624,6 +1748,20 @@ class _RequestsTicketDialogState extends State<RequestsTicketDialog> {
     super.initState();
     _phoneController.text = widget.currentUser.phone ?? '';
     _loadData();
+  }
+
+  Future<void> _pickFromLibrary() async {
+    final picked = await pickLibraryFiles(context, userId: widget.currentUser.id);
+    if (picked == null) return;
+    setState(() {
+      for (final f in picked) {
+        if (!_libraryAttachments.any((e) => e.id == f.id)) _libraryAttachments.add(f);
+      }
+    });
+  }
+
+  void _removeLibraryAttachment(LibraryFile file) {
+    setState(() => _libraryAttachments.removeWhere((e) => e.id == file.id));
   }
 
   Future<void> _loadData() async {
@@ -1906,6 +2044,24 @@ class _RequestsTicketDialogState extends State<RequestsTicketDialog> {
         await _uploadFiles(ticketId);
       }
 
+      if (_libraryAttachments.isNotEmpty) {
+        for (final f in _libraryAttachments) {
+          await LibraryService.attachToTicket(
+            file: f,
+            ticketId: ticketId,
+            uploadedByUserId: widget.currentUser.id,
+          );
+        }
+        if (mounted) {
+          await promptShareLibraryAttachments(
+            context,
+            currentUser: widget.currentUser,
+            attachedFiles: _libraryAttachments,
+            departmentId: _selectedDepartmentId,
+          );
+        }
+      }
+
       setState(() => _isLoading = false);
 
       if (mounted) {
@@ -1957,7 +2113,11 @@ class _RequestsTicketDialogState extends State<RequestsTicketDialog> {
           ? MediaQuery.of(context).size.width * 0.95
           : MediaQuery.of(context).size.width * 0.7,
       contentPadding: const EdgeInsets.all(16),
-      child: RequestsTicketContent(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          RequestsTicketContent(
         currentUser: widget.currentUser,
         titleController: _titleController,
         descriptionController: _descriptionController,
@@ -2017,6 +2177,11 @@ class _RequestsTicketDialogState extends State<RequestsTicketDialog> {
         onPickImages: _pickImages,
         onPickFiles: _pickFiles,
         onRemoveFile: _removeFile,
+        libraryAttachments: _libraryAttachments,
+        onPickFromLibrary: _pickFromLibrary,
+        onRemoveLibraryAttachment: _removeLibraryAttachment,
+      ),
+        ],
       ),
       actions: [
         TextButton(

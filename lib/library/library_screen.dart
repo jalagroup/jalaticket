@@ -1,4 +1,5 @@
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import '../l10n/app_localizations.dart';
@@ -19,6 +20,8 @@ class LibraryScreen extends StatefulWidget {
 class _LibraryScreenState extends State<LibraryScreen> {
   List<LibraryFolder> _folders = [];
   List<LibraryFile> _files = [];
+  List<LibraryFolder> _sharedFolders = [];
+  List<LibraryFile> _sharedFiles = [];
   bool _loading = true;
   bool _uploading = false;
 
@@ -26,6 +29,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   // library root when the stack is empty.
   final List<LibraryFolder> _folderStack = [];
   String? get _currentFolderId => _folderStack.isEmpty ? null : _folderStack.last.id;
+  bool get _atRoot => _folderStack.isEmpty;
 
   @override
   void initState() {
@@ -39,7 +43,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
       final folderId = _currentFolderId;
       final folders = await LibraryService.getFolders(widget.currentUser.id, folderId);
       final files = await LibraryService.getFiles(widget.currentUser.id, folderId);
-      if (mounted) setState(() { _folders = folders; _files = files; _loading = false; });
+      List<LibraryFolder> sharedFolders = [];
+      List<LibraryFile> sharedFiles = [];
+      if (_atRoot) {
+        sharedFolders = await LibraryService.getSharedFolders(widget.currentUser.id);
+        sharedFiles = await LibraryService.getSharedFiles(widget.currentUser.id);
+      }
+      if (mounted) {
+        setState(() {
+          _folders = folders;
+          _files = files;
+          _sharedFolders = sharedFolders;
+          _sharedFiles = sharedFiles;
+          _loading = false;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _loading = false);
     }
@@ -172,6 +190,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (picked == null) return;
     await LibraryService.moveFile(file.id, picked.folderId);
     await _load();
+  }
+
+  void _shareFile(LibraryFile file) {
+    showDialog(
+      context: context,
+      builder: (_) => _ShareDialog(currentUser: widget.currentUser, fileId: file.id, resourceName: file.fileName),
+    );
+  }
+
+  void _shareFolder(LibraryFolder folder) {
+    showDialog(
+      context: context,
+      builder: (_) => _ShareDialog(currentUser: widget.currentUser, folderId: folder.id, resourceName: folder.name),
+    );
   }
 
   Future<void> _attachToTicket(LibraryFile file) async {
@@ -333,31 +365,53 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  IconData _iconFor(String? mimeType) {
-    if (mimeType == null) return Icons.insert_drive_file_outlined;
-    if (mimeType.startsWith('image/')) return Icons.image_outlined;
-    if (mimeType == 'application/pdf') return Icons.picture_as_pdf_outlined;
-    if (mimeType.contains('photoshop')) return Icons.brush_outlined;
-    if (mimeType.contains('zip')) return Icons.folder_zip_outlined;
-    return Icons.insert_drive_file_outlined;
-  }
-
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.safeOf(context);
-    final isEmpty = _folders.isEmpty && _files.isEmpty;
+    final isEmpty = _folders.isEmpty && _files.isEmpty && _sharedFolders.isEmpty && _sharedFiles.isEmpty;
+    // Same reserved-space convention used across the app so the FAB clears
+    // the floating bottom-nav island instead of sitting behind it.
+    final isCompact = MediaQuery.of(context).size.width < 992;
+    final bottomNavBarHeight = isCompact && !kIsWeb ? 90.0 : 0.0;
 
     return Scaffold(
+      backgroundColor: const Color(0xFFF7F8FA),
       appBar: AppBar(
         leading: _folderStack.isNotEmpty
             ? IconButton(icon: const Icon(Icons.arrow_back), onPressed: _goUp)
             : null,
-        title: GestureDetector(
-          onTap: _folderStack.isNotEmpty ? _goToRoot : null,
-          child: Text(_folderStack.isEmpty ? l10n.myLibrary : _folderStack.last.name),
+        titleSpacing: _folderStack.isEmpty ? null : 0,
+        title: _folderStack.isEmpty
+            ? Text(l10n.myLibrary)
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: _goToRoot,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                      child: Icon(Icons.folder_special_outlined, size: 18, color: Colors.white.withValues(alpha: 0.85)),
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right, size: 16, color: Colors.white70),
+                  Flexible(
+                    child: Text(_folderStack.last.name, overflow: TextOverflow.ellipsis),
+                  ),
+                ],
+              ),
+        flexibleSpace: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [AppColors.secondary, AppColors.secondary.withValues(alpha: 0.85)],
+            ),
+          ),
         ),
-        backgroundColor: AppColors.secondary,
+        backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
+        elevation: 0,
         actions: [
           IconButton(
             icon: const Icon(Icons.create_new_folder_outlined),
@@ -366,13 +420,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _uploading ? null : _upload,
-        icon: _uploading
-            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-            : const Icon(Icons.upload_file),
-        label: Text(_uploading ? l10n.uploading : l10n.uploadFile),
-        backgroundColor: AppColors.primary,
+      floatingActionButton: Padding(
+        padding: EdgeInsets.only(bottom: bottomNavBarHeight),
+        child: FloatingActionButton.extended(
+          onPressed: _uploading ? null : _upload,
+          icon: _uploading
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Icon(Icons.upload_file_rounded, color: Colors.white),
+          label: Text(
+            _uploading ? l10n.uploading : l10n.uploadFile,
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+          ),
+          backgroundColor: AppColors.primary,
+          elevation: 3,
+        ),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -381,97 +442,227 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.folder_open_outlined, size: 64, color: Colors.grey[300]),
-                      const SizedBox(height: 12),
+                      Container(
+                        width: 96,
+                        height: 96,
+                        decoration: BoxDecoration(
+                          color: AppColors.secondary.withValues(alpha: 0.08),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(Icons.folder_open_rounded, size: 46, color: AppColors.secondary.withValues(alpha: 0.5)),
+                      ),
+                      const SizedBox(height: 16),
                       Text(
                         _folderStack.isEmpty ? l10n.libraryEmpty : l10n.folderEmpty,
                         style: TextStyle(color: Colors.grey[500]),
+                        textAlign: TextAlign.center,
                       ),
                     ],
                   ),
                 )
               : ListView(
-                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
+                  padding: EdgeInsets.fromLTRB(12, 14, 12, bottomNavBarHeight + 90),
                   children: [
-                    for (final folder in _folders) _FolderTile(
-                      folder: folder,
-                      onOpen: () => _openFolder(folder),
-                      onRename: () => _renameFolder(folder),
-                      onMove: () => _moveFolder(folder),
-                      onDelete: () => _deleteFolder(folder),
-                    ),
-                    for (final file in _files) _FileTile(
-                      file: file,
-                      iconFor: _iconFor,
-                      onToggleShare: () => _toggleShare(file),
-                      onCopyLink: () => _copyLink(file),
-                      onRegenerate: () => _regenerate(file),
-                      onAttachToTicket: () => _attachToTicket(file),
-                      onRename: () => _renameFile(file),
-                      onMove: () => _moveFile(file),
-                      onDelete: () => _deleteFile(file),
-                    ),
+                    if (_sharedFolders.isNotEmpty || _sharedFiles.isNotEmpty) ...[
+                      _SectionHeader(icon: Icons.group_outlined, label: l10n.sharedWithMe, color: AppColors.secondary),
+                      const SizedBox(height: 8),
+                      for (final folder in _sharedFolders)
+                        _FolderTile(
+                          folder: folder,
+                          sharedByLabel: folder.ownerName,
+                          onOpen: () => _openFolder(folder),
+                          onRename: null,
+                          onMove: null,
+                          onDelete: null,
+                          onShare: null,
+                        ),
+                      for (final file in _sharedFiles)
+                        _FileTile(
+                          file: file,
+                          sharedByLabel: file.ownerName,
+                          onToggleShare: null,
+                          onCopyLink: file.isShared ? () => _copyLink(file) : null,
+                          onRegenerate: null,
+                          onAttachToTicket: () => _attachToTicket(file),
+                          onRename: null,
+                          onMove: null,
+                          onDelete: null,
+                          onShare: null,
+                        ),
+                      const SizedBox(height: 18),
+                    ],
+                    if (_folders.isNotEmpty || _files.isNotEmpty) ...[
+                      if (_sharedFolders.isNotEmpty || _sharedFiles.isNotEmpty) ...[
+                        _SectionHeader(icon: Icons.folder_outlined, label: l10n.myFiles, color: AppColors.primary),
+                        const SizedBox(height: 8),
+                      ],
+                      for (final folder in _folders)
+                        _FolderTile(
+                          folder: folder,
+                          sharedByLabel: null,
+                          onOpen: () => _openFolder(folder),
+                          onRename: () => _renameFolder(folder),
+                          onMove: () => _moveFolder(folder),
+                          onDelete: () => _deleteFolder(folder),
+                          onShare: () => _shareFolder(folder),
+                        ),
+                      for (final file in _files)
+                        _FileTile(
+                          file: file,
+                          sharedByLabel: null,
+                          onToggleShare: () => _toggleShare(file),
+                          onCopyLink: () => _copyLink(file),
+                          onRegenerate: () => _regenerate(file),
+                          onAttachToTicket: () => _attachToTicket(file),
+                          onRename: () => _renameFile(file),
+                          onMove: () => _moveFile(file),
+                          onDelete: () => _deleteFile(file),
+                          onShare: () => _shareFile(file),
+                        ),
+                    ],
                   ],
                 ),
     );
   }
 }
 
+class _SectionHeader extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  const _SectionHeader({required this.icon, required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: color, letterSpacing: 0.3),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _FolderTile extends StatelessWidget {
   final LibraryFolder folder;
+  final String? sharedByLabel;
   final VoidCallback onOpen;
-  final VoidCallback onRename;
-  final VoidCallback onMove;
-  final VoidCallback onDelete;
+  final VoidCallback? onRename;
+  final VoidCallback? onMove;
+  final VoidCallback? onDelete;
+  final VoidCallback? onShare;
 
   const _FolderTile({
     required this.folder,
+    required this.sharedByLabel,
     required this.onOpen,
     required this.onRename,
     required this.onMove,
     required this.onDelete,
+    required this.onShare,
   });
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.safeOf(context);
-    return Card(
+    final hasMenu = onRename != null || onMove != null || onDelete != null || onShare != null;
+    return Container(
       margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 3)),
+        ],
+      ),
       child: ListTile(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         onTap: onOpen,
         leading: Container(
-          width: 40,
-          height: 40,
+          width: 42,
+          height: 42,
           decoration: BoxDecoration(
-            color: Colors.amber.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(10),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Colors.amber.shade300, Colors.amber.shade600],
+            ),
+            borderRadius: BorderRadius.circular(12),
           ),
-          child: const Icon(Icons.folder_rounded, color: Colors.amber),
+          child: const Icon(Icons.folder_rounded, color: Colors.white, size: 22),
         ),
-        title: Text(folder.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-        trailing: PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert, size: 20),
-          onSelected: (value) {
-            switch (value) {
-              case 'rename': onRename(); break;
-              case 'move': onMove(); break;
-              case 'delete': onDelete(); break;
-            }
-          },
-          itemBuilder: (context) => [
-            PopupMenuItem(value: 'rename', child: Row(children: [
-              const Icon(Icons.drive_file_rename_outline, size: 18), const SizedBox(width: 8), Text(l10n.rename),
-            ])),
-            PopupMenuItem(value: 'move', child: Row(children: [
-              const Icon(Icons.drive_file_move_outline, size: 18), const SizedBox(width: 8), Text(l10n.move),
-            ])),
-            const PopupMenuDivider(),
-            PopupMenuItem(value: 'delete', child: Row(children: [
-              const Icon(Icons.delete_outline, size: 18, color: Colors.red), const SizedBox(width: 8),
-              Text(l10n.delete, style: const TextStyle(color: Colors.red)),
-            ])),
-          ],
-        ),
+        title: Text(folder.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+        subtitle: sharedByLabel != null
+            ? _SharedByChip(name: sharedByLabel!)
+            : null,
+        trailing: hasMenu
+            ? PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, size: 20),
+                onSelected: (value) {
+                  switch (value) {
+                    case 'share': onShare?.call(); break;
+                    case 'rename': onRename?.call(); break;
+                    case 'move': onMove?.call(); break;
+                    case 'delete': onDelete?.call(); break;
+                  }
+                },
+                itemBuilder: (context) => [
+                  if (onShare != null)
+                    PopupMenuItem(value: 'share', child: Row(children: [
+                      const Icon(Icons.person_add_alt_outlined, size: 18), const SizedBox(width: 8), Text(l10n.shareWithPeople),
+                    ])),
+                  if (onRename != null)
+                    PopupMenuItem(value: 'rename', child: Row(children: [
+                      const Icon(Icons.drive_file_rename_outline, size: 18), const SizedBox(width: 8), Text(l10n.rename),
+                    ])),
+                  if (onMove != null)
+                    PopupMenuItem(value: 'move', child: Row(children: [
+                      const Icon(Icons.drive_file_move_outline, size: 18), const SizedBox(width: 8), Text(l10n.move),
+                    ])),
+                  if (onDelete != null) ...[
+                    const PopupMenuDivider(),
+                    PopupMenuItem(value: 'delete', child: Row(children: [
+                      const Icon(Icons.delete_outline, size: 18, color: Colors.red), const SizedBox(width: 8),
+                      Text(l10n.delete, style: const TextStyle(color: Colors.red)),
+                    ])),
+                  ],
+                ],
+              )
+            : const Icon(Icons.chevron_right, color: Colors.grey),
+      ),
+    );
+  }
+}
+
+class _SharedByChip extends StatelessWidget {
+  final String name;
+  const _SharedByChip({required this.name});
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.safeOf(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 3),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.people_alt_outlined, size: 11, color: AppColors.secondary),
+          const SizedBox(width: 3),
+          Flexible(
+            child: Text(
+              '${l10n.sharedByName} $name',
+              style: TextStyle(fontSize: 10.5, color: AppColors.secondary, fontWeight: FontWeight.w600),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -479,18 +670,19 @@ class _FolderTile extends StatelessWidget {
 
 class _FileTile extends StatelessWidget {
   final LibraryFile file;
-  final IconData Function(String?) iconFor;
-  final VoidCallback onToggleShare;
-  final VoidCallback onCopyLink;
-  final VoidCallback onRegenerate;
-  final VoidCallback onAttachToTicket;
-  final VoidCallback onRename;
-  final VoidCallback onMove;
-  final VoidCallback onDelete;
+  final String? sharedByLabel;
+  final VoidCallback? onToggleShare;
+  final VoidCallback? onCopyLink;
+  final VoidCallback? onRegenerate;
+  final VoidCallback? onAttachToTicket;
+  final VoidCallback? onRename;
+  final VoidCallback? onMove;
+  final VoidCallback? onDelete;
+  final VoidCallback? onShare;
 
   const _FileTile({
     required this.file,
-    required this.iconFor,
+    required this.sharedByLabel,
     required this.onToggleShare,
     required this.onCopyLink,
     required this.onRegenerate,
@@ -498,98 +690,148 @@ class _FileTile extends StatelessWidget {
     required this.onRename,
     required this.onMove,
     required this.onDelete,
+    required this.onShare,
   });
+
+  IconData get _icon {
+    final mimeType = file.mimeType;
+    if (mimeType == null) return Icons.insert_drive_file_outlined;
+    if (mimeType.startsWith('image/')) return Icons.image_outlined;
+    if (mimeType == 'application/pdf') return Icons.picture_as_pdf_outlined;
+    if (mimeType.contains('photoshop')) return Icons.brush_outlined;
+    if (mimeType.contains('zip')) return Icons.folder_zip_outlined;
+    return Icons.insert_drive_file_outlined;
+  }
+
+  Color get _iconColor {
+    final mimeType = file.mimeType;
+    if (mimeType == null) return Colors.blueGrey;
+    if (mimeType.startsWith('image/')) return Colors.purple;
+    if (mimeType == 'application/pdf') return Colors.red;
+    if (mimeType.contains('photoshop')) return Colors.indigo;
+    if (mimeType.contains('zip')) return Colors.brown;
+    return Colors.blueGrey;
+  }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.safeOf(context);
-    return Card(
+    final hasMenu = onCopyLink != null || onRegenerate != null || onAttachToTicket != null ||
+        onRename != null || onMove != null || onDelete != null || onShare != null;
+    return Container(
       margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 3)),
+        ],
+      ),
       child: ListTile(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         leading: Container(
-          width: 40,
-          height: 40,
+          width: 42,
+          height: 42,
           decoration: BoxDecoration(
-            color: AppColors.primary.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(10),
+            color: _iconColor.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(12),
           ),
-          child: Icon(iconFor(file.mimeType), color: AppColors.primary, size: 20),
+          child: Icon(_icon, color: _iconColor, size: 20),
         ),
         title: Text(file.fileName,
-            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
             maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Row(
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text(file.formattedSize, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
-            if (file.isShared) ...[
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.green.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.public, size: 10, color: Colors.green),
-                    const SizedBox(width: 3),
-                    Text(l10n.shared, style: const TextStyle(fontSize: 9, color: Colors.green, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ),
-            ],
+            Row(
+              children: [
+                Text(file.formattedSize, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                if (file.isShared) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.public, size: 10, color: Colors.green),
+                        const SizedBox(width: 3),
+                        Text(l10n.shared, style: const TextStyle(fontSize: 9, color: Colors.green, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            if (sharedByLabel != null) _SharedByChip(name: sharedByLabel!),
           ],
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            IconButton(
-              tooltip: file.isShared ? l10n.unshare : l10n.share,
-              icon: Icon(
-                file.isShared ? Icons.link_rounded : Icons.share_outlined,
-                color: file.isShared ? Colors.green : Colors.grey[600],
-                size: 20,
+            if (onToggleShare != null)
+              IconButton(
+                tooltip: file.isShared ? l10n.unshare : l10n.share,
+                icon: Icon(
+                  file.isShared ? Icons.link_rounded : Icons.share_outlined,
+                  color: file.isShared ? Colors.green : Colors.grey[600],
+                  size: 20,
+                ),
+                onPressed: onToggleShare,
               ),
-              onPressed: onToggleShare,
-            ),
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, size: 20),
-              onSelected: (value) {
-                switch (value) {
-                  case 'copy_link': onCopyLink(); break;
-                  case 'regenerate': onRegenerate(); break;
-                  case 'attach': onAttachToTicket(); break;
-                  case 'rename': onRename(); break;
-                  case 'move': onMove(); break;
-                  case 'delete': onDelete(); break;
-                }
-              },
-              itemBuilder: (context) => [
-                if (file.isShared)
-                  PopupMenuItem(value: 'copy_link', child: Row(children: [
-                    const Icon(Icons.copy_outlined, size: 18), const SizedBox(width: 8), Text(l10n.copyLink),
-                  ])),
-                if (file.isShared)
-                  PopupMenuItem(value: 'regenerate', child: Row(children: [
-                    const Icon(Icons.refresh, size: 18), const SizedBox(width: 8), Text(l10n.revokeLink),
-                  ])),
-                PopupMenuItem(value: 'attach', child: Row(children: [
-                  const Icon(Icons.confirmation_number_outlined, size: 18), const SizedBox(width: 8), Text(l10n.attachToTicket),
-                ])),
-                PopupMenuItem(value: 'rename', child: Row(children: [
-                  const Icon(Icons.drive_file_rename_outline, size: 18), const SizedBox(width: 8), Text(l10n.rename),
-                ])),
-                PopupMenuItem(value: 'move', child: Row(children: [
-                  const Icon(Icons.drive_file_move_outline, size: 18), const SizedBox(width: 8), Text(l10n.move),
-                ])),
-                const PopupMenuDivider(),
-                PopupMenuItem(value: 'delete', child: Row(children: [
-                  const Icon(Icons.delete_outline, size: 18, color: Colors.red), const SizedBox(width: 8),
-                  Text(l10n.delete, style: const TextStyle(color: Colors.red)),
-                ])),
-              ],
-            ),
+            if (hasMenu)
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, size: 20),
+                onSelected: (value) {
+                  switch (value) {
+                    case 'copy_link': onCopyLink?.call(); break;
+                    case 'regenerate': onRegenerate?.call(); break;
+                    case 'attach': onAttachToTicket?.call(); break;
+                    case 'share': onShare?.call(); break;
+                    case 'rename': onRename?.call(); break;
+                    case 'move': onMove?.call(); break;
+                    case 'delete': onDelete?.call(); break;
+                  }
+                },
+                itemBuilder: (context) => [
+                  if (onCopyLink != null)
+                    PopupMenuItem(value: 'copy_link', child: Row(children: [
+                      const Icon(Icons.copy_outlined, size: 18), const SizedBox(width: 8), Text(l10n.copyLink),
+                    ])),
+                  if (onRegenerate != null)
+                    PopupMenuItem(value: 'regenerate', child: Row(children: [
+                      const Icon(Icons.refresh, size: 18), const SizedBox(width: 8), Text(l10n.revokeLink),
+                    ])),
+                  if (onShare != null)
+                    PopupMenuItem(value: 'share', child: Row(children: [
+                      const Icon(Icons.person_add_alt_outlined, size: 18), const SizedBox(width: 8), Text(l10n.shareWithPeople),
+                    ])),
+                  if (onAttachToTicket != null)
+                    PopupMenuItem(value: 'attach', child: Row(children: [
+                      const Icon(Icons.confirmation_number_outlined, size: 18), const SizedBox(width: 8), Text(l10n.attachToTicket),
+                    ])),
+                  if (onRename != null)
+                    PopupMenuItem(value: 'rename', child: Row(children: [
+                      const Icon(Icons.drive_file_rename_outline, size: 18), const SizedBox(width: 8), Text(l10n.rename),
+                    ])),
+                  if (onMove != null)
+                    PopupMenuItem(value: 'move', child: Row(children: [
+                      const Icon(Icons.drive_file_move_outline, size: 18), const SizedBox(width: 8), Text(l10n.move),
+                    ])),
+                  if (onDelete != null) ...[
+                    const PopupMenuDivider(),
+                    PopupMenuItem(value: 'delete', child: Row(children: [
+                      const Icon(Icons.delete_outline, size: 18, color: Colors.red), const SizedBox(width: 8),
+                      Text(l10n.delete, style: const TextStyle(color: Colors.red)),
+                    ])),
+                  ],
+                ],
+              ),
           ],
         ),
       ),
@@ -691,6 +933,214 @@ class _FolderPickerDialogState extends State<_FolderPickerDialog> {
                             title: Text(folder.name, maxLines: 1, overflow: TextOverflow.ellipsis),
                             trailing: const Icon(Icons.chevron_right, size: 18),
                             onTap: () => setState(() { _stack.add(folder); _load(); }),
+                          );
+                        },
+                      ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Manage-access dialog for a single file or folder — add a person by
+/// name search, change their permission, or remove access.
+class _ShareDialog extends StatefulWidget {
+  final UserModel currentUser;
+  final String? fileId;
+  final String? folderId;
+  final String resourceName;
+  const _ShareDialog({required this.currentUser, this.fileId, this.folderId, required this.resourceName});
+
+  @override
+  State<_ShareDialog> createState() => _ShareDialogState();
+}
+
+class _ShareDialogState extends State<_ShareDialog> {
+  List<LibraryShare> _shares = [];
+  bool _loading = true;
+  final _searchCtrl = TextEditingController();
+  List<Map<String, dynamic>> _searchResults = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final shares = widget.fileId != null
+        ? await LibraryService.getSharesForFile(widget.fileId!)
+        : await LibraryService.getSharesForFolder(widget.folderId!);
+    if (mounted) setState(() { _shares = shares; _loading = false; });
+  }
+
+  Future<void> _search(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) {
+      setState(() => _searchResults = []);
+      return;
+    }
+    final results = await LibraryService.searchUsers(widget.currentUser.id, trimmed);
+    if (mounted) setState(() => _searchResults = results);
+  }
+
+  Future<void> _addPerson(Map<String, dynamic> user) async {
+    final l10n = AppLocalizations.safeOf(context);
+    if (widget.fileId != null) {
+      await LibraryService.shareFile(
+        fileId: widget.fileId!,
+        sharedByUserId: widget.currentUser.id,
+        sharedWithUserId: user['id'] as String,
+        permission: 'view',
+      );
+    } else {
+      await LibraryService.shareFolder(
+        folderId: widget.folderId!,
+        sharedByUserId: widget.currentUser.id,
+        sharedWithUserId: user['id'] as String,
+        permission: 'view',
+      );
+    }
+    _searchCtrl.clear();
+    if (mounted) setState(() => _searchResults = []);
+    await _load();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.personAdded), backgroundColor: Colors.green),
+      );
+    }
+  }
+
+  Future<void> _changePermission(LibraryShare share, String permission) async {
+    if (widget.fileId != null) {
+      await LibraryService.shareFile(
+        fileId: widget.fileId!,
+        sharedByUserId: widget.currentUser.id,
+        sharedWithUserId: share.sharedWithUserId,
+        permission: permission,
+      );
+    } else {
+      await LibraryService.shareFolder(
+        folderId: widget.folderId!,
+        sharedByUserId: widget.currentUser.id,
+        sharedWithUserId: share.sharedWithUserId,
+        permission: permission,
+      );
+    }
+    await _load();
+  }
+
+  Future<void> _remove(LibraryShare share) async {
+    await LibraryService.unshare(share.id);
+    await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.safeOf(context);
+    return OptimizedDialog(
+      title: l10n.shareWithPeople,
+      isScrollable: false,
+      height: 500,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: Text(l10n.cancel)),
+      ],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            widget.resourceName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _searchCtrl,
+            decoration: InputDecoration(
+              labelText: l10n.addPerson,
+              hintText: l10n.searchByName,
+              prefixIcon: const Icon(Icons.search, size: 18),
+              isDense: true,
+              border: const OutlineInputBorder(),
+            ),
+            onChanged: _search,
+          ),
+          if (_searchResults.isNotEmpty)
+            Container(
+              margin: const EdgeInsets.only(top: 6),
+              constraints: const BoxConstraints(maxHeight: 160),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey.shade200),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _searchResults.length,
+                itemBuilder: (context, index) {
+                  final u = _searchResults[index];
+                  return ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.person_outline, size: 18),
+                    title: Text(u['full_name'] as String? ?? '', style: const TextStyle(fontSize: 13)),
+                    onTap: () => _addPerson(u),
+                  );
+                },
+              ),
+            ),
+          const SizedBox(height: 14),
+          Text(l10n.manageAccess, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+          const SizedBox(height: 4),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _shares.isEmpty
+                    ? Center(child: Text(l10n.noOneHasAccessYet, style: TextStyle(color: Colors.grey[500], fontSize: 12)))
+                    : ListView.builder(
+                        itemCount: _shares.length,
+                        itemBuilder: (context, index) {
+                          final s = _shares[index];
+                          return ListTile(
+                            dense: true,
+                            leading: CircleAvatar(
+                              radius: 14,
+                              backgroundColor: AppColors.secondary.withValues(alpha: 0.15),
+                              child: Text(
+                                (s.sharedWithName?.isNotEmpty == true ? s.sharedWithName![0] : '?').toUpperCase(),
+                                style: TextStyle(fontSize: 12, color: AppColors.secondary, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            title: Text(s.sharedWithName ?? '', style: const TextStyle(fontSize: 13)),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                DropdownButton<String>(
+                                  value: s.permission,
+                                  underline: const SizedBox(),
+                                  style: const TextStyle(fontSize: 12, color: Colors.black87),
+                                  items: [
+                                    DropdownMenuItem(value: 'view', child: Text(l10n.viewOnly)),
+                                    DropdownMenuItem(value: 'edit', child: Text(l10n.canEdit)),
+                                  ],
+                                  onChanged: (v) {
+                                    if (v != null) _changePermission(s, v);
+                                  },
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.close, size: 16, color: Colors.red),
+                                  tooltip: l10n.removeAccess,
+                                  onPressed: () => _remove(s),
+                                ),
+                              ],
+                            ),
                           );
                         },
                       ),
